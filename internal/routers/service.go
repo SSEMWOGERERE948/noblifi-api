@@ -57,12 +57,7 @@ func (s *Service) Create(input CreateRouterInput) (Router, error) {
 	if err != nil {
 		return router, err
 	}
-	if _, err = s.repo.EnsureSetupSession(router.ID); err != nil {
-		return router, err
-	}
-	profile := s.defaultNetworkProfile(router.ID, router.Name)
-	err = s.repo.CreateNetworkProfile(&profile)
-	return router, err
+	return router, nil
 }
 
 func (s *Service) List() ([]Router, error) {
@@ -211,11 +206,7 @@ func (s *Service) Interfaces(routerID uuid.UUID) ([]RouterInterface, error) {
 	if len(interfaces) > 0 {
 		return interfaces, nil
 	}
-	mocked := defaultInterfaces(routerID)
-	if err := s.repo.ReplaceInterfaces(routerID, mocked); err != nil {
-		return nil, err
-	}
-	return mocked, nil
+	return interfaces, nil
 }
 
 func (s *Service) BootstrapScript(routerID uuid.UUID) (string, error) {
@@ -299,24 +290,6 @@ func randomToken() string {
 	return fmt.Sprintf("NOB-%s-%s", strings.ToUpper(hex.EncodeToString(left)), strings.ToUpper(hex.EncodeToString(right)))
 }
 
-func defaultInterfaces(routerID uuid.UUID) []RouterInterface {
-	now := time.Now()
-	kind := "ethernet"
-	names := []string{"ether1", "ether2", "ether3", "ether4", "ether5"}
-	interfaces := make([]RouterInterface, 0, len(names))
-	for _, name := range names {
-		interfaces = append(interfaces, RouterInterface{
-			RouterID:     routerID,
-			Name:         name,
-			Type:         &kind,
-			Running:      name == "ether1",
-			Disabled:     false,
-			DiscoveredAt: now,
-		})
-	}
-	return interfaces
-}
-
 func bootstrapScript(token, baseURL string) string {
 	if baseURL == "" {
 		baseURL = "http://localhost:8080/api/v1/provisioning"
@@ -327,17 +300,25 @@ func bootstrapScript(token, baseURL string) string {
 /system identity set name=("noblifi-pending-" . $claimToken)
 
 :local serial [/system routerboard get serial-number]
-:local identity [/system identity get name]
+:local model [/system routerboard get model]
+:local version [/system resource get version]
+:local ifaceJson ""
 
-/tool fetch url=($baseUrl . "/check-in?token=" . $claimToken . "&serial=" . $serial) mode=http keep-result=no
+:foreach iface in=[/interface find] do={
+  :local name [/interface get $iface name]
+  :local type [/interface get $iface type]
+  :local mac [/interface get $iface mac-address]
+  :local running [/interface get $iface running]
+  :local disabled [/interface get $iface disabled]
+  :if ([:len $ifaceJson] > 0) do={ :set ifaceJson ($ifaceJson . ",") }
+  :set ifaceJson ($ifaceJson . "{\"name\":\"" . $name . "\",\"type\":\"" . $type . "\",\"mac_address\":\"" . $mac . "\",\"running\":" . $running . ",\"disabled\":" . $disabled . "}")
+}
 
-/tool fetch url=($baseUrl . "/config.rsc?token=" . $claimToken . "&serial=" . $serial) mode=http dst-path=noblifi-config.rsc
+:local payload ("{\"claim_token\":\"" . $claimToken . "\",\"serial_number\":\"" . $serial . "\",\"model\":\"" . $model . "\",\"routeros_version\":\"" . $version . "\",\"interfaces\":[" . $ifaceJson . "]}")
+/tool fetch url=($baseUrl . "/check-in") http-method=post http-header-field="Content-Type: application/json" http-data=$payload keep-result=no
+/tool fetch url=($baseUrl . "/status?token=" . $claimToken . "&serial=" . $serial . "&status=linked") mode=http keep-result=no
 
-:delay 3s
-
-/import file-name=noblifi-config.rsc
-
-/tool fetch url=($baseUrl . "/status?token=" . $claimToken . "&serial=" . $serial . "&status=installed") mode=http keep-result=no`, token, baseURL)
+:put "NobliFi router linked. Return to the dashboard and choose automatic or manual setup."`, token, baseURL)
 }
 
 func legacyRandomToken() string {
