@@ -291,34 +291,53 @@ func randomToken() string {
 }
 
 func bootstrapScript(token, baseURL string) string {
-	if baseURL == "" {
-		baseURL = "http://localhost:8080/api/v1/provisioning"
-	}
-	return fmt.Sprintf(`:local claimToken "%s"
-:local baseUrl "%s"
+	baseURL = normalizeProvisioningBaseURL(baseURL)
+	fetchMode := provisioningFetchMode(baseURL)
+
+	return fmt.Sprintf(`:global claimToken "%s"
+:global baseUrl "%s"
 
 /system identity set name=("noblifi-pending-" . $claimToken)
 
-:local serial [/system routerboard get serial-number]
-:local model [/system routerboard get model]
-:local version [/system resource get version]
-:local ifaceJson ""
+:global serial [/system routerboard get serial-number]
+:global model [/system routerboard get model]
+:global version [/system resource get version]
+:global ifaceJson ""
 
 :foreach iface in=[/interface find] do={
   :local name [/interface get $iface name]
   :local type [/interface get $iface type]
-  :local mac [/interface get $iface mac-address]
+  :local mac ""
+
+  :do {
+    :set mac [/interface get $iface mac-address]
+  } on-error={
+    :set mac ""
+  }
+
   :local running [/interface get $iface running]
   :local disabled [/interface get $iface disabled]
-  :if ([:len $ifaceJson] > 0) do={ :set ifaceJson ($ifaceJson . ",") }
+
+  :if ([:len $ifaceJson] > 0) do={
+    :set ifaceJson ($ifaceJson . ",")
+  }
+
   :set ifaceJson ($ifaceJson . "{\"name\":\"" . $name . "\",\"type\":\"" . $type . "\",\"mac_address\":\"" . $mac . "\",\"running\":" . $running . ",\"disabled\":" . $disabled . "}")
 }
 
-:local payload ("{\"claim_token\":\"" . $claimToken . "\",\"serial_number\":\"" . $serial . "\",\"model\":\"" . $model . "\",\"routeros_version\":\"" . $version . "\",\"interfaces\":[" . $ifaceJson . "]}")
-/tool fetch url=($baseUrl . "/check-in") http-method=post http-header-field="Content-Type: application/json" http-data=$payload keep-result=no
-/tool fetch url=($baseUrl . "/status?token=" . $claimToken . "&serial=" . $serial . "&status=linked") mode=http keep-result=no
+:global payload ("{\"claim_token\":\"" . $claimToken . "\",\"serial_number\":\"" . $serial . "\",\"model\":\"" . $model . "\",\"routeros_version\":\"" . $version . "\",\"interfaces\":[" . $ifaceJson . "]}")
 
-:put "NobliFi router linked. Return to the dashboard and choose automatic or manual setup."`, token, baseURL)
+:global checkInUrl ($baseUrl . "/check-in")
+:global statusUrl ($baseUrl . "/status?token=" . $claimToken . "&serial=" . $serial . "&status=linked")
+
+:put ("NobliFi check-in URL: " . $checkInUrl)
+:put ("NobliFi status URL: " . $statusUrl)
+
+/tool fetch url=$checkInUrl mode=%s http-method=post http-header-field="Content-Type: application/json" http-data=$payload keep-result=no
+
+/tool fetch url=$statusUrl mode=%s keep-result=no
+
+:put "NobliFi router linked. Return to the dashboard and choose automatic or manual setup."`, token, baseURL, fetchMode, fetchMode)
 }
 
 func legacyRandomToken() string {
@@ -327,6 +346,31 @@ func legacyRandomToken() string {
 		return uuid.NewString()
 	}
 	return hex.EncodeToString(bytes)
+}
+
+func normalizeProvisioningBaseURL(baseURL string) string {
+	baseURL = strings.TrimSpace(baseURL)
+	baseURL = strings.TrimRight(baseURL, "/")
+
+	if baseURL == "" {
+		return "http://localhost:8080/api/v1/provisioning"
+	}
+
+	lower := strings.ToLower(baseURL)
+
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return "https://" + baseURL
+	}
+
+	return baseURL
+}
+
+func provisioningFetchMode(baseURL string) string {
+	if strings.HasPrefix(strings.ToLower(baseURL), "https://") {
+		return "https"
+	}
+
+	return "http"
 }
 
 func renderOptions(cfg config.Config) portprofiles.RenderOptions {
