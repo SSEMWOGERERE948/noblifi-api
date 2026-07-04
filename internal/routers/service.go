@@ -293,26 +293,10 @@ func randomToken() string {
 func bootstrapScript(token, baseURL string) string {
 	baseURL = normalizeProvisioningBaseURL(baseURL)
 	fetchMode := provisioningFetchMode(baseURL)
+	bootstrapURL := baseURL + "/bootstrap/" + token
 
-	return fmt.Sprintf(`:global claimToken "%s"
-:global baseUrl "%s"
-
-/system identity set name=("noblifi-pending-" . $claimToken)
-
-:global serial [/system routerboard get serial-number]
-:global model [/system routerboard get model]
-:global version [/system resource get version]
-
-:global checkInUrl ($baseUrl . "/check-in?token=" . $claimToken . "&serial=" . $serial . "&model=" . $model . "&routeros_version=" . $version)
-:global statusUrl ($baseUrl . "/status?token=" . $claimToken . "&serial=" . $serial . "&status=linked")
-
-:put ("NobliFi check-in URL: " . $checkInUrl)
-:put ("NobliFi status URL: " . $statusUrl)
-
-/tool fetch url=$checkInUrl mode=%s keep-result=no
-/tool fetch url=$statusUrl mode=%s keep-result=no
-
-:put "NobliFi router linked. Return to the dashboard and choose automatic or manual setup."`, token, baseURL, fetchMode, fetchMode)
+	return fmt.Sprintf(`/tool fetch url="%s" mode=%s dst-path=noblifi-bootstrap.rsc
+/import file-name=noblifi-bootstrap.rsc`, bootstrapURL, fetchMode)
 }
 
 func legacyRandomToken() string {
