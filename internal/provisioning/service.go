@@ -103,6 +103,15 @@ type InterfaceCheckIn struct {
 	Disabled   bool   `json:"disabled"`
 }
 
+type InterfaceCheckInInput struct {
+	ClaimToken string `json:"claim_token"`
+	Token      string `json:"token"`
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	MacAddress string `json:"mac_address"`
+	Running    string `json:"running"`
+	Disabled   string `json:"disabled"`
+}
 type CheckInInput struct {
 	ClaimToken      string             `json:"claim_token"`
 	Token           string             `json:"token"`
@@ -170,6 +179,56 @@ func (s *Service) CheckIn(input CheckInInput) error {
 	return s.repo.ReplaceInterfaces(router.ID, interfaces)
 }
 
+func (s *Service) InterfaceCheckIn(input InterfaceCheckInInput) error {
+	token := input.ClaimToken
+	if token == "" {
+		token = input.Token
+	}
+	if strings.TrimSpace(input.Name) == "" {
+		return errors.New("interface name is required")
+	}
+	router, err := s.repo.FindByClaimToken(token)
+	if err != nil {
+		return errors.New("invalid claim token")
+	}
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) {
+		return errors.New("claim token expired")
+	}
+	now := time.Now()
+	router.LastSeenAt = &now
+	if router.Status == "pending" {
+		router.Status = "online"
+	}
+	if err := s.repo.Save(&router); err != nil {
+		return err
+	}
+	var kind *string
+	if input.Type != "" {
+		kind = &input.Type
+	}
+	var mac *string
+	if input.MacAddress != "" {
+		mac = &input.MacAddress
+	}
+	iface := routers.RouterInterface{
+		Name:         input.Name,
+		Type:         kind,
+		MacAddress:   mac,
+		Running:      parseRouterOSBool(input.Running),
+		Disabled:     parseRouterOSBool(input.Disabled),
+		DiscoveredAt: now,
+	}
+	return s.repo.UpsertInterface(router.ID, iface)
+}
+
+func parseRouterOSBool(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
 func (s *Service) Status(token, serial, status string) error {
 	router, err := s.repo.FindByClaimToken(token)
 	if err != nil {
@@ -229,9 +288,22 @@ func renderBootstrapScript(token, baseURL string) string {
 :put ("NobliFi status URL: " . $statusUrl)
 
 /tool fetch url=$checkInUrl mode=%s keep-result=no
+
+:foreach iface in=[/interface find] do={
+  :local name [/interface get $iface name]
+  :local type [/interface get $iface type]
+  :local mac ""
+  :do { :set mac [/interface get $iface mac-address] } on-error={ :set mac "" }
+  :local running [/interface get $iface running]
+  :local disabled [/interface get $iface disabled]
+  :local ifaceUrl ($baseUrl . "/interface?token=" . $claimToken . "&name=" . $name . "&type=" . $type . "&mac_address=" . $mac . "&running=" . $running . "&disabled=" . $disabled)
+  :put ("NobliFi interface URL: " . $ifaceUrl)
+  /tool fetch url=$ifaceUrl mode=%s keep-result=no
+}
+
 /tool fetch url=$statusUrl mode=%s keep-result=no
 
-:put "NobliFi router linked. Return to the dashboard and choose automatic or manual setup."`, token, baseURL, fetchMode, fetchMode)
+:put "NobliFi router linked. Return to the dashboard and choose automatic or manual setup."`, token, baseURL, fetchMode, fetchMode, fetchMode)
 }
 
 func normalizeProvisioningBaseURL(baseURL string) string {
