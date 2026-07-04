@@ -172,14 +172,15 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString("# HotSpot bridge, DHCP, and client addressing\n")
 	builder.WriteString(fmt.Sprintf("/interface bridge add name=%s protocol-mode=rstp comment=\"NobliFi HotSpot bridge\"\n", options.HotspotBridge))
 	for _, iface := range summary.HotspotLAN {
+		builder.WriteString(fmt.Sprintf("/interface bridge port remove [find interface=%s]\n", iface))
 		builder.WriteString(fmt.Sprintf("/interface bridge port add bridge=%s interface=%s comment=\"NobliFi HotSpot port\"\n", options.HotspotBridge, iface))
 		builder.WriteString(fmt.Sprintf("/interface list member remove [find list=LAN interface=%s]\n", iface))
 		builder.WriteString(fmt.Sprintf("/interface list member add list=LAN interface=%s comment=\"NobliFi LAN member\"\n", iface))
 	}
 	builder.WriteString(fmt.Sprintf("/ip address add address=%s interface=%s comment=\"NobliFi HotSpot gateway\"\n", options.HotspotGateway, options.HotspotBridge))
 	builder.WriteString(fmt.Sprintf("/ip pool add name=pool-hotspot ranges=%s comment=\"NobliFi HotSpot pool\"\n", options.HotspotPool))
-	builder.WriteString(fmt.Sprintf("/ip dhcp-server add name=dhcp-hotspot interface=%s address-pool=pool-hotspot lease-time=1h disabled=no comment=\"NobliFi HotSpot DHCP\"\n", options.HotspotBridge))
-	builder.WriteString(fmt.Sprintf("/ip dhcp-server network add address=%s gateway=%s dns-server=%s comment=\"NobliFi HotSpot DHCP network\"\n\n", options.HotspotSubnet, hotspotGateway, hotspotGateway))
+	builder.WriteString(fmt.Sprintf("/ip dhcp-server add name=dhcp-hotspot interface=%s address-pool=pool-hotspot lease-time=1h disabled=no\n", options.HotspotBridge))
+	builder.WriteString(fmt.Sprintf("/ip dhcp-server network add address=%s gateway=%s dns-server=%s\n\n", options.HotspotSubnet, hotspotGateway, hotspotGateway))
 
 	writeBridge(&builder, options.StaffBridge, summary.StaffLAN, options.StaffGateway, "pool-staff", options.StaffPool, options.StaffSubnet)
 	writeBridge(&builder, options.POSBridge, summary.POSLAN, options.POSGateway, "pool-pos", options.POSPool, options.POSSubnet)
@@ -190,9 +191,9 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString("/ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment=\"NobliFi client NAT\"\n")
 	builder.WriteString(fmt.Sprintf("/radius add service=hotspot address=%s secret=\"%s\" authentication-port=1812 accounting-port=1813 timeout=3s comment=\"NobliFi RADIUS\"\n", options.RadiusServer, escape(options.RadiusSecret)))
 	builder.WriteString("/radius incoming set accept=yes\n")
-	builder.WriteString("/ip hotspot user profile add name=noblifi-voucher-profile shared-users=1 keepalive-timeout=2m status-autorefresh=1m comment=\"NobliFi voucher profile\"\n")
-	builder.WriteString(fmt.Sprintf("/ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=%s dns-name=%s use-radius=yes login-by=http-chap,http-pap comment=\"NobliFi HotSpot profile\"\n", hotspotGateway, options.HotspotDNSName))
-	builder.WriteString(fmt.Sprintf("/ip hotspot add name=noblifi-hotspot interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no comment=\"NobliFi HotSpot server\"\n", options.HotspotBridge))
+	builder.WriteString("/ip hotspot user profile add name=noblifi-voucher-profile shared-users=1 keepalive-timeout=2m status-autorefresh=1m\n")
+	builder.WriteString(fmt.Sprintf("/ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=%s dns-name=%s use-radius=yes login-by=http-chap,http-pap\n", hotspotGateway, options.HotspotDNSName))
+	builder.WriteString(fmt.Sprintf("/ip hotspot add name=noblifi-hotspot interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no\n", options.HotspotBridge))
 	return builder.String(), nil
 }
 func withDefaults(options RenderOptions) RenderOptions {
@@ -300,11 +301,11 @@ func writeCleanup(builder *strings.Builder, bridge string, dhcpServer string, po
 		return
 	}
 	builder.WriteString(fmt.Sprintf("/ip dhcp-server remove [find name=\"%s\"]\n", dhcpServer))
-	builder.WriteString(fmt.Sprintf("/ip dhcp-server network remove [find address=%s comment~\"NobliFi\"]\n", subnet))
-	builder.WriteString(fmt.Sprintf("/ip address remove [find interface=%s comment~\"NobliFi\"]\n", bridge))
+	builder.WriteString(fmt.Sprintf("/ip dhcp-server network remove [find address=%s]\n", subnet))
+	builder.WriteString(fmt.Sprintf("/ip address remove [find interface=%s]\n", bridge))
 	builder.WriteString(fmt.Sprintf("/ip pool remove [find name=\"%s\"]\n", pool))
 	builder.WriteString(fmt.Sprintf("/interface bridge port remove [find bridge=%s]\n", bridge))
-	builder.WriteString(fmt.Sprintf("/interface bridge remove [find name=%s comment~\"NobliFi\"]\n", bridge))
+	builder.WriteString(fmt.Sprintf("/interface bridge remove [find name=%s]\n", bridge))
 }
 
 func writeBridge(builder *strings.Builder, bridge string, interfaces []string, address string, pool string, ranges string, subnet string) {
@@ -316,12 +317,13 @@ func writeBridge(builder *strings.Builder, bridge string, interfaces []string, a
 	builder.WriteString(fmt.Sprintf("# %s bridge, DHCP, and client addressing\n", strings.ToUpper(role)))
 	builder.WriteString(fmt.Sprintf("/interface bridge add name=%s protocol-mode=rstp comment=\"NobliFi %s bridge\"\n", bridge, role))
 	for _, iface := range interfaces {
+		builder.WriteString(fmt.Sprintf("/interface bridge port remove [find interface=%s]\n", iface))
 		builder.WriteString(fmt.Sprintf("/interface bridge port add bridge=%s interface=%s comment=\"NobliFi %s port\"\n", bridge, iface, role))
 		builder.WriteString(fmt.Sprintf("/interface list member remove [find list=LAN interface=%s]\n", iface))
 		builder.WriteString(fmt.Sprintf("/interface list member add list=LAN interface=%s comment=\"NobliFi LAN member\"\n", iface))
 	}
 	builder.WriteString(fmt.Sprintf("/ip address add address=%s interface=%s comment=\"NobliFi %s gateway\"\n", address, bridge, role))
 	builder.WriteString(fmt.Sprintf("/ip pool add name=%s ranges=%s comment=\"NobliFi %s pool\"\n", pool, ranges, role))
-	builder.WriteString(fmt.Sprintf("/ip dhcp-server add name=dhcp-%s interface=%s address-pool=%s lease-time=1h disabled=no comment=\"NobliFi %s DHCP\"\n", role, bridge, pool, role))
-	builder.WriteString(fmt.Sprintf("/ip dhcp-server network add address=%s gateway=%s dns-server=%s comment=\"NobliFi %s DHCP network\"\n\n", subnet, gateway, gateway, role))
+	builder.WriteString(fmt.Sprintf("/ip dhcp-server add name=dhcp-%s interface=%s address-pool=%s lease-time=1h disabled=no\n", role, bridge, pool))
+	builder.WriteString(fmt.Sprintf("/ip dhcp-server network add address=%s gateway=%s dns-server=%s\n\n", subnet, gateway, gateway))
 }
