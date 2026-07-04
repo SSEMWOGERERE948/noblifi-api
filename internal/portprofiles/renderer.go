@@ -191,7 +191,7 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString(fmt.Sprintf("/radius add service=hotspot address=%s secret=\"%s\" authentication-port=1812 accounting-port=1813 timeout=3s comment=\"NobliFi RADIUS\"\n", options.RadiusServer, escape(options.RadiusSecret)))
 	builder.WriteString("/radius incoming set accept=yes\n")
 	builder.WriteString("/ip hotspot user profile add name=noblifi-voucher-profile shared-users=1 keepalive-timeout=2m status-autorefresh=1m comment=\"NobliFi voucher profile\"\n")
-	builder.WriteString(fmt.Sprintf("/ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=%s dns-name=%s use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap,http-pap comment=\"NobliFi HotSpot profile\"\n", hotspotGateway, options.HotspotDNSName))
+	builder.WriteString(fmt.Sprintf("/ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=%s dns-name=%s use-radius=yes login-by=http-chap,http-pap comment=\"NobliFi HotSpot profile\"\n", hotspotGateway, options.HotspotDNSName))
 	builder.WriteString(fmt.Sprintf("/ip hotspot add name=noblifi-hotspot interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no comment=\"NobliFi HotSpot server\"\n", options.HotspotBridge))
 	return builder.String(), nil
 }
