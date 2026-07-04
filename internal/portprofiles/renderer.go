@@ -132,49 +132,69 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 
 	summary := BuildSummary(assignments)
 	wan := summary.WAN[0]
+	hotspotGateway := strings.Split(options.HotspotGateway, "/")[0]
 
 	var builder strings.Builder
 	builder.WriteString("# NobliFi generated RouterOS configuration\n")
-	builder.WriteString(fmt.Sprintf("/system identity set name=\"%s\"\n\n", escape(options.RouterIdentity)))
-	builder.WriteString(fmt.Sprintf("/user add name=%s group=full password=\"%s\" comment=\"NobliFi API management user\"\n", options.APIUsername, escape(options.APIPassword)))
-	builder.WriteString("/ip/service set telnet disabled=yes\n")
-	builder.WriteString("/ip/service set ftp disabled=yes\n")
-	if options.DisableWWWService {
-		builder.WriteString("/ip/service set www disabled=yes\n")
-	}
-	builder.WriteString(fmt.Sprintf("/ip/service set api disabled=%s\n", routerOSDisabled(!options.EnableAPIService)))
-	builder.WriteString(fmt.Sprintf("/ip/service set api-ssl disabled=%s\n\n", routerOSDisabled(!options.EnableAPISSLService)))
-	builder.WriteString("/interface/list add name=WAN\n")
-	builder.WriteString("/interface/list add name=LAN\n")
-	builder.WriteString(fmt.Sprintf("/interface/list/member add list=WAN interface=%s\n", wan))
-	builder.WriteString(fmt.Sprintf("/ip/dhcp-client add interface=%s disabled=no\n\n", wan))
-
-	builder.WriteString(fmt.Sprintf("/interface/bridge add name=%s protocol-mode=rstp\n", options.HotspotBridge))
-	for _, iface := range summary.HotspotLAN {
-		builder.WriteString(fmt.Sprintf("/interface/bridge/port add bridge=%s interface=%s\n", options.HotspotBridge, iface))
-		builder.WriteString(fmt.Sprintf("/interface/list/member add list=LAN interface=%s\n", iface))
-	}
-	builder.WriteString(fmt.Sprintf("/ip/address add address=%s interface=%s\n", options.HotspotGateway, options.HotspotBridge))
-	builder.WriteString(fmt.Sprintf("/ip/pool add name=pool-hotspot ranges=%s\n", options.HotspotPool))
-	builder.WriteString(fmt.Sprintf("/ip/dhcp-server add name=dhcp-hotspot interface=%s address-pool=pool-hotspot disabled=no\n", options.HotspotBridge))
-	hotspotGateway := strings.Split(options.HotspotGateway, "/")[0]
-	builder.WriteString(fmt.Sprintf("/ip/dhcp-server/network add address=%s gateway=%s dns-server=%s\n", options.HotspotSubnet, hotspotGateway, hotspotGateway))
+	builder.WriteString("# Import this file with: /import file-name=noblifi-config.rsc\n\n")
+	builder.WriteString("# Clean previous NobliFi-owned service setup\n")
+	builder.WriteString(fmt.Sprintf("/ip hotspot remove [find name=\"noblifi-hotspot\"]\n"))
+	builder.WriteString(fmt.Sprintf("/ip hotspot profile remove [find name=\"noblifi-hotspot-profile\"]\n"))
+	builder.WriteString(fmt.Sprintf("/ip hotspot user profile remove [find name=\"noblifi-voucher-profile\"]\n"))
+	builder.WriteString("/radius remove [find comment=\"NobliFi RADIUS\"]\n")
+	builder.WriteString("/ip firewall nat remove [find comment=\"NobliFi client NAT\"]\n")
+	builder.WriteString(fmt.Sprintf("/ip dhcp-client remove [find interface=%s comment=\"NobliFi WAN DHCP client\"]\n", wan))
+	writeCleanup(&builder, options.HotspotBridge, "dhcp-hotspot", "pool-hotspot", options.HotspotSubnet)
+	writeCleanup(&builder, options.StaffBridge, "dhcp-staff", "pool-staff", options.StaffSubnet)
+	writeCleanup(&builder, options.POSBridge, "dhcp-pos", "pool-pos", options.POSSubnet)
+	writeCleanup(&builder, options.CCTVBridge, "dhcp-cctv", "pool-cctv", options.CCTVSubnet)
 	builder.WriteString("\n")
+
+	builder.WriteString("# Management and router services\n")
+	builder.WriteString(fmt.Sprintf("/system identity set name=\"%s\"\n", escape(options.RouterIdentity)))
+	builder.WriteString(fmt.Sprintf("/user remove [find name=%s comment=\"NobliFi API management user\"]\n", options.APIUsername))
+	builder.WriteString(fmt.Sprintf("/user add name=%s group=full password=\"%s\" comment=\"NobliFi API management user\"\n", options.APIUsername, escape(options.APIPassword)))
+	builder.WriteString("/ip service set telnet disabled=yes\n")
+	builder.WriteString("/ip service set ftp disabled=yes\n")
+	if options.DisableWWWService {
+		builder.WriteString("/ip service set www disabled=yes\n")
+	}
+	builder.WriteString(fmt.Sprintf("/ip service set api disabled=%s\n", routerOSDisabled(!options.EnableAPIService)))
+	builder.WriteString(fmt.Sprintf("/ip service set api-ssl disabled=%s\n\n", routerOSDisabled(!options.EnableAPISSLService)))
+
+	builder.WriteString("# Interface lists and WAN internet\n")
+	builder.WriteString(":if ([:len [/interface list find name=WAN]] = 0) do={/interface list add name=WAN comment=\"NobliFi WAN list\"}\n")
+	builder.WriteString(":if ([:len [/interface list find name=LAN]] = 0) do={/interface list add name=LAN comment=\"NobliFi LAN list\"}\n")
+	builder.WriteString(fmt.Sprintf("/interface list member remove [find list=WAN interface=%s]\n", wan))
+	builder.WriteString(fmt.Sprintf("/interface list member add list=WAN interface=%s comment=\"NobliFi WAN member\"\n", wan))
+	builder.WriteString(fmt.Sprintf("/ip dhcp-client add interface=%s disabled=no comment=\"NobliFi WAN DHCP client\"\n\n", wan))
+
+	builder.WriteString("# HotSpot bridge, DHCP, and client addressing\n")
+	builder.WriteString(fmt.Sprintf("/interface bridge add name=%s protocol-mode=rstp comment=\"NobliFi HotSpot bridge\"\n", options.HotspotBridge))
+	for _, iface := range summary.HotspotLAN {
+		builder.WriteString(fmt.Sprintf("/interface bridge port add bridge=%s interface=%s comment=\"NobliFi HotSpot port\"\n", options.HotspotBridge, iface))
+		builder.WriteString(fmt.Sprintf("/interface list member remove [find list=LAN interface=%s]\n", iface))
+		builder.WriteString(fmt.Sprintf("/interface list member add list=LAN interface=%s comment=\"NobliFi LAN member\"\n", iface))
+	}
+	builder.WriteString(fmt.Sprintf("/ip address add address=%s interface=%s comment=\"NobliFi HotSpot gateway\"\n", options.HotspotGateway, options.HotspotBridge))
+	builder.WriteString(fmt.Sprintf("/ip pool add name=pool-hotspot ranges=%s comment=\"NobliFi HotSpot pool\"\n", options.HotspotPool))
+	builder.WriteString(fmt.Sprintf("/ip dhcp-server add name=dhcp-hotspot interface=%s address-pool=pool-hotspot lease-time=1h disabled=no comment=\"NobliFi HotSpot DHCP\"\n", options.HotspotBridge))
+	builder.WriteString(fmt.Sprintf("/ip dhcp-server network add address=%s gateway=%s dns-server=%s comment=\"NobliFi HotSpot DHCP network\"\n\n", options.HotspotSubnet, hotspotGateway, hotspotGateway))
 
 	writeBridge(&builder, options.StaffBridge, summary.StaffLAN, options.StaffGateway, "pool-staff", options.StaffPool, options.StaffSubnet)
 	writeBridge(&builder, options.POSBridge, summary.POSLAN, options.POSGateway, "pool-pos", options.POSPool, options.POSSubnet)
 	writeBridge(&builder, options.CCTVBridge, summary.CCTVLAN, options.CCTVGateway, "pool-cctv", options.CCTVPool, options.CCTVSubnet)
 
-	builder.WriteString("# NAT for client internet access\n")
-	builder.WriteString("/ip/firewall/nat add chain=srcnat out-interface-list=WAN action=masquerade comment=\"NobliFi client NAT\"\n\n")
-	builder.WriteString("# RADIUS + HotSpot service setup\n")
+	builder.WriteString("# DNS, NAT, RADIUS, and HotSpot service setup\n")
+	builder.WriteString("/ip dns set allow-remote-requests=yes\n")
+	builder.WriteString("/ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment=\"NobliFi client NAT\"\n")
 	builder.WriteString(fmt.Sprintf("/radius add service=hotspot address=%s secret=\"%s\" authentication-port=1812 accounting-port=1813 timeout=3s comment=\"NobliFi RADIUS\"\n", options.RadiusServer, escape(options.RadiusSecret)))
 	builder.WriteString("/radius incoming set accept=yes\n")
-	builder.WriteString(fmt.Sprintf("/ip/hotspot/profile add name=noblifi-hotspot-profile hotspot-address=%s dns-name=%s use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap,http-pap comment=\"NobliFi HotSpot profile\"\n", hotspotGateway, options.HotspotDNSName))
-	builder.WriteString(fmt.Sprintf("/ip/hotspot add name=noblifi-hotspot interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no comment=\"NobliFi HotSpot server\"\n", options.HotspotBridge))
+	builder.WriteString("/ip hotspot user profile add name=noblifi-voucher-profile shared-users=1 keepalive-timeout=2m status-autorefresh=1m transparent-proxy=no comment=\"NobliFi voucher profile\"\n")
+	builder.WriteString(fmt.Sprintf("/ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=%s dns-name=%s use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap,http-pap comment=\"NobliFi HotSpot profile\"\n", hotspotGateway, options.HotspotDNSName))
+	builder.WriteString(fmt.Sprintf("/ip hotspot add name=noblifi-hotspot interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no comment=\"NobliFi HotSpot server\"\n", options.HotspotBridge))
 	return builder.String(), nil
 }
-
 func withDefaults(options RenderOptions) RenderOptions {
 	defaults := RenderOptions{
 		RouterIdentity:      "NobliFi-Router",
@@ -275,18 +295,33 @@ func escape(value string) string {
 	return strings.ReplaceAll(value, `"`, `\"`)
 }
 
+func writeCleanup(builder *strings.Builder, bridge string, dhcpServer string, pool string, subnet string) {
+	if bridge == "" {
+		return
+	}
+	builder.WriteString(fmt.Sprintf("/ip dhcp-server remove [find name=\"%s\"]\n", dhcpServer))
+	builder.WriteString(fmt.Sprintf("/ip dhcp-server network remove [find address=%s comment~\"NobliFi\"]\n", subnet))
+	builder.WriteString(fmt.Sprintf("/ip address remove [find interface=%s comment~\"NobliFi\"]\n", bridge))
+	builder.WriteString(fmt.Sprintf("/ip pool remove [find name=\"%s\"]\n", pool))
+	builder.WriteString(fmt.Sprintf("/interface bridge port remove [find bridge=%s]\n", bridge))
+	builder.WriteString(fmt.Sprintf("/interface bridge remove [find name=%s comment~\"NobliFi\"]\n", bridge))
+}
+
 func writeBridge(builder *strings.Builder, bridge string, interfaces []string, address string, pool string, ranges string, subnet string) {
 	if len(interfaces) == 0 {
 		return
 	}
-	builder.WriteString(fmt.Sprintf("/interface/bridge add name=%s protocol-mode=rstp\n", bridge))
-	for _, iface := range interfaces {
-		builder.WriteString(fmt.Sprintf("/interface/bridge/port add bridge=%s interface=%s\n", bridge, iface))
-		builder.WriteString(fmt.Sprintf("/interface/list/member add list=LAN interface=%s\n", iface))
-	}
-	builder.WriteString(fmt.Sprintf("/ip/address add address=%s interface=%s\n", address, bridge))
-	builder.WriteString(fmt.Sprintf("/ip/pool add name=%s ranges=%s\n", pool, ranges))
-	builder.WriteString(fmt.Sprintf("/ip/dhcp-server add name=dhcp-%s interface=%s address-pool=%s disabled=no\n", strings.TrimPrefix(bridge, "br-"), bridge, pool))
+	role := strings.TrimPrefix(bridge, "br-")
 	gateway := strings.Split(address, "/")[0]
-	builder.WriteString(fmt.Sprintf("/ip/dhcp-server/network add address=%s gateway=%s dns-server=%s\n\n", subnet, gateway, gateway))
+	builder.WriteString(fmt.Sprintf("# %s bridge, DHCP, and client addressing\n", strings.ToUpper(role)))
+	builder.WriteString(fmt.Sprintf("/interface bridge add name=%s protocol-mode=rstp comment=\"NobliFi %s bridge\"\n", bridge, role))
+	for _, iface := range interfaces {
+		builder.WriteString(fmt.Sprintf("/interface bridge port add bridge=%s interface=%s comment=\"NobliFi %s port\"\n", bridge, iface, role))
+		builder.WriteString(fmt.Sprintf("/interface list member remove [find list=LAN interface=%s]\n", iface))
+		builder.WriteString(fmt.Sprintf("/interface list member add list=LAN interface=%s comment=\"NobliFi LAN member\"\n", iface))
+	}
+	builder.WriteString(fmt.Sprintf("/ip address add address=%s interface=%s comment=\"NobliFi %s gateway\"\n", address, bridge, role))
+	builder.WriteString(fmt.Sprintf("/ip pool add name=%s ranges=%s comment=\"NobliFi %s pool\"\n", pool, ranges, role))
+	builder.WriteString(fmt.Sprintf("/ip dhcp-server add name=dhcp-%s interface=%s address-pool=%s lease-time=1h disabled=no comment=\"NobliFi %s DHCP\"\n", role, bridge, pool, role))
+	builder.WriteString(fmt.Sprintf("/ip dhcp-server network add address=%s gateway=%s dns-server=%s comment=\"NobliFi %s DHCP network\"\n\n", subnet, gateway, gateway, role))
 }
