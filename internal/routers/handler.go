@@ -27,6 +27,7 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Put("/routers/:id/port-assignments", h.portAssignments)
 	router.Get("/routers/:id/bootstrap-script", h.bootstrapScript)
 	router.Get("/routers/:id/config-preview", h.configPreview)
+	router.Get("/routers/:id/config-install-command", h.configInstallCommand)
 	router.Post("/routers/:id/deploy", h.deploy)
 	router.Post("/routers/:id/apply-config", h.applyConfig)
 }
@@ -185,6 +186,18 @@ func (h *Handler) configPreview(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 	return c.JSON(preview)
+}
+
+func (h *Handler) configInstallCommand(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
+	}
+	command, err := h.service.ConfigInstallCommand(id)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	return c.JSON(fiber.Map{"script": command})
 }
 
 func (h *Handler) deploy(c *fiber.Ctx) error {
