@@ -14,6 +14,8 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Post("/provisioning/check-in", h.checkIn)
 	router.Get("/provisioning/check-in", h.checkIn)
 	router.Get("/provisioning/bootstrap/:token", h.bootstrap)
+	router.Get("/provisioning/interface", h.interfaceCheckIn)
+	router.Post("/provisioning/interface", h.interfaceCheckIn)
 	router.Get("/provisioning/config.rsc", h.config)
 	router.Post("/provisioning/status", h.status)
 	router.Get("/provisioning/status", h.status)
@@ -42,6 +44,26 @@ func (h *Handler) checkIn(c *fiber.Ctx) error {
 		}
 	}
 	if err := h.service.CheckIn(input); err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
+	}
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+func (h *Handler) interfaceCheckIn(c *fiber.Ctx) error {
+	var input InterfaceCheckInInput
+	if c.Method() == fiber.MethodGet {
+		input.ClaimToken = c.Query("token")
+		input.Name = c.Query("name")
+		input.Type = c.Query("type")
+		input.MacAddress = c.Query("mac_address")
+		input.Running = c.Query("running")
+		input.Disabled = c.Query("disabled")
+	} else {
+		if err := c.BodyParser(&input); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+		}
+	}
+	if err := h.service.InterfaceCheckIn(input); err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
 	}
 	return c.JSON(fiber.Map{"status": "ok"})

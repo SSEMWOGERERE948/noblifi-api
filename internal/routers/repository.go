@@ -91,6 +91,15 @@ func (r *Repository) ReplaceInterfaces(routerID uuid.UUID, interfaces []RouterIn
 		return tx.Create(&interfaces).Error
 	})
 }
+func (r *Repository) UpsertInterface(routerID uuid.UUID, iface RouterInterface) error {
+	iface.RouterID = routerID
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("router_id = ? AND name = ?", routerID, iface.Name).Delete(&RouterInterface{}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&iface).Error
+	})
+}
 
 func (r *Repository) CreateConfigLog(log *RouterConfigLog) error {
 	return r.db.Create(log).Error
