@@ -17,6 +17,7 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Get("/provisioning/interface", h.interfaceCheckIn)
 	router.Post("/provisioning/interface", h.interfaceCheckIn)
 	router.Get("/provisioning/config.rsc", h.config)
+	router.Get("/provisioning/config/:token", h.configByToken)
 	router.Post("/provisioning/status", h.status)
 	router.Get("/provisioning/status", h.status)
 }
@@ -75,6 +76,17 @@ func (h *Handler) config(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
 	}
 	c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
+	c.Set(fiber.HeaderContentDisposition, `attachment; filename="noblifi-config.rsc"`)
+	return c.SendString(script)
+}
+
+func (h *Handler) configByToken(c *fiber.Ctx) error {
+	script, err := h.service.ClaimConfig(c.Params("token"), "")
+	if err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
+	}
+	c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
+	c.Set(fiber.HeaderContentDisposition, `attachment; filename="noblifi-config.rsc"`)
 	return c.SendString(script)
 }
 

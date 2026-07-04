@@ -261,6 +261,14 @@ func (s *Service) BootstrapScript(routerID uuid.UUID) (string, error) {
 	return bootstrapScript(router.ClaimToken, s.cfg.ProvisioningBaseURL), nil
 }
 
+func (s *Service) ConfigInstallCommand(routerID uuid.UUID) (string, error) {
+	router, err := s.repo.Find(routerID)
+	if err != nil {
+		return "", err
+	}
+	return configInstallCommand(router.ClaimToken, s.cfg.ProvisioningBaseURL), nil
+}
+
 func (s *Service) ConfigPreview(routerID uuid.UUID) (ConfigPreview, error) {
 	router, err := s.repo.Find(routerID)
 	if err != nil {
@@ -341,6 +349,15 @@ func bootstrapScript(token, baseURL string) string {
 
 	return fmt.Sprintf(`/tool fetch url="%s" mode=%s dst-path=noblifi-bootstrap.rsc
 /import file-name=noblifi-bootstrap.rsc`, bootstrapURL, fetchMode)
+}
+
+func configInstallCommand(token, baseURL string) string {
+	baseURL = normalizeProvisioningBaseURL(baseURL)
+	fetchMode := provisioningFetchMode(baseURL)
+	configURL := baseURL + "/config/" + token
+
+	return fmt.Sprintf(`/tool fetch url="%s" mode=%s dst-path=noblifi-config.rsc
+/import file-name=noblifi-config.rsc`, configURL, fetchMode)
 }
 
 func legacyRandomToken() string {
