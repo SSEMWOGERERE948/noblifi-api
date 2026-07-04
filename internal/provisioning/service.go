@@ -36,7 +36,7 @@ func (s *Service) ClaimConfig(token, serial string) (string, error) {
 	if err != nil {
 		return "", errors.New("invalid claim token")
 	}
-	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) {
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
 		return "", errors.New("claim token expired")
 	}
 	if serial != "" {
@@ -221,6 +221,17 @@ func (s *Service) InterfaceCheckIn(input InterfaceCheckInInput) error {
 	return s.repo.UpsertInterface(router.ID, iface)
 }
 
+func canFetchConfigAfterClaimExpiry(router routers.Router) bool {
+	if router.LastSeenAt != nil || router.SerialNumber != nil {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(router.Status)) {
+	case "linked", "online", "provisioning", "provisioned", "queued":
+		return true
+	default:
+		return false
+	}
+}
 func parseRouterOSBool(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "1", "true", "yes", "on":
