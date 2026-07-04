@@ -12,13 +12,18 @@ import (
 	"github.com/noblifi/noblifi/backend/internal/routers"
 )
 
-type Service struct {
-	repo *routers.Repository
-	cfg  config.Config
+type RadiusRegistrar interface {
+	RegisterNAS(nasName, shortName, secret, description string) error
 }
 
-func NewService(repo *routers.Repository, cfg config.Config) *Service {
-	return &Service{repo: repo, cfg: cfg}
+type Service struct {
+	repo   *routers.Repository
+	cfg    config.Config
+	radius RadiusRegistrar
+}
+
+func NewService(repo *routers.Repository, cfg config.Config, radius RadiusRegistrar) *Service {
+	return &Service{repo: repo, cfg: cfg, radius: radius}
 }
 func (s *Service) BootstrapScript(token string) (string, error) {
 	router, err := s.repo.FindByClaimToken(token)
@@ -31,7 +36,7 @@ func (s *Service) BootstrapScript(token string) (string, error) {
 	return renderBootstrapScript(token, s.cfg.ProvisioningBaseURL), nil
 }
 
-func (s *Service) ClaimConfig(token, serial string) (string, error) {
+func (s *Service) ClaimConfig(token, serial string, sourceIP string) (string, error) {
 	router, err := s.repo.FindByClaimToken(token)
 	if err != nil {
 		return "", errors.New("invalid claim token")
@@ -55,9 +60,58 @@ func (s *Service) ClaimConfig(token, serial string) (string, error) {
 	if len(assignments) == 0 {
 		assignments = portprofiles.DefaultAssignments()
 	}
-	return portprofiles.RenderRouterOSWithOptions(assignments, s.renderOptionsForRouter(router))
+	options := s.renderOptionsForRouter(router)
+	if err := s.registerRadiusNAS(router, options, sourceIP); err != nil {
+		return "", err
+	}
+	return portprofiles.RenderRouterOSWithOptions(assignments, options)
 }
 
+func (s *Service) registerRadiusNAS(router routers.Router, options portprofiles.RenderOptions, sourceIP string) error {
+	if s.radius == nil {
+		return nil
+	}
+	nasName := firstForwardedIP(sourceIP)
+	if nasName == "" {
+		return nil
+	}
+	shortName := sanitizeNASName(options.RouterIdentity)
+	if shortName == "" {
+		shortName = sanitizeNASName(router.Name)
+	}
+	description := "NobliFi MikroTik router"
+	if router.SerialNumber != nil && strings.TrimSpace(*router.SerialNumber) != "" {
+		description += " serial=" + strings.TrimSpace(*router.SerialNumber)
+	}
+	return s.radius.RegisterNAS(nasName, shortName, options.RadiusSecret, description)
+}
+
+func firstForwardedIP(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	parts := strings.Split(value, ",")
+	return strings.TrimSpace(parts[0])
+}
+
+func sanitizeNASName(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var builder strings.Builder
+	for _, ch := range value {
+		switch {
+		case ch >= 'a' && ch <= 'z':
+			builder.WriteRune(ch)
+		case ch >= '0' && ch <= '9':
+			builder.WriteRune(ch)
+		case ch == '-' || ch == '_':
+			builder.WriteRune(ch)
+		case ch == ' ' || ch == '.':
+			builder.WriteRune('-')
+		}
+	}
+	return strings.Trim(builder.String(), "-")
+}
 func (s *Service) renderOptionsForRouter(router routers.Router) portprofiles.RenderOptions {
 	if router.NetworkProfile != nil {
 		return router.NetworkProfile.RenderOptions()

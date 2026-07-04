@@ -27,6 +27,42 @@ func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
 }
 
+func (s *Service) RegisterNAS(nasName, shortName, secret, description string) error {
+	nasName = strings.TrimSpace(nasName)
+	if nasName == "" {
+		return nil
+	}
+	shortName = strings.TrimSpace(shortName)
+	if shortName == "" {
+		shortName = nasName
+	}
+	secret = strings.TrimSpace(secret)
+	if secret == "" || secret == "CHANGE_ME_RADIUS_SECRET" {
+		secret = "noblifi"
+	}
+
+	var nas NAS
+	err := s.db.First(&nas, "nasname = ?", nasName).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		nas = NAS{
+			NASName:     nasName,
+			ShortName:   shortName,
+			Type:        "mikrotik",
+			Secret:      secret,
+			Description: description,
+		}
+		return s.db.Create(&nas).Error
+	}
+	if err != nil {
+		return err
+	}
+
+	nas.ShortName = shortName
+	nas.Type = "mikrotik"
+	nas.Secret = secret
+	nas.Description = description
+	return s.db.Save(&nas).Error
+}
 func (s *Service) AuthorizeVoucher(code string) (bool, error) {
 	var voucher vouchers.Voucher
 	if err := s.db.First(&voucher, "code = ?", strings.TrimSpace(code)).Error; err != nil {

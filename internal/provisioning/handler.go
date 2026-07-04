@@ -71,7 +71,7 @@ func (h *Handler) interfaceCheckIn(c *fiber.Ctx) error {
 }
 
 func (h *Handler) config(c *fiber.Ctx) error {
-	script, err := h.service.ClaimConfig(c.Query("token"), c.Query("serial"))
+	script, err := h.service.ClaimConfig(c.Query("token"), c.Query("serial"), clientIP(c))
 	if err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
 	}
@@ -81,7 +81,7 @@ func (h *Handler) config(c *fiber.Ctx) error {
 }
 
 func (h *Handler) configByToken(c *fiber.Ctx) error {
-	script, err := h.service.ClaimConfig(c.Params("token"), "")
+	script, err := h.service.ClaimConfig(c.Params("token"), "", clientIP(c))
 	if err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
 	}
@@ -119,4 +119,12 @@ func (h *Handler) status(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
 	}
 	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+func clientIP(c *fiber.Ctx) string {
+	forwardedFor := c.Get("X-Forwarded-For")
+	if forwardedFor != "" {
+		return forwardedFor
+	}
+	return c.IP()
 }

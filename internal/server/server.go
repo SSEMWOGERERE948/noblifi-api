@@ -41,14 +41,14 @@ func Run() {
 	auth.NewHandler(authService).RegisterRoutes(api)
 
 	routerRepo := routers.NewRepository(db)
+	radiusService := radius.NewService(db)
 	routerService := routers.NewService(routerRepo, cfg)
 	routers.NewHandler(routerService).RegisterRoutes(api)
-	provisioning.NewHandler(provisioning.NewService(routerRepo, cfg)).RegisterRoutes(api)
+	provisioning.NewHandler(provisioning.NewService(routerRepo, cfg, radiusService)).RegisterRoutes(api)
 
 	planRepo := plans.NewRepository(db)
 	plans.NewHandler(plans.NewService(planRepo)).RegisterRoutes(api)
 
-	radiusService := radius.NewService(db)
 	radius.NewHandler(radiusService).RegisterRoutes(api)
 
 	voucherRepo := vouchers.NewRepository(db)
