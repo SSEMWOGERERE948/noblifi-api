@@ -13,9 +13,20 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Post("/provisioning/check-in", h.checkIn)
 	router.Get("/provisioning/check-in", h.checkIn)
+	router.Get("/provisioning/bootstrap/:token", h.bootstrap)
 	router.Get("/provisioning/config.rsc", h.config)
 	router.Post("/provisioning/status", h.status)
 	router.Get("/provisioning/status", h.status)
+}
+
+func (h *Handler) bootstrap(c *fiber.Ctx) error {
+	script, err := h.service.BootstrapScript(c.Params("token"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, err.Error())
+	}
+	c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
+	c.Set(fiber.HeaderContentDisposition, `attachment; filename="noblifi-bootstrap.rsc"`)
+	return c.SendString(script)
 }
 
 func (h *Handler) checkIn(c *fiber.Ctx) error {

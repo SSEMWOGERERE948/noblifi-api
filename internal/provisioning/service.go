@@ -3,6 +3,8 @@ package provisioning
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/noblifi/noblifi/backend/internal/config"
@@ -17,6 +19,16 @@ type Service struct {
 
 func NewService(repo *routers.Repository, cfg config.Config) *Service {
 	return &Service{repo: repo, cfg: cfg}
+}
+func (s *Service) BootstrapScript(token string) (string, error) {
+	router, err := s.repo.FindByClaimToken(token)
+	if err != nil {
+		return "", errors.New("invalid claim token")
+	}
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) {
+		return "", errors.New("claim token expired")
+	}
+	return renderBootstrapScript(token, s.cfg.ProvisioningBaseURL), nil
 }
 
 func (s *Service) ClaimConfig(token, serial string) (string, error) {
@@ -189,4 +201,55 @@ func (s *Service) Status(token, serial, status string) error {
 		Status:          router.Status,
 		ResponsePayload: payload,
 	})
+}
+
+func renderBootstrapScript(token, baseURL string) string {
+	baseURL = normalizeProvisioningBaseURL(baseURL)
+	fetchMode := provisioningFetchMode(baseURL)
+
+	return fmt.Sprintf(`:global claimToken "%s"
+:global baseUrl "%s"
+
+/system identity set name=("noblifi-pending-" . $claimToken)
+
+:global serial [/system routerboard get serial-number]
+:global model [/system routerboard get model]
+:global versionRaw [/system resource get version]
+:global version $versionRaw
+:global spacePos [:find $versionRaw " "]
+:if ($spacePos != nil) do={ :set version [:pick $versionRaw 0 $spacePos] }
+
+:put ("RAW VERSION: " . $versionRaw)
+:put ("PARSED VERSION: " . $version)
+
+:global checkInUrl ($baseUrl . "/check-in?token=" . $claimToken . "&serial=" . $serial . "&model=" . $model . "&routeros_version=" . $version)
+:global statusUrl ($baseUrl . "/status?token=" . $claimToken . "&serial=" . $serial . "&status=linked")
+
+:put ("NobliFi check-in URL: " . $checkInUrl)
+:put ("NobliFi status URL: " . $statusUrl)
+
+/tool fetch url=$checkInUrl mode=%s keep-result=no
+/tool fetch url=$statusUrl mode=%s keep-result=no
+
+:put "NobliFi router linked. Return to the dashboard and choose automatic or manual setup."`, token, baseURL, fetchMode, fetchMode)
+}
+
+func normalizeProvisioningBaseURL(baseURL string) string {
+	baseURL = strings.TrimSpace(baseURL)
+	baseURL = strings.TrimRight(baseURL, "/")
+	if baseURL == "" {
+		return "http://localhost:8080/api/v1/provisioning"
+	}
+	lower := strings.ToLower(baseURL)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return "https://" + baseURL
+	}
+	return baseURL
+}
+
+func provisioningFetchMode(baseURL string) string {
+	if strings.HasPrefix(strings.ToLower(baseURL), "https://") {
+		return "https"
+	}
+	return "http"
 }
