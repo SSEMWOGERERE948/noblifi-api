@@ -143,6 +143,7 @@ func (s *Service) renderOptionsForRouter(router routers.Router) portprofiles.Ren
 		CCTVGateway:         s.cfg.CCTVGatewayCIDR,
 		CCTVPool:            s.cfg.CCTVPoolRange,
 		HotspotDNSName:      s.cfg.HotspotDNSName,
+		WalledGardenHosts:   s.cfg.HotspotWalledGardenHosts,
 		DisableWWWService:   s.cfg.DisableWWWService,
 		EnableAPIService:    s.cfg.EnableAPIService,
 		EnableAPISSLService: s.cfg.EnableAPISSLService,

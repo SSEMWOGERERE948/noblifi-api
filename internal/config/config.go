@@ -35,6 +35,7 @@ type Config struct {
 	CCTVGatewayCIDR          string
 	CCTVPoolRange            string
 	HotspotDNSName           string
+	HotspotWalledGardenHosts []string
 	DisableWWWService        bool
 	EnableAPIService         bool
 	EnableAPISSLService      bool
@@ -73,6 +74,7 @@ func Load() Config {
 		CCTVGatewayCIDR:          getEnv("NOBLIFI_CCTV_GATEWAY", "10.40.40.1/24"),
 		CCTVPoolRange:            getEnv("NOBLIFI_CCTV_POOL", "10.40.40.10-10.40.40.254"),
 		HotspotDNSName:           getEnv("NOBLIFI_HOTSPOT_DNS_NAME", "login.noblifi.local"),
+		HotspotWalledGardenHosts: getListEnv("NOBLIFI_HOTSPOT_WALLED_GARDEN_HOSTS", "noblifi-frontend.vercel.app,noblifi.ew.r.appspot.com,noblifi.uc.r.appspot.com"),
 		DisableWWWService:        getBoolEnv("NOBLIFI_DISABLE_WWW_SERVICE", true),
 		EnableAPIService:         getBoolEnv("NOBLIFI_ENABLE_API_SERVICE", true),
 		EnableAPISSLService:      getBoolEnv("NOBLIFI_ENABLE_API_SSL_SERVICE", true),
@@ -92,6 +94,19 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func getListEnv(key, fallback string) []string {
+	value := getEnv(key, fallback)
+	parts := strings.Split(value, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			items = append(items, part)
+		}
+	}
+	return items
 }
 
 func getBoolEnv(key string, fallback bool) bool {
