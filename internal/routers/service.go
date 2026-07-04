@@ -71,6 +71,7 @@ func (s *Service) Find(id uuid.UUID) (Router, error) {
 func (s *Service) NetworkProfile(routerID uuid.UUID) (RouterNetworkProfile, error) {
 	profile, err := s.repo.NetworkProfile(routerID)
 	if err == nil {
+		s.normalizeNetworkProfile(&profile)
 		return profile, nil
 	}
 	router, findErr := s.repo.Find(routerID)
@@ -431,6 +432,16 @@ func (s *Service) renderOptionsForRouter(routerID uuid.UUID) (portprofiles.Rende
 	return profile.RenderOptions(), nil
 }
 
+func (s *Service) normalizeNetworkProfile(profile *RouterNetworkProfile) {
+	if isPlaceholderRadiusSecret(profile.RadiusSecret) {
+		profile.RadiusSecret = s.cfg.RadiusSecret
+	}
+}
+
+func isPlaceholderRadiusSecret(value string) bool {
+	secret := strings.TrimSpace(value)
+	return secret == "" || secret == "CHANGE_ME_RADIUS_SECRET"
+}
 func (s *Service) defaultNetworkProfile(routerID uuid.UUID, routerName string) RouterNetworkProfile {
 	return RouterNetworkProfile{
 		RouterID:            routerID,

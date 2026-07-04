@@ -91,7 +91,7 @@ func BuildSummary(assignments []Assignment) Summary {
 func RenderRouterOS(assignments []Assignment) (string, error) {
 	return RenderRouterOSWithOptions(assignments, RenderOptions{
 		RadiusServer:        "127.0.0.1",
-		RadiusSecret:        "CHANGE_ME_RADIUS_SECRET",
+		RadiusSecret:        "noblifi",
 		RouterIdentity:      "NobliFi-Router",
 		APIUsername:         "noblifi-api",
 		APIPassword:         "CHANGE_ME_API_PASSWORD",
@@ -125,8 +125,8 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	if strings.TrimSpace(options.RadiusServer) == "" {
 		options.RadiusServer = "127.0.0.1"
 	}
-	if strings.TrimSpace(options.RadiusSecret) == "" {
-		options.RadiusSecret = "CHANGE_ME_RADIUS_SECRET"
+	if isPlaceholderRadiusSecret(options.RadiusSecret) {
+		options.RadiusSecret = "noblifi"
 	}
 	options = withDefaults(options)
 
@@ -285,6 +285,10 @@ func withDefaults(options RenderOptions) RenderOptions {
 	return options
 }
 
+func isPlaceholderRadiusSecret(value string) bool {
+	secret := strings.TrimSpace(value)
+	return secret == "" || secret == "CHANGE_ME_RADIUS_SECRET"
+}
 func routerOSDisabled(disabled bool) string {
 	if disabled {
 		return "yes"
