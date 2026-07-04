@@ -107,6 +107,9 @@ func (s *Service) SavePortAssignments(routerID uuid.UUID, inputs []portprofiles.
 	if err := portprofiles.Validate(inputs); err != nil {
 		return err
 	}
+	if err := s.validateAssignablePorts(routerID, inputs); err != nil {
+		return err
+	}
 	assignments := make([]RouterPortAssignment, 0, len(inputs))
 	for _, input := range inputs {
 		assignments = append(assignments, RouterPortAssignment{
@@ -124,6 +127,47 @@ func (s *Service) SavePortAssignments(routerID uuid.UUID, inputs []portprofiles.
 	}
 	session.CurrentStep = "preview"
 	return s.repo.SaveSetupSession(&session)
+}
+
+func (s *Service) validateAssignablePorts(routerID uuid.UUID, inputs []portprofiles.Assignment) error {
+	interfaces, err := s.repo.Interfaces(routerID)
+	if err != nil {
+		return err
+	}
+	byName := map[string]RouterInterface{}
+	for _, iface := range interfaces {
+		byName[iface.Name] = iface
+	}
+	for _, input := range inputs {
+		role := strings.TrimSpace(input.Role)
+		if role == "DISABLED" {
+			continue
+		}
+		iface, ok := byName[input.Name()]
+		if !ok {
+			return fmt.Errorf("interface %s was not discovered on this MikroTik", input.Name())
+		}
+		if iface.Disabled && (role == "WAN" || role == "HOTSPOT_LAN") {
+			return fmt.Errorf("interface %s is disabled and cannot be used for %s", iface.Name, role)
+		}
+		if isVirtualInterface(iface) && (role == "WAN" || role == "HOTSPOT_LAN") {
+			return fmt.Errorf("interface %s is %s and cannot be used for %s; select a physical port like ether1", iface.Name, interfaceType(iface), role)
+		}
+	}
+	return nil
+}
+
+func isVirtualInterface(iface RouterInterface) bool {
+	typeName := strings.ToLower(interfaceType(iface))
+	name := strings.ToLower(iface.Name)
+	return strings.Contains(typeName, "bridge") || strings.Contains(name, "bridge") || strings.HasPrefix(name, "br-") || strings.Contains(typeName, "loopback") || strings.Contains(typeName, "tunnel")
+}
+
+func interfaceType(iface RouterInterface) string {
+	if iface.Type == nil || strings.TrimSpace(*iface.Type) == "" {
+		return "unknown"
+	}
+	return *iface.Type
 }
 
 type RemoteAccessInput struct {

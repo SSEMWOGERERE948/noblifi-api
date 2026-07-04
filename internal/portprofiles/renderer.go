@@ -165,10 +165,13 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	writeBridge(&builder, options.POSBridge, summary.POSLAN, options.POSGateway, "pool-pos", options.POSPool, options.POSSubnet)
 	writeBridge(&builder, options.CCTVBridge, summary.CCTVLAN, options.CCTVGateway, "pool-cctv", options.CCTVPool, options.CCTVSubnet)
 
-	builder.WriteString("/ip/firewall/nat add chain=srcnat out-interface-list=WAN action=masquerade\n\n")
-	builder.WriteString(fmt.Sprintf("/radius add service=hotspot address=%s secret=\"%s\" authentication-port=1812 accounting-port=1813 timeout=3s\n", options.RadiusServer, escape(options.RadiusSecret)))
-	builder.WriteString(fmt.Sprintf("/ip/hotspot/profile add name=noblifi-hotspot-profile hotspot-address=%s dns-name=%s use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap\n", hotspotGateway, options.HotspotDNSName))
-	builder.WriteString(fmt.Sprintf("/ip/hotspot add name=noblifi-hotspot interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no\n", options.HotspotBridge))
+	builder.WriteString("# NAT for client internet access\n")
+	builder.WriteString("/ip/firewall/nat add chain=srcnat out-interface-list=WAN action=masquerade comment=\"NobliFi client NAT\"\n\n")
+	builder.WriteString("# RADIUS + HotSpot service setup\n")
+	builder.WriteString(fmt.Sprintf("/radius add service=hotspot address=%s secret=\"%s\" authentication-port=1812 accounting-port=1813 timeout=3s comment=\"NobliFi RADIUS\"\n", options.RadiusServer, escape(options.RadiusSecret)))
+	builder.WriteString("/radius incoming set accept=yes\n")
+	builder.WriteString(fmt.Sprintf("/ip/hotspot/profile add name=noblifi-hotspot-profile hotspot-address=%s dns-name=%s use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap,http-pap comment=\"NobliFi HotSpot profile\"\n", hotspotGateway, options.HotspotDNSName))
+	builder.WriteString(fmt.Sprintf("/ip/hotspot add name=noblifi-hotspot interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no comment=\"NobliFi HotSpot server\"\n", options.HotspotBridge))
 	return builder.String(), nil
 }
 
