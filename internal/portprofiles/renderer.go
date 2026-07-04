@@ -41,6 +41,7 @@ type RenderOptions struct {
 	DisableWWWService   bool
 	EnableAPIService    bool
 	EnableAPISSLService bool
+	WalledGardenHosts   []string
 }
 
 func DefaultAssignments() []Assignment {
@@ -115,6 +116,7 @@ func RenderRouterOS(assignments []Assignment) (string, error) {
 		DisableWWWService:   true,
 		EnableAPIService:    true,
 		EnableAPISSLService: true,
+		WalledGardenHosts:   defaultWalledGardenHosts(),
 	})
 }
 
@@ -141,6 +143,7 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString(fmt.Sprintf("/ip hotspot remove [find name=\"noblifi-hotspot\"]\n"))
 	builder.WriteString(fmt.Sprintf("/ip hotspot profile remove [find name=\"noblifi-hotspot-profile\"]\n"))
 	builder.WriteString(fmt.Sprintf("/ip hotspot user profile remove [find name=\"noblifi-voucher-profile\"]\n"))
+	builder.WriteString("/ip hotspot walled-garden remove [find comment=\"NobliFi captive portal\"]\n")
 	builder.WriteString("/radius remove [find comment=\"NobliFi RADIUS\"]\n")
 	builder.WriteString("/ip firewall nat remove [find comment=\"NobliFi client NAT\"]\n")
 	builder.WriteString(fmt.Sprintf("/ip dhcp-client remove [find interface=%s]\n", wan))
@@ -191,8 +194,16 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString("/ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment=\"NobliFi client NAT\"\n")
 	builder.WriteString(fmt.Sprintf("/radius add service=hotspot address=%s secret=\"%s\" authentication-port=1812 accounting-port=1813 timeout=3s comment=\"NobliFi RADIUS\"\n", options.RadiusServer, escape(options.RadiusSecret)))
 	builder.WriteString("/radius incoming set accept=yes\n")
-	builder.WriteString("/ip hotspot user profile add name=noblifi-voucher-profile shared-users=1 keepalive-timeout=2m status-autorefresh=1m\n")
+	builder.WriteString("/ip hotspot user profile add name=noblifi-voucher-profile\n")
+	builder.WriteString("/ip hotspot user profile set noblifi-voucher-profile shared-users=1\n")
+	builder.WriteString("/ip hotspot user profile set noblifi-voucher-profile keepalive-timeout=2m\n")
+	builder.WriteString("/ip hotspot user profile set noblifi-voucher-profile status-autorefresh=1m\n")
 	builder.WriteString(fmt.Sprintf("/ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=%s dns-name=%s use-radius=yes login-by=http-chap,http-pap\n", hotspotGateway, options.HotspotDNSName))
+	builder.WriteString("/ip hotspot profile set noblifi-hotspot-profile radius-accounting=yes\n")
+	builder.WriteString("/ip hotspot profile set noblifi-hotspot-profile radius-interim-update=5m\n")
+	for _, host := range options.WalledGardenHosts {
+		builder.WriteString(fmt.Sprintf("/ip hotspot walled-garden add dst-host=%s action=allow comment=\"NobliFi captive portal\"\n", host))
+	}
 	builder.WriteString(fmt.Sprintf("/ip hotspot add name=noblifi-hotspot interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no\n", options.HotspotBridge))
 	return builder.String(), nil
 }
@@ -221,6 +232,7 @@ func withDefaults(options RenderOptions) RenderOptions {
 		DisableWWWService:   true,
 		EnableAPIService:    true,
 		EnableAPISSLService: true,
+		WalledGardenHosts:   defaultWalledGardenHosts(),
 	}
 	if options.RouterIdentity == "" {
 		options.RouterIdentity = defaults.RouterIdentity
@@ -282,6 +294,10 @@ func withDefaults(options RenderOptions) RenderOptions {
 	if options.HotspotDNSName == "" {
 		options.HotspotDNSName = defaults.HotspotDNSName
 	}
+	if len(options.WalledGardenHosts) == 0 {
+		options.WalledGardenHosts = defaults.WalledGardenHosts
+	}
+	options.WalledGardenHosts = cleanHosts(options.WalledGardenHosts)
 	return options
 }
 
@@ -330,4 +346,31 @@ func writeBridge(builder *strings.Builder, bridge string, interfaces []string, a
 	builder.WriteString(fmt.Sprintf("/ip pool add name=%s ranges=%s comment=\"NobliFi %s pool\"\n", pool, ranges, role))
 	builder.WriteString(fmt.Sprintf("/ip dhcp-server add name=dhcp-%s interface=%s address-pool=%s lease-time=1h disabled=no\n", role, bridge, pool))
 	builder.WriteString(fmt.Sprintf("/ip dhcp-server network add address=%s gateway=%s dns-server=%s\n\n", subnet, gateway, gateway))
+}
+
+func defaultWalledGardenHosts() []string {
+	return []string{
+		"noblifi-frontend.vercel.app",
+		"noblifi.ew.r.appspot.com",
+		"noblifi.uc.r.appspot.com",
+	}
+}
+
+func cleanHosts(hosts []string) []string {
+	seen := map[string]bool{}
+	cleaned := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		host = strings.TrimSpace(host)
+		host = strings.TrimPrefix(host, "https://")
+		host = strings.TrimPrefix(host, "http://")
+		if slash := strings.Index(host, "/"); slash >= 0 {
+			host = host[:slash]
+		}
+		if host == "" || seen[host] {
+			continue
+		}
+		seen[host] = true
+		cleaned = append(cleaned, host)
+	}
+	return cleaned
 }

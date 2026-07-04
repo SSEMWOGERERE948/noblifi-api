@@ -418,6 +418,7 @@ func renderOptions(cfg config.Config) portprofiles.RenderOptions {
 		CCTVGateway:         cfg.CCTVGatewayCIDR,
 		CCTVPool:            cfg.CCTVPoolRange,
 		HotspotDNSName:      cfg.HotspotDNSName,
+		WalledGardenHosts:   cfg.HotspotWalledGardenHosts,
 		DisableWWWService:   cfg.DisableWWWService,
 		EnableAPIService:    cfg.EnableAPIService,
 		EnableAPISSLService: cfg.EnableAPISSLService,
