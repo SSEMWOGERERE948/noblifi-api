@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ACCOUNT_NAME}} - Connect</title>
+  <style>
+    :root {
+      --primary: {{PRIMARY_COLOR}};
+      --accent: {{ACCENT_COLOR}};
+      --bg: #07111f;
+      --panel: #0d1f3c;
+      --input: #091529;
+      --text: #f0faff;
+      --muted: rgba(255,255,255,.58);
+      --border: rgba(0,198,178,.25);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 22px; background: var(--bg); color: var(--text); font-family: Arial, sans-serif; }
+    main { width: min(460px, 100%); background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 26px; box-shadow: 0 24px 70px rgba(0,0,0,.45); }
+    h1 { margin: 0; font-size: 2rem; letter-spacing: .02em; }
+    .sub { color: var(--muted); margin: 8px 0 24px; }
+    label { display: block; margin: 16px 0 7px; color: var(--primary); font-weight: 700; font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; }
+    input { width: 100%; padding: 13px 14px; border-radius: 9px; border: 1px solid var(--border); background: var(--input); color: var(--text); font-size: 1rem; }
+    button { width: 100%; border: 0; border-radius: 9px; padding: 13px 16px; margin-top: 12px; background: var(--primary); color: #06111f; font-weight: 800; cursor: pointer; }
+    .plans { display: grid; gap: 9px; margin-top: 10px; }
+    .plan { border: 1px solid var(--border); background: var(--input); border-radius: 10px; padding: 12px; cursor: pointer; }
+    .plan.active { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(0,198,178,.14); }
+    .muted { color: var(--muted); font-size: .88rem; }
+    .split { margin: 24px 0 8px; text-align: center; color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .1em; }
+    .error { display: none; margin-top: 14px; padding: 11px; border-radius: 9px; background: rgba(255,80,80,.12); color: #ff8a8a; }
+    footer { margin-top: 22px; color: var(--muted); font-size: .76rem; text-align: center; }
+  </style>
+</head>
+<body>
+<main id="portal" hidden>
+  <h1>{{ACCOUNT_NAME}}</h1>
+  <p class="sub">Fast hotspot access with voucher or mobile money.</p>
+
+  <label for="voucher">Voucher code</label>
+  <input id="voucher" autocomplete="off" placeholder="Enter voucher code">
+  <button onclick="redeemVoucher()">Connect with voucher</button>
+
+  <div class="split">or buy a package</div>
+  <div id="plans" class="plans"></div>
+
+  <label for="phone">Mobile money phone</label>
+  <input id="phone" inputmode="numeric" maxlength="10" placeholder="07XX XXX XXX">
+  <button onclick="payAndConnect()">Pay and connect</button>
+
+  <div class="split">already paid?</div>
+  <label for="transaction">Transaction ID</label>
+  <input id="transaction" placeholder="Paste transaction ID">
+  <button onclick="lookupTransaction()">Recover voucher</button>
+
+  <div id="message" class="error"></div>
+  <footer>Support: {{SUPPORT_PHONE}}</footer>
+</main>
+
+<script>
+var MT_LOGIN_URL = new URLSearchParams(location.search).get("link-login-only") || "$(link-login-only)";
+var MT_DST = new URLSearchParams(location.search).get("link-orig") || "$(link-orig)" || "http://google.com";
+var MT_MAC = new URLSearchParams(location.search).get("mac") || "$(mac)";
+var API_BASE = "{{API_BASE}}";
+var PLANS = {{PLANS_JSON}};
+var selectedPlan = PLANS[0] || null;
+
+window.addEventListener("load", function () {
+  renderPlans();
+  var params = new URLSearchParams(location.search);
+  var returnedTrackingId = params.get("OrderTrackingId") || params.get("orderTrackingId") || params.get("order_tracking_id");
+  if (returnedTrackingId) {
+    document.getElementById("portal").hidden = false;
+    verifyPesapalAndConnect(returnedTrackingId);
+    return;
+  }
+  if (MT_MAC && MT_MAC.indexOf("$(") !== 0) {
+    fetch(API_BASE + "/mac/check?mac=" + encodeURIComponent(MT_MAC))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.found) loginToMikrotik(data.code);
+        else document.getElementById("portal").hidden = false;
+      })
+      .catch(function () { document.getElementById("portal").hidden = false; });
+  } else {
+    document.getElementById("portal").hidden = false;
+  }
+});
+
+function renderPlans() {
+  var target = document.getElementById("plans");
+  target.innerHTML = PLANS.map(function (plan, index) {
+    return '<div class="plan ' + (index === 0 ? 'active' : '') + '" onclick="selectPlan(\\'' + plan.id + '\\')">' +
+      '<strong>' + plan.name + '</strong><br><span class="muted">UGX ' + Number(plan.price).toLocaleString() + '</span></div>';
+  }).join("");
+}
+
+function selectPlan(id) {
+  selectedPlan = PLANS.find(function (p) { return p.id === id; });
+  document.querySelectorAll(".plan").forEach(function (el) { el.classList.remove("active"); });
+  event.currentTarget.classList.add("active");
+}
+
+function showError(message) {
+  var el = document.getElementById("message");
+  el.textContent = message;
+  el.style.display = "block";
+}
+
+function loginToMikrotik(username) {
+  var form = document.createElement("form");
+  form.method = "POST";
+  form.action = MT_LOGIN_URL;
+  form.style.display = "none";
+  [["username", username], ["password", ""], ["dst", MT_DST]].forEach(function (pair) {
+    var input = document.createElement("input");
+    input.type = "hidden";
+    input.name = pair[0];
+    input.value = pair[1];
+    form.appendChild(input);
+  });
+  document.body.appendChild(form);
+  form.submit();
+}
+
+function redeemVoucher() {
+  var code = document.getElementById("voucher").value.trim();
+  fetch(API_BASE + "/voucher/redeem", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ voucherCode: code })
+  }).then(function (r) { return r.json(); }).then(function (data) {
+    if (!data.success) return showError(data.message || "Invalid voucher.");
+    loginToMikrotik(data.code);
+  }).catch(function () { showError("Could not reach billing server."); });
+}
+
+function payAndConnect() {
+  var phone = document.getElementById("phone").value.trim();
+  if (!selectedPlan) return showError("Select a package first.");
+  fetch(API_BASE + "/pay", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone: phone ? "256" + phone.substring(1) : "", packageId: selectedPlan.id })
+  }).then(function (r) { return r.json(); }).then(function (payment) {
+    if (!payment.redirectUrl) return showError(payment.error || "Pesapal order request failed.");
+    sessionStorage.setItem("noblifi_pesapal_tracking", payment.orderTrackingId || "");
+    location.href = payment.redirectUrl;
+  }).catch(function () { showError("Payment request failed."); });
+}
+
+function verifyPesapalAndConnect(orderTrackingId) {
+  showError("Confirming Pesapal payment...");
+  pollPayment(orderTrackingId, 0);
+}
+
+function pollPayment(id, tries) {
+  setTimeout(function () {
+    fetch(API_BASE + "/pay/status/" + encodeURIComponent(id))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.status === "paid" && data.voucher) return loginToMikrotik(data.voucher);
+        if (data.status === "failed") return showError(data.rawStatus || "Payment failed.");
+        if (tries > 20) return showError("Timed out waiting for payment.");
+        pollPayment(id, tries + 1);
+      }).catch(function () {
+        if (tries > 20) return showError("Could not verify payment.");
+        pollPayment(id, tries + 1);
+      });
+  }, 3000);
+}
+
+function lookupTransaction() {
+  fetch(API_BASE + "/voucher/lookup-by-transaction", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transactionId: document.getElementById("transaction").value.trim() })
+  }).then(function (r) { return r.json(); }).then(function (data) {
+    if (!data.success) return showError(data.message || "No voucher found.");
+    loginToMikrotik(data.code);
+  }).catch(function () { showError("Lookup failed."); });
+}
+</script>
+</body>
+</html>
