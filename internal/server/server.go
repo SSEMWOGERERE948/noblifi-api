@@ -56,9 +56,31 @@ func Run() {
 	voucherService.SetRadiusSyncer(radiusService)
 	vouchers.NewHandler(voucherService).RegisterRoutes(api)
 
-	app.Get("/healthz", func(c *fiber.Ctx) error {
-		return c.JSON(fiber.Map{"status": "ok"})
+	app.Get("/", func(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{
+		"service": "noblifi-api",
+		"status":  "running",
+		"version": "2026-07-04-router-provisioning",
 	})
+})
+
+app.Get("/healthz", func(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{
+		"status":  "ok",
+		"service": "noblifi-api",
+	})
+})
+
+app.Get("/debug/routes", func(c *fiber.Ctx) error {
+	routes := app.GetRoutes()
+	out := make([]string, 0, len(routes))
+
+	for _, route := range routes {
+		out = append(out, route.Method+" "+route.Path)
+	}
+
+	return c.JSON(out)
+})
 
 	log.Fatal(app.Listen(":" + cfg.Port))
 }
