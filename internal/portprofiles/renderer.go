@@ -49,8 +49,8 @@ func DefaultAssignments() []Assignment {
 		{InterfaceName: "ether1", Role: "WAN"},
 		{InterfaceName: "ether2", Role: "HOTSPOT_LAN"},
 		{InterfaceName: "ether3", Role: "HOTSPOT_LAN"},
-		{InterfaceName: "ether4", Role: "STAFF_LAN"},
-		{InterfaceName: "ether5", Role: "DISABLED"},
+		{InterfaceName: "ether4", Role: "HOTSPOT_LAN"},
+		{InterfaceName: "ether5", Role: "STAFF_LAN"},
 	}
 }
 
@@ -172,6 +172,8 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString(fmt.Sprintf("/interface list member add list=WAN interface=%s comment=\"NobliFi WAN member\"\n", wan))
 	builder.WriteString(fmt.Sprintf("/ip dhcp-client add interface=%s disabled=no comment=\"NobliFi WAN DHCP client\"\n\n", wan))
 
+	writeBridge(&builder, options.StaffBridge, summary.StaffLAN, options.StaffGateway, "pool-staff", options.StaffPool, options.StaffSubnet)
+
 	builder.WriteString("# HotSpot bridge, DHCP, and client addressing\n")
 	builder.WriteString(fmt.Sprintf("/interface bridge add name=%s protocol-mode=rstp comment=\"NobliFi HotSpot bridge\"\n", options.HotspotBridge))
 	for _, iface := range summary.HotspotLAN {
@@ -185,7 +187,6 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString(fmt.Sprintf("/ip dhcp-server add name=dhcp-hotspot interface=%s address-pool=pool-hotspot lease-time=1h disabled=no\n", options.HotspotBridge))
 	builder.WriteString(fmt.Sprintf("/ip dhcp-server network add address=%s gateway=%s dns-server=%s\n\n", options.HotspotSubnet, hotspotGateway, hotspotGateway))
 
-	writeBridge(&builder, options.StaffBridge, summary.StaffLAN, options.StaffGateway, "pool-staff", options.StaffPool, options.StaffSubnet)
 	writeBridge(&builder, options.POSBridge, summary.POSLAN, options.POSGateway, "pool-pos", options.POSPool, options.POSSubnet)
 	writeBridge(&builder, options.CCTVBridge, summary.CCTVLAN, options.CCTVGateway, "pool-cctv", options.CCTVPool, options.CCTVSubnet)
 
