@@ -178,7 +178,7 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString(fmt.Sprintf("/interface bridge add name=%s protocol-mode=rstp comment=\"NobliFi HotSpot bridge\"\n", options.HotspotBridge))
 	for _, iface := range summary.HotspotLAN {
 		builder.WriteString(fmt.Sprintf("/interface bridge port remove [find interface=%s]\n", iface))
-		builder.WriteString(fmt.Sprintf("/interface bridge port add bridge=%s interface=%s comment=\"NobliFi HotSpot port\"\n", options.HotspotBridge, iface))
+		builder.WriteString(fmt.Sprintf(":if ([:len [/interface bridge port find bridge=%s interface=%s]] = 0) do={/interface bridge port add bridge=%s interface=%s comment=\"NobliFi HotSpot port\"}\n", options.HotspotBridge, iface, options.HotspotBridge, iface))
 		builder.WriteString(fmt.Sprintf("/interface list member remove [find list=LAN interface=%s]\n", iface))
 		builder.WriteString(fmt.Sprintf("/interface list member add list=LAN interface=%s comment=\"NobliFi LAN member\"\n", iface))
 	}
@@ -339,7 +339,7 @@ func writeBridge(builder *strings.Builder, bridge string, interfaces []string, a
 	builder.WriteString(fmt.Sprintf("/interface bridge add name=%s protocol-mode=rstp comment=\"NobliFi %s bridge\"\n", bridge, role))
 	for _, iface := range interfaces {
 		builder.WriteString(fmt.Sprintf("/interface bridge port remove [find interface=%s]\n", iface))
-		builder.WriteString(fmt.Sprintf("/interface bridge port add bridge=%s interface=%s comment=\"NobliFi %s port\"\n", bridge, iface, role))
+		builder.WriteString(fmt.Sprintf(":if ([:len [/interface bridge port find bridge=%s interface=%s]] = 0) do={/interface bridge port add bridge=%s interface=%s comment=\"NobliFi %s port\"}\n", bridge, iface, bridge, iface, role))
 		builder.WriteString(fmt.Sprintf("/interface list member remove [find list=LAN interface=%s]\n", iface))
 		builder.WriteString(fmt.Sprintf("/interface list member add list=LAN interface=%s comment=\"NobliFi LAN member\"\n", iface))
 	}

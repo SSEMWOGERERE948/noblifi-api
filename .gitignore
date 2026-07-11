@@ -1,0 +1,28 @@
+node_modules/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+*.log
+*.err.log
+
+# SQLite local data
+*.db
+*.db-shm
+*.db-wal
+
+# Go build/test output
+bin/
+*.exe
+*.test
+coverage.out
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
