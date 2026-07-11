@@ -1,0 +1,992 @@
+
+2026/07/04 13:27:07 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[810.789ms] [33m[rows:1][35m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND table_type = 'BASE TABLE'[0m
+
+2026/07/04 13:27:07 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[427.512ms] [33m[rows:1][35m SELECT CURRENT_DATABASE()[0m
+
+2026/07/04 13:27:08 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[557.456ms] [33m[rows:-][35m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'neondb' AND table_schema = CURRENT_SCHEMA() AND table_name = 'users'[0m
+
+2026/07/04 13:27:08 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[221.938ms] [33m[rows:-][35m SELECT * FROM "users" LIMIT 5[0m
+
+2026/07/04 13:27:08 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[473.767ms] [33m[rows:-][35m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'users' AND constraint_type = 'UNIQUE'[0m
+
+2026/07/04 13:27:09 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[435.801ms] [33m[rows:-][35m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'users'[0m
+
+2026/07/04 13:27:09 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[425.488ms] [33m[rows:-][35m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'users'[0m
+
+2026/07/04 13:27:10 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[429.378ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:10 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[222.036ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'name') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:10 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.221ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'email') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:10 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.245ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'password_hash') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:11 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[234.769ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'role') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:11 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.376ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'created_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:11 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.821ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'updated_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:12 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[446.442ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'users' AND indexname = 'idx_users_email' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:27:12 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.084ms] [33m[rows:1][35m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sites' AND table_type = 'BASE TABLE'[0m
+
+2026/07/04 13:27:12 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.234ms] [33m[rows:1][35m SELECT CURRENT_DATABASE()[0m
+
+2026/07/04 13:27:12 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.186ms] [33m[rows:-][35m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'neondb' AND table_schema = CURRENT_SCHEMA() AND table_name = 'sites'[0m
+
+2026/07/04 13:27:12 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.503ms] [33m[rows:-][35m SELECT * FROM "sites" LIMIT 5[0m
+
+2026/07/04 13:27:13 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[218.685ms] [33m[rows:-][35m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'sites' AND constraint_type = 'UNIQUE'[0m
+
+2026/07/04 13:27:13 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[217.652ms] [33m[rows:-][35m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'sites'[0m
+
+2026/07/04 13:27:13 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.461ms] [33m[rows:-][35m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'sites'[0m
+
+2026/07/04 13:27:13 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.039ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sites' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'sites' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:13 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.576ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sites' AND column_name = 'name') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'sites' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:14 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.022ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sites' AND column_name = 'location') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'sites' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:14 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.597ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sites' AND column_name = 'created_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'sites' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:14 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.012ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sites' AND column_name = 'updated_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'sites' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:14 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.509ms] [33m[rows:1][35m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND table_type = 'BASE TABLE'[0m
+
+2026/07/04 13:27:15 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[237.171ms] [33m[rows:1][35m SELECT CURRENT_DATABASE()[0m
+
+2026/07/04 13:27:15 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[229.211ms] [33m[rows:-][35m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'neondb' AND table_schema = CURRENT_SCHEMA() AND table_name = 'routers'[0m
+
+2026/07/04 13:27:15 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[221.591ms] [33m[rows:-][35m SELECT * FROM "routers" LIMIT 5[0m
+
+2026/07/04 13:27:15 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[217.604ms] [33m[rows:-][35m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'routers' AND constraint_type = 'UNIQUE'[0m
+
+2026/07/04 13:27:16 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[231.349ms] [33m[rows:-][35m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'routers'[0m
+
+2026/07/04 13:27:16 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.441ms] [33m[rows:-][35m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'routers'[0m
+
+2026/07/04 13:27:16 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.901ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:16 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.419ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'site_id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:16 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.657ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'name') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:17 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.794ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'site_name') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:17 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.133ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'expected_model') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:17 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.169ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'model') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:17 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.977ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'serial_number') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:17 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.405ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'mac_address') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:18 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.486ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'router_os_version') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:18 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.550ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'management_ip') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:18 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.219ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'api_username') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:18 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.932ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'api_password_encrypted') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:18 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.462ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'radius_secret_encrypted') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:19 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.161ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'status') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:19 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.201ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'claim_token') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:19 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.764ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'claim_token_expires_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:19 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.035ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'last_seen_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:20 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.054ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'provisioned_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:20 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.759ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'created_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:20 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.077ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'routers' AND column_name = 'updated_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'routers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:20 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.915ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'routers' AND indexname = 'idx_routers_serial_number' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:27:20 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.042ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'routers' AND indexname = 'idx_routers_claim_token' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:27:21 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.028ms] [33m[rows:1][35m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_setup_sessions' AND table_type = 'BASE TABLE'[0m
+
+2026/07/04 13:27:21 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.366ms] [33m[rows:1][35m SELECT CURRENT_DATABASE()[0m
+
+2026/07/04 13:27:21 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[217.673ms] [33m[rows:-][35m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'neondb' AND table_schema = CURRENT_SCHEMA() AND table_name = 'router_setup_sessions'[0m
+
+2026/07/04 13:27:22 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[226.643ms] [33m[rows:-][35m SELECT * FROM "router_setup_sessions" LIMIT 5[0m
+
+2026/07/04 13:27:22 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[218.006ms] [33m[rows:-][35m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'router_setup_sessions' AND constraint_type = 'UNIQUE'[0m
+
+2026/07/04 13:27:22 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[222.425ms] [33m[rows:-][35m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'router_setup_sessions'[0m
+
+2026/07/04 13:27:22 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.849ms] [33m[rows:-][35m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'router_setup_sessions'[0m
+
+2026/07/04 13:27:22 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[230.893ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_setup_sessions' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_setup_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:23 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[220.047ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_setup_sessions' AND column_name = 'router_id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_setup_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:23 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.419ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_setup_sessions' AND column_name = 'current_step') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_setup_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:23 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.038ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_setup_sessions' AND column_name = 'remote_access_method') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_setup_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:23 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[217.554ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_setup_sessions' AND column_name = 'configuration_method') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_setup_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:23 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.658ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_setup_sessions' AND column_name = 'deployment_status') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_setup_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:24 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.401ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_setup_sessions' AND column_name = 'error_message') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_setup_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:24 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[222.369ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_setup_sessions' AND column_name = 'created_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_setup_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:24 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.665ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_setup_sessions' AND column_name = 'updated_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_setup_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:25 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[432.927ms] [33m[rows:1][35m SELECT count(*) FROM INFORMATION_SCHEMA.table_constraints WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_setup_sessions' AND constraint_name = 'fk_routers_setup_session'[0m
+
+2026/07/04 13:27:25 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.168ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'router_setup_sessions' AND indexname = 'idx_router_setup_sessions_router_id' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:27:25 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[218.732ms] [33m[rows:1][35m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND table_type = 'BASE TABLE'[0m
+
+2026/07/04 13:27:25 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.875ms] [33m[rows:1][35m SELECT CURRENT_DATABASE()[0m
+
+2026/07/04 13:27:25 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[218.107ms] [33m[rows:-][35m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'neondb' AND table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles'[0m
+
+2026/07/04 13:27:26 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[227.578ms] [33m[rows:-][35m SELECT * FROM "router_network_profiles" LIMIT 5[0m
+
+2026/07/04 13:27:26 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[218.357ms] [33m[rows:-][35m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'router_network_profiles' AND constraint_type = 'UNIQUE'[0m
+
+2026/07/04 13:27:26 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[218.837ms] [33m[rows:-][35m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'router_network_profiles'[0m
+
+2026/07/04 13:27:26 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.070ms] [33m[rows:-][35m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'router_network_profiles'[0m
+
+2026/07/04 13:27:27 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[217.162ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:27 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.131ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'router_id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:27 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.321ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'name') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:27 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.639ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'radius_server') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:27 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.314ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'radius_secret') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:28 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[219.809ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'router_identity') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:28 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.697ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'api_username') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:28 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.308ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'api_password') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:28 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[221.151ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'hotspot_bridge') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:29 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.498ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'staff_bridge') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:29 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.171ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'pos_bridge') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:29 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.569ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'cctv_bridge') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:29 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.393ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'hotspot_subnet') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:29 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.308ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'hotspot_gateway') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:30 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.874ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'hotspot_pool') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:30 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.728ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'staff_subnet') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:30 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.589ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'staff_gateway') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:30 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.674ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'staff_pool') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:30 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.305ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'pos_subnet') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:31 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.523ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'pos_gateway') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:31 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.743ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'pos_pool') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:31 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.091ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'cctv_subnet') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:31 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.750ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'cctv_gateway') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:32 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.816ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'cctv_pool') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:32 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.946ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'hotspot_dns_name') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:32 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[211.594ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'wan_mode') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:32 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.709ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'pp_po_e_username') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:32 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.808ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'pp_po_e_password') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:33 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[211.962ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'disable_www_service') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:33 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.268ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'enable_api_service') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:33 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[223.570ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'enable_api_ssl_service') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:33 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.879ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'created_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:33 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.910ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND column_name = 'updated_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_network_profiles' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:34 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.437ms] [33m[rows:1][35m SELECT count(*) FROM INFORMATION_SCHEMA.table_constraints WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_network_profiles' AND constraint_name = 'fk_routers_network_profile'[0m
+
+2026/07/04 13:27:34 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[221.869ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'router_network_profiles' AND indexname = 'idx_router_network_profiles_router_id' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:27:34 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.763ms] [33m[rows:1][35m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_interfaces' AND table_type = 'BASE TABLE'[0m
+
+2026/07/04 13:27:34 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.637ms] [33m[rows:1][35m SELECT CURRENT_DATABASE()[0m
+
+2026/07/04 13:27:35 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[221.445ms] [33m[rows:-][35m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'neondb' AND table_schema = CURRENT_SCHEMA() AND table_name = 'router_interfaces'[0m
+
+2026/07/04 13:27:35 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[227.895ms] [33m[rows:-][35m SELECT * FROM "router_interfaces" LIMIT 5[0m
+
+2026/07/04 13:27:35 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[218.764ms] [33m[rows:-][35m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'router_interfaces' AND constraint_type = 'UNIQUE'[0m
+
+2026/07/04 13:27:35 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[221.217ms] [33m[rows:-][35m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'router_interfaces'[0m
+
+2026/07/04 13:27:35 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.922ms] [33m[rows:-][35m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'router_interfaces'[0m
+
+2026/07/04 13:27:36 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[218.488ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_interfaces' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_interfaces' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:36 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.468ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_interfaces' AND column_name = 'router_id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_interfaces' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:36 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[218.374ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_interfaces' AND column_name = 'name') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_interfaces' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:36 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[217.366ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_interfaces' AND column_name = 'type') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_interfaces' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:37 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.567ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_interfaces' AND column_name = 'mac_address') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_interfaces' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:37 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.851ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_interfaces' AND column_name = 'running') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_interfaces' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:37 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.727ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_interfaces' AND column_name = 'disabled') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_interfaces' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:37 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.371ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_interfaces' AND column_name = 'discovered_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_interfaces' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:37 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.060ms] [33m[rows:1][35m SELECT count(*) FROM INFORMATION_SCHEMA.table_constraints WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_interfaces' AND constraint_name = 'fk_routers_interfaces'[0m
+
+2026/07/04 13:27:38 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.013ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'router_interfaces' AND indexname = 'idx_router_interfaces_router_id' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:27:38 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.635ms] [33m[rows:1][35m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_port_assignments' AND table_type = 'BASE TABLE'[0m
+
+2026/07/04 13:27:38 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[217.119ms] [33m[rows:1][35m SELECT CURRENT_DATABASE()[0m
+
+2026/07/04 13:27:38 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.970ms] [33m[rows:-][35m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'neondb' AND table_schema = CURRENT_SCHEMA() AND table_name = 'router_port_assignments'[0m
+
+2026/07/04 13:27:38 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[217.261ms] [33m[rows:-][35m SELECT * FROM "router_port_assignments" LIMIT 5[0m
+
+2026/07/04 13:27:39 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.718ms] [33m[rows:-][35m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'router_port_assignments' AND constraint_type = 'UNIQUE'[0m
+
+2026/07/04 13:27:39 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.897ms] [33m[rows:-][35m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'router_port_assignments'[0m
+
+2026/07/04 13:27:39 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.153ms] [33m[rows:-][35m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'router_port_assignments'[0m
+
+2026/07/04 13:27:39 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[219.613ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_port_assignments' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_port_assignments' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:40 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[515.592ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_port_assignments' AND column_name = 'router_id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_port_assignments' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:40 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.947ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_port_assignments' AND column_name = 'interface_name') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_port_assignments' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:40 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.139ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_port_assignments' AND column_name = 'role') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_port_assignments' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:41 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.507ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_port_assignments' AND column_name = 'bridge_name') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_port_assignments' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:41 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.795ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_port_assignments' AND column_name = 'vlan_id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_port_assignments' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:41 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.638ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_port_assignments' AND column_name = 'created_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_port_assignments' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:41 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.540ms] [33m[rows:1][35m SELECT count(*) FROM INFORMATION_SCHEMA.table_constraints WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_port_assignments' AND constraint_name = 'fk_routers_port_assignments'[0m
+
+2026/07/04 13:27:41 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.356ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'router_port_assignments' AND indexname = 'idx_router_port_assignments_router_id' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:27:42 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[227.022ms] [33m[rows:1][35m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_config_logs' AND table_type = 'BASE TABLE'[0m
+
+2026/07/04 13:27:42 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.157ms] [33m[rows:1][35m SELECT CURRENT_DATABASE()[0m
+
+2026/07/04 13:27:42 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.243ms] [33m[rows:-][35m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'neondb' AND table_schema = CURRENT_SCHEMA() AND table_name = 'router_config_logs'[0m
+
+2026/07/04 13:27:42 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[220.011ms] [33m[rows:-][35m SELECT * FROM "router_config_logs" LIMIT 5[0m
+
+2026/07/04 13:27:42 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.861ms] [33m[rows:-][35m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'router_config_logs' AND constraint_type = 'UNIQUE'[0m
+
+2026/07/04 13:27:43 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.272ms] [33m[rows:-][35m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'router_config_logs'[0m
+
+2026/07/04 13:27:43 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.441ms] [33m[rows:-][35m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'router_config_logs'[0m
+
+2026/07/04 13:27:43 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.761ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_config_logs' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_config_logs' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:43 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.640ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_config_logs' AND column_name = 'router_id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_config_logs' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:44 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.502ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_config_logs' AND column_name = 'action') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_config_logs' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:44 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.039ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_config_logs' AND column_name = 'status') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_config_logs' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:44 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.322ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_config_logs' AND column_name = 'request_payload') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_config_logs' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:44 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.484ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_config_logs' AND column_name = 'response_payload') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_config_logs' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:44 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.076ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_config_logs' AND column_name = 'error_message') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_config_logs' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:45 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.241ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'router_config_logs' AND column_name = 'created_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'router_config_logs' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:45 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.009ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'router_config_logs' AND indexname = 'idx_router_config_logs_router_id' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:27:45 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.648ms] [33m[rows:1][35m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radcheck' AND table_type = 'BASE TABLE'[0m
+
+2026/07/04 13:27:45 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.376ms] [33m[rows:1][35m SELECT CURRENT_DATABASE()[0m
+
+2026/07/04 13:27:45 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[219.626ms] [33m[rows:-][35m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'neondb' AND table_schema = CURRENT_SCHEMA() AND table_name = 'radcheck'[0m
+
+2026/07/04 13:27:46 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[222.139ms] [33m[rows:-][35m SELECT * FROM "radcheck" LIMIT 5[0m
+
+2026/07/04 13:27:46 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.558ms] [33m[rows:-][35m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'radcheck' AND constraint_type = 'UNIQUE'[0m
+
+2026/07/04 13:27:46 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.925ms] [33m[rows:-][35m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'radcheck'[0m
+
+2026/07/04 13:27:46 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.932ms] [33m[rows:-][35m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'radcheck'[0m
+
+2026/07/04 13:27:47 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.152ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radcheck' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radcheck' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:47 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.677ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radcheck' AND column_name = 'username') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radcheck' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:47 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.776ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radcheck' AND column_name = 'attribute') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radcheck' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:47 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.870ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radcheck' AND column_name = 'op') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radcheck' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:47 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.850ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radcheck' AND column_name = 'value') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radcheck' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:48 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.984ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'radcheck' AND indexname = 'idx_radcheck_username' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:27:48 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.910ms] [33m[rows:1][35m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radreply' AND table_type = 'BASE TABLE'[0m
+
+2026/07/04 13:27:48 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[211.911ms] [33m[rows:1][35m SELECT CURRENT_DATABASE()[0m
+
+2026/07/04 13:27:48 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.812ms] [33m[rows:-][35m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'neondb' AND table_schema = CURRENT_SCHEMA() AND table_name = 'radreply'[0m
+
+2026/07/04 13:27:49 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[221.059ms] [33m[rows:-][35m SELECT * FROM "radreply" LIMIT 5[0m
+
+2026/07/04 13:27:49 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.403ms] [33m[rows:-][35m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'radreply' AND constraint_type = 'UNIQUE'[0m
+
+2026/07/04 13:27:49 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[221.634ms] [33m[rows:-][35m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'radreply'[0m
+
+2026/07/04 13:27:49 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.163ms] [33m[rows:-][35m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'radreply'[0m
+
+2026/07/04 13:27:49 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.705ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radreply' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radreply' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:50 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.312ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radreply' AND column_name = 'username') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radreply' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:50 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.182ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radreply' AND column_name = 'attribute') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radreply' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:50 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.975ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radreply' AND column_name = 'op') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radreply' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:50 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.749ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radreply' AND column_name = 'value') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radreply' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:50 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.823ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'radreply' AND indexname = 'idx_radreply_username' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:27:51 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.571ms] [33m[rows:1][35m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND table_type = 'BASE TABLE'[0m
+
+2026/07/04 13:27:51 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.277ms] [33m[rows:1][35m SELECT CURRENT_DATABASE()[0m
+
+2026/07/04 13:27:51 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.111ms] [33m[rows:-][35m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'neondb' AND table_schema = CURRENT_SCHEMA() AND table_name = 'radacct'[0m
+
+2026/07/04 13:27:52 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[223.764ms] [33m[rows:-][35m SELECT * FROM "radacct" LIMIT 5[0m
+
+2026/07/04 13:27:52 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.210ms] [33m[rows:-][35m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'radacct' AND constraint_type = 'UNIQUE'[0m
+
+2026/07/04 13:27:52 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.599ms] [33m[rows:-][35m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'radacct'[0m
+
+2026/07/04 13:27:52 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.534ms] [33m[rows:-][35m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'radacct'[0m
+
+2026/07/04 13:27:52 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.563ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'radacctid') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:53 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.983ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'acctsessionid') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:53 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.334ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'acctuniqueid') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:53 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.382ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'username') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:53 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.836ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'groupname') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:54 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.896ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'realm') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:54 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.665ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'nasipaddress') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:54 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.437ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'nasportid') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:54 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.054ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'nasporttype') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:54 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.481ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'acctstarttime') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:55 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.872ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'acctupdatetime') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:55 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.639ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'acctstoptime') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:55 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.029ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'acctinterval') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:55 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.432ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'acctsessiontime') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:55 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.778ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'acctauthentic') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:56 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.916ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'connectinfo_start') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:56 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.483ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'connectinfo_stop') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:56 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.106ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'acctinputoctets') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:56 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[226.444ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'acctoutputoctets') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:57 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.685ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'calledstationid') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:57 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.455ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'callingstationid') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:57 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[224.572ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'acctterminatecause') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:57 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.874ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'servicetype') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:57 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.896ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'framedprotocol') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:58 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.829ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'framedipaddress') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:58 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.701ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'framedipv6address') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:58 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.341ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'framedipv6prefix') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:58 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.124ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'framedinterfaceid') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:59 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.802ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'radacct' AND column_name = 'delegatedipv6prefix') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'radacct' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:27:59 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.268ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'radacct' AND indexname = 'idx_radacct_acct_session_id' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:27:59 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.397ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'radacct' AND indexname = 'idx_radacct_acct_unique_id' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:27:59 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.341ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'radacct' AND indexname = 'idx_radacct_username' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:27:59 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.314ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'radacct' AND indexname = 'idx_radacct_calling_station_id' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:28:00 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.069ms] [33m[rows:1][35m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'nas' AND table_type = 'BASE TABLE'[0m
+
+2026/07/04 13:28:00 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.526ms] [33m[rows:1][35m SELECT CURRENT_DATABASE()[0m
+
+2026/07/04 13:28:00 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.076ms] [33m[rows:-][35m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'neondb' AND table_schema = CURRENT_SCHEMA() AND table_name = 'nas'[0m
+
+2026/07/04 13:28:00 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[218.876ms] [33m[rows:-][35m SELECT * FROM "nas" LIMIT 5[0m
+
+2026/07/04 13:28:00 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.116ms] [33m[rows:-][35m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'nas' AND constraint_type = 'UNIQUE'[0m
+
+2026/07/04 13:28:01 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[217.569ms] [33m[rows:-][35m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'nas'[0m
+
+2026/07/04 13:28:01 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.239ms] [33m[rows:-][35m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'nas'[0m
+
+2026/07/04 13:28:01 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.706ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'nas' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'nas' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:01 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.147ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'nas' AND column_name = 'nasname') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'nas' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:02 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.857ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'nas' AND column_name = 'shortname') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'nas' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:02 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.933ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'nas' AND column_name = 'type') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'nas' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:02 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.548ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'nas' AND column_name = 'ports') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'nas' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:02 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.715ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'nas' AND column_name = 'secret') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'nas' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:02 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.216ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'nas' AND column_name = 'server') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'nas' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:03 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.946ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'nas' AND column_name = 'community') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'nas' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:03 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[211.734ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'nas' AND column_name = 'description') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'nas' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:03 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.097ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'nas' AND indexname = 'idx_nas_nas_name' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:28:03 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.528ms] [33m[rows:1][35m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'plans' AND table_type = 'BASE TABLE'[0m
+
+2026/07/04 13:28:04 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.355ms] [33m[rows:1][35m SELECT CURRENT_DATABASE()[0m
+
+2026/07/04 13:28:04 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.189ms] [33m[rows:-][35m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'neondb' AND table_schema = CURRENT_SCHEMA() AND table_name = 'plans'[0m
+
+2026/07/04 13:28:04 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.917ms] [33m[rows:-][35m SELECT * FROM "plans" LIMIT 5[0m
+
+2026/07/04 13:28:04 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.888ms] [33m[rows:-][35m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'plans' AND constraint_type = 'UNIQUE'[0m
+
+2026/07/04 13:28:04 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.568ms] [33m[rows:-][35m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'plans'[0m
+
+2026/07/04 13:28:05 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.203ms] [33m[rows:-][35m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'plans'[0m
+
+2026/07/04 13:28:05 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.744ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'plans' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'plans' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:05 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.137ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'plans' AND column_name = 'name') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'plans' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:05 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.250ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'plans' AND column_name = 'price') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'plans' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:06 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.744ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'plans' AND column_name = 'duration_minutes') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'plans' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:06 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[211.171ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'plans' AND column_name = 'data_limit_mb') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'plans' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:06 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.496ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'plans' AND column_name = 'upload_speed') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'plans' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:06 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.992ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'plans' AND column_name = 'download_speed') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'plans' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:07 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.916ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'plans' AND column_name = 'max_devices') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'plans' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:07 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.862ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'plans' AND column_name = 'is_active') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'plans' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:07 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.736ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'plans' AND column_name = 'created_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'plans' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:07 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.394ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'plans' AND column_name = 'updated_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'plans' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:08 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[231.921ms] [33m[rows:1][35m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'vouchers' AND table_type = 'BASE TABLE'[0m
+
+2026/07/04 13:28:08 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.451ms] [33m[rows:1][35m SELECT CURRENT_DATABASE()[0m
+
+2026/07/04 13:28:08 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.147ms] [33m[rows:-][35m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'neondb' AND table_schema = CURRENT_SCHEMA() AND table_name = 'vouchers'[0m
+
+2026/07/04 13:28:08 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[226.144ms] [33m[rows:-][35m SELECT * FROM "vouchers" LIMIT 5[0m
+
+2026/07/04 13:28:08 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.574ms] [33m[rows:-][35m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'vouchers' AND constraint_type = 'UNIQUE'[0m
+
+2026/07/04 13:28:09 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.997ms] [33m[rows:-][35m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'vouchers'[0m
+
+2026/07/04 13:28:09 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.604ms] [33m[rows:-][35m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'vouchers'[0m
+
+2026/07/04 13:28:09 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.588ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'vouchers' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'vouchers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:09 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.232ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'vouchers' AND column_name = 'code') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'vouchers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:10 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.972ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'vouchers' AND column_name = 'plan_id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'vouchers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:10 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.117ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'vouchers' AND column_name = 'status') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'vouchers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:10 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.532ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'vouchers' AND column_name = 'starts_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'vouchers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:10 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.546ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'vouchers' AND column_name = 'expires_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'vouchers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:10 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.565ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'vouchers' AND column_name = 'used_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'vouchers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:11 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.761ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'vouchers' AND column_name = 'created_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'vouchers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:11 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.436ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'vouchers' AND column_name = 'updated_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'vouchers' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:11 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[218.755ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'vouchers' AND indexname = 'idx_vouchers_code' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:28:11 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.239ms] [33m[rows:1][35m SELECT count(*) FROM pg_indexes WHERE tablename = 'vouchers' AND indexname = 'idx_vouchers_plan_id' AND schemaname = CURRENT_SCHEMA()[0m
+
+2026/07/04 13:28:12 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.115ms] [33m[rows:1][35m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sessions' AND table_type = 'BASE TABLE'[0m
+
+2026/07/04 13:28:12 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.486ms] [33m[rows:1][35m SELECT CURRENT_DATABASE()[0m
+
+2026/07/04 13:28:12 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.823ms] [33m[rows:-][35m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'neondb' AND table_schema = CURRENT_SCHEMA() AND table_name = 'sessions'[0m
+
+2026/07/04 13:28:12 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[216.027ms] [33m[rows:-][35m SELECT * FROM "sessions" LIMIT 5[0m
+
+2026/07/04 13:28:12 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.591ms] [33m[rows:-][35m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'sessions' AND constraint_type = 'UNIQUE'[0m
+
+2026/07/04 13:28:13 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[211.701ms] [33m[rows:-][35m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'neondb' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'sessions'[0m
+
+2026/07/04 13:28:13 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.530ms] [33m[rows:-][35m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'sessions'[0m
+
+2026/07/04 13:28:13 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.458ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sessions' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:13 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.307ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sessions' AND column_name = 'voucher_id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:14 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[215.616ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sessions' AND column_name = 'router_id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:14 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.308ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sessions' AND column_name = 'username') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:14 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.747ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sessions' AND column_name = 'mac_address') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:14 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.453ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sessions' AND column_name = 'ip_address') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:14 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.235ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sessions' AND column_name = 'started_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:15 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[211.928ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sessions' AND column_name = 'stopped_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:15 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[212.871ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sessions' AND column_name = 'upload_bytes') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:15 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[214.729ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sessions' AND column_name = 'download_bytes') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:15 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/database/database.go:17 [33mSLOW SQL >= 200ms
+[0m[31;1m[213.141ms] [33m[rows:0][35m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'sessions' AND column_name = 'status') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))[0m
+
+2026/07/04 13:28:16 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/auth/service.go:125 [33mSLOW SQL >= 200ms
+[0m[31;1m[438.371ms] [33m[rows:1][35m SELECT count(*) FROM "users" WHERE email = 'admin@noblifi.local'[0m
+
+ ┌───────────────────────────────────────────────────┐ 
+ │                    NobliFi API                    │ 
+ │                   Fiber v2.52.8                   │ 
+ │               http://127.0.0.1:8080               │ 
+ │       (bound on host 0.0.0.0 and port 8080)       │ 
+ │                                                   │ 
+ │ Handlers ............ 50  Processes ........... 1 │ 
+ │ Prefork ....... Disabled  PID ............. 10684 │ 
+ └───────────────────────────────────────────────────┘ 
+
+
+2026/07/04 13:29:13 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/routers/repository.go:34 [33mSLOW SQL >= 200ms
+[0m[31;1m[429.731ms] [33m[rows:1][35m SELECT * FROM "router_network_profiles" WHERE "router_network_profiles"."router_id" = '8a9e3156-8ec5-4031-a073-d34c59d15a09'[0m
+
+2026/07/04 13:29:13 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/routers/repository.go:34 [33mSLOW SQL >= 200ms
+[0m[31;1m[426.554ms] [33m[rows:0][35m SELECT * FROM "router_port_assignments" WHERE "router_port_assignments"."router_id" = '8a9e3156-8ec5-4031-a073-d34c59d15a09'[0m
+
+2026/07/04 13:29:13 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/routers/repository.go:34 [33mSLOW SQL >= 200ms
+[0m[31;1m[426.911ms] [33m[rows:1][35m SELECT * FROM "router_setup_sessions" WHERE "router_setup_sessions"."router_id" = '8a9e3156-8ec5-4031-a073-d34c59d15a09'[0m
+
+2026/07/04 13:29:13 [32mF:/NobliFi/2026-06-29/he/noblifi/backend/internal/routers/repository.go:34 [33mSLOW SQL >= 200ms
+[0m[31;1m[1941.973ms] [33m[rows:1][35m SELECT * FROM "routers" WHERE claim_token = 'NOB-0085-0314' ORDER BY "routers"."id" LIMIT 1[0m
