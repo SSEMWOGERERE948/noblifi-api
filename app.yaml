@@ -1,0 +1,60 @@
+runtime: go122
+env: standard
+
+instance_class: F1
+
+automatic_scaling:
+  min_instances: 0
+  max_instances: 2
+
+env_variables:
+  PORT: "8080"
+  APP_ENV: "production"
+
+  # Replace this with the NEW Neon URL after rotating the exposed password.
+
+  DATABASE_URL: "postgresql://neondb_owner:npg_WFD5YkdowM1z@ep-green-pond-adlzg68u-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+  # Replace with a strong production secret.
+  JWT_SECRET: "REPLACE_WITH_STRONG_PRODUCTION_JWT_SECRET"
+
+  PUBLIC_API_BASE_URL: "https://noblifi.ew.r.appspot.com"
+  NOBLIFI_PROVISIONING_BASE_URL: "https://noblifi.ew.r.appspot.com/api/v1/provisioning"
+
+  # IMPORTANT:cd 
+  # Do NOT use 127.0.0.1 unless the RADIUS server is running on the same machine.
+  # MikroTik must reach this address from the internet/LAN.
+  # App Engine Standard is not suitable for UDP RADIUS 1812/1813.
+  # Use the public IP/domain of your actual RADIUS server.
+  NOBLIFI_RADIUS_SERVER: "REPLACE_WITH_RADIUS_SERVER_PUBLIC_IP_OR_DOMAIN"
+  NOBLIFI_RADIUS_SECRET: "REPLACE_WITH_STRONG_RADIUS_SECRET"
+
+  NOBLIFI_ROUTER_IDENTITY_PREFIX: "NobliFi"
+  NOBLIFI_ROUTER_API_USERNAME: "noblifi-api"
+  NOBLIFI_ROUTER_API_PASSWORD: "REPLACE_WITH_STRONG_ROUTER_API_PASSWORD"
+
+  NOBLIFI_HOTSPOT_BRIDGE: "br-hotspot"
+  NOBLIFI_STAFF_BRIDGE: "br-staff"
+  NOBLIFI_POS_BRIDGE: "br-pos"
+  NOBLIFI_CCTV_BRIDGE: "br-cctv"
+
+  NOBLIFI_HOTSPOT_SUBNET: "10.10.10.0/24"
+  NOBLIFI_HOTSPOT_GATEWAY: "10.10.10.1/24"
+  NOBLIFI_HOTSPOT_POOL: "10.10.10.10-10.10.10.254"
+
+  NOBLIFI_STAFF_SUBNET: "10.20.20.0/24"
+  NOBLIFI_STAFF_GATEWAY: "10.20.20.1/24"
+  NOBLIFI_STAFF_POOL: "10.20.20.10-10.20.20.254"
+
+  NOBLIFI_POS_SUBNET: "10.30.30.0/24"
+  NOBLIFI_POS_GATEWAY: "10.30.30.1/24"
+  NOBLIFI_POS_POOL: "10.30.30.10-10.30.30.254"
+
+  NOBLIFI_CCTV_SUBNET: "10.40.40.0/24"
+  NOBLIFI_CCTV_GATEWAY: "10.40.40.1/24"
+  NOBLIFI_CCTV_POOL: "10.40.40.10-10.40.40.254"
+
+  NOBLIFI_HOTSPOT_DNS_NAME: "login.noblifi.local"
+
+  NOBLIFI_DISABLE_WWW_SERVICE: "true"
+  NOBLIFI_ENABLE_API_SERVICE: "true"
+  NOBLIFI_ENABLE_API_SSL_SERVICE: "true"
