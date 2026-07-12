@@ -141,7 +141,6 @@ function renderSetupScript(router, account, opts = {}) {
   }
   const portalHost = opts.portalHost || process.env.BILLING_PORTAL_HOST || radiusAddress;
   const publicBase = (opts.publicBaseUrl || process.env.PUBLIC_BASE_URL || `http://${portalHost}:3000`).replace(/\/+$/, "");
-  const loginUrl = `${publicBase}/portal/${account.slug}/login.html`;
   const topology = parseTopology(router.topology_json);
   const assignments = topology.assignments || [];
   const wanInterface = assignments.find((item) => item.role === "WAN")?.interface || router.wan_interface;
@@ -182,9 +181,50 @@ function renderSetupScript(router, account, opts = {}) {
     `/ip hotspot add name=noblifi-hotspot interface=${hotspotBridge.name} profile=noblifi-profile address-pool=${hotspotBridge.poolName} disabled=no`,
     `/ip hotspot walled-garden ip add dst-host=${portalHost} action=accept comment="Allow NobliFi billing portal"`,
     `/ip hotspot walled-garden add dst-host=${portalHost} comment="Allow NobliFi billing portal host"`,
-    `# Upload a RouterOS login.html that redirects to: ${loginUrl}`,
-    `# Suggested login.html body: <script>location.href='${loginUrl}?mac=$(mac)&ip=$(ip)&link-login-only=$(link-login-only)&link-orig=$(link-orig)'</script>`
+    ...renderHotspotLoginInstallScript(router, account, { publicBaseUrl: publicBase })
   ].join("\n");
+}
+
+function renderHotspotLoginTemplate(router, account, opts = {}) {
+  const publicBase = (opts.publicBaseUrl || process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
+  if (!publicBase) throw new Error("PUBLIC_BASE_URL is required to render MikroTik login.html.");
+  const loginUrl = `${publicBase}/portal/${account.slug}/login.html`;
+  const redirectUrl = `${loginUrl}?mac=$(mac)&ip=$(ip)&link-login-only=$(link-login-only)&link-orig=$(link-orig)`;
+  return [
+    "<!doctype html>",
+    "<html>",
+    "<head>",
+    "  <meta charset=\"utf-8\">",
+    "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+    `  <title>${escapeHtml(account.name)} WiFi Login</title>`,
+    "</head>",
+    "<body>",
+    "  <script>",
+    `    location.replace(${JSON.stringify(redirectUrl)});`,
+    "  </script>",
+    `  <a href="${escapeHtml(redirectUrl)}">Continue to WiFi login</a>`,
+    "</body>",
+    "</html>"
+  ].join("\n");
+}
+
+function renderHotspotLoginInstallScript(router, account, opts = {}) {
+  const publicBase = (opts.publicBaseUrl || process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
+  if (!publicBase) throw new Error("PUBLIC_BASE_URL is required before generating the MikroTik login template fetch command.");
+  const fetchUrl = `${publicBase}/api/admin/routers/${router.id}/hotspot-login.html`;
+  const portalHost = hostFromUrl(publicBase);
+  const mode = publicBase.toLowerCase().startsWith("https://") ? "https" : "http";
+  return [
+    `# Install MikroTik HotSpot login template for ${account.name}`,
+    ...(portalHost ? [
+      `/ip hotspot walled-garden remove [find comment="Allow NobliFi billing portal host"]`,
+      `/ip hotspot walled-garden add dst-host=${portalHost} comment="Allow NobliFi billing portal host"`
+    ] : []),
+    `:if ([:len [/file find name="noblifi"]] = 0) do={ /file make-directory noblifi }`,
+    `/file remove [find name="noblifi/login.html"]`,
+    `/tool fetch url="${fetchUrl}" mode=${mode} dst-path="noblifi/login.html"`,
+    `/ip hotspot profile set [find name="noblifi-profile"] html-directory=noblifi`
+  ];
 }
 
 function renderDiscoveryScript(router, opts = {}) {
@@ -332,12 +372,30 @@ function parseTopology(raw) {
   }
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function hostFromUrl(value) {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return "";
+  }
+}
+
 module.exports = {
   mikrotikFetch,
   activeSessions,
   disconnectUser,
   routerSnapshot,
   renderSetupScript,
+  renderHotspotLoginTemplate,
+  renderHotspotLoginInstallScript,
   renderDiscoveryScript,
   routerById
 };

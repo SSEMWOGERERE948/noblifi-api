@@ -7,7 +7,8 @@
     "dev": "node src/server.js",
     "start": "node src/server.js",
     "radius": "node src/radius-server.js",
-    "check": "node --check src/server.js && node --check src/radius-server.js"
+    "radius:configure": "node src/configure-radius.js",
+    "check": "node --check src/server.js && node --check src/radius-server.js && node --check src/configure-radius.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
