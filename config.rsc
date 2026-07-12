@@ -61,13 +61,22 @@
 /interface bridge port add bridge=br-hotspot interface=ether4 comment="NobliFi HotSpot port"
 /interface list member remove [find list=LAN interface=ether4]
 /interface list member add list=LAN interface=ether4 comment="NobliFi LAN member"
-/interface bridge port add bridge=br-hotspot interface=ether5 comment="NobliFi HotSpot port"
-/interface list member remove [find list=LAN interface=ether5]
-/interface list member add list=LAN interface=ether5 comment="NobliFi LAN member"
 /ip address add address=10.10.10.1/24 interface=br-hotspot comment="NobliFi HotSpot gateway"
 /ip pool add name=pool-hotspot ranges=10.10.10.10-10.10.10.254 comment="NobliFi HotSpot pool"
 /ip dhcp-server add name=dhcp-hotspot interface=br-hotspot address-pool=pool-hotspot lease-time=1h disabled=no comment="NobliFi HotSpot DHCP"
 /ip dhcp-server network add address=10.10.10.0/24 gateway=10.10.10.1 dns-server=10.10.10.1 comment="NobliFi HotSpot DHCP network"
+
+# Staff management bridge, DHCP, and client addressing
+# Keep ether5 out of HotSpot so you have a recovery/management port.
+/interface bridge add name=br-staff protocol-mode=rstp comment="NobliFi Staff management bridge"
+/interface bridge port remove [find interface=ether5]
+/interface bridge port add bridge=br-staff interface=ether5 comment="NobliFi Staff management port"
+/interface list member remove [find list=LAN interface=ether5]
+/interface list member add list=LAN interface=ether5 comment="NobliFi management LAN member"
+/ip address add address=10.20.20.1/24 interface=br-staff comment="NobliFi Staff management gateway"
+/ip pool add name=pool-staff ranges=10.20.20.10-10.20.20.254 comment="NobliFi Staff management pool"
+/ip dhcp-server add name=dhcp-staff interface=br-staff address-pool=pool-staff lease-time=1h disabled=no comment="NobliFi Staff management DHCP"
+/ip dhcp-server network add address=10.20.20.0/24 gateway=10.20.20.1 dns-server=10.20.20.1 comment="NobliFi Staff management DHCP network"
 
 # DNS, NAT, RADIUS, and HotSpot service setup
 /ip dns set allow-remote-requests=yes

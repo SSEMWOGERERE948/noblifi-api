@@ -67,7 +67,7 @@ func Validate(assignments []Assignment) error {
 	if hotspotCount < 1 {
 		return errors.New("at least one HOTSPOT_LAN interface is required")
 	}
-	if len(assignments) >= 3 && staffCount < 1 {
+	if staffCount < 1 {
 		return errors.New("reserve at least one STAFF_LAN interface for management access")
 	}
 	return nil

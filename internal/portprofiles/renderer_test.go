@@ -7,7 +7,9 @@ import (
 
 func TestRenderRouterOSUsesIdempotentBridgePortAdds(t *testing.T) {
 	assignments := []Assignment{
+		{InterfaceName: "ether1", Role: "WAN"},
 		{InterfaceName: "ether2", Role: "HOTSPOT_LAN"},
+		{InterfaceName: "ether5", Role: "STAFF_LAN"},
 	}
 
 	script, err := RenderRouterOSWithOptions(assignments, RenderOptions{})
@@ -21,5 +23,24 @@ func TestRenderRouterOSUsesIdempotentBridgePortAdds(t *testing.T) {
 
 	if !strings.Contains(script, ":if ([:len [/interface bridge port find bridge=br-hotspot interface=ether2]] = 0) do={/interface bridge port add bridge=br-hotspot interface=ether2 comment=\"NobliFi HotSpot port\"}") {
 		t.Fatalf("expected idempotent bridge-port add guard for ether2, got script:\n%s", script)
+	}
+
+	if strings.Contains(script, "bridge=br-hotspot interface=ether5") {
+		t.Fatalf("management port ether5 must not be added to HotSpot bridge, got script:\n%s", script)
+	}
+}
+
+func TestRenderRouterOSRejectsNoManagementPort(t *testing.T) {
+	assignments := []Assignment{
+		{InterfaceName: "ether1", Role: "WAN"},
+		{InterfaceName: "ether2", Role: "HOTSPOT_LAN"},
+		{InterfaceName: "ether3", Role: "HOTSPOT_LAN"},
+		{InterfaceName: "ether4", Role: "HOTSPOT_LAN"},
+		{InterfaceName: "ether5", Role: "HOTSPOT_LAN"},
+	}
+
+	_, err := RenderRouterOSWithOptions(assignments, RenderOptions{})
+	if err == nil || !strings.Contains(err.Error(), "STAFF_LAN") {
+		t.Fatalf("expected missing management port error, got %v", err)
 	}
 }
