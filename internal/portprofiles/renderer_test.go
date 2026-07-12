@@ -12,7 +12,7 @@ func TestRenderRouterOSUsesIdempotentBridgePortAdds(t *testing.T) {
 		{InterfaceName: "ether5", Role: "STAFF_LAN"},
 	}
 
-	script, err := RenderRouterOSWithOptions(assignments, RenderOptions{})
+	script, err := RenderRouterOSWithOptions(assignments, RenderOptions{RadiusServer: "203.0.113.10"})
 	if err != nil {
 		t.Fatalf("RenderRouterOSWithOptions returned error: %v", err)
 	}
@@ -39,8 +39,21 @@ func TestRenderRouterOSRejectsNoManagementPort(t *testing.T) {
 		{InterfaceName: "ether5", Role: "HOTSPOT_LAN"},
 	}
 
-	_, err := RenderRouterOSWithOptions(assignments, RenderOptions{})
+	_, err := RenderRouterOSWithOptions(assignments, RenderOptions{RadiusServer: "203.0.113.10"})
 	if err == nil || !strings.Contains(err.Error(), "STAFF_LAN") {
 		t.Fatalf("expected missing management port error, got %v", err)
+	}
+}
+
+func TestRenderRouterOSRejectsPlaceholderRadiusServer(t *testing.T) {
+	assignments := []Assignment{
+		{InterfaceName: "ether1", Role: "WAN"},
+		{InterfaceName: "ether2", Role: "HOTSPOT_LAN"},
+		{InterfaceName: "ether5", Role: "STAFF_LAN"},
+	}
+
+	_, err := RenderRouterOSWithOptions(assignments, RenderOptions{RadiusServer: "127.0.0.1"})
+	if err == nil || !strings.Contains(err.Error(), "NOBLIFI_RADIUS_SERVER") {
+		t.Fatalf("expected RADIUS server config error, got %v", err)
 	}
 }
