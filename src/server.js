@@ -5,7 +5,7 @@ require("dotenv").config();
 
 const store = require("./db");
 const { renderPortal, getTemplate, saveTemplate } = require("./template");
-const { activeSessions, disconnectUser, renderSetupScript, renderDiscoveryScript, routerById, routerSnapshot } = require("./mikrotik");
+const { activeSessions, disconnectUser, renderSetupScript, renderDiscoveryScript, renderHotspotLoginTemplate, routerById, routerSnapshot } = require("./mikrotik");
 const pesapal = require("./pesapal");
 const { startRadiusServers } = require("./radius-server");
 
@@ -374,6 +374,17 @@ app.get("/api/admin/routers/:routerId/script", (req, res) => {
     if (!router) return res.status(404).json({ error: "Router not found." });
     const account = store.accountById(router.account_id);
     res.type("text/plain").send(renderSetupScript(router, account, req.query));
+  } catch (err) {
+    res.status(400).send(err.message);
+  }
+});
+
+app.get("/api/admin/routers/:routerId/hotspot-login.html", (req, res) => {
+  try {
+    const router = routerById(req.params.routerId);
+    if (!router) return res.status(404).send("Router not found.");
+    const account = store.accountById(router.account_id);
+    res.type("html").send(renderHotspotLoginTemplate(router, account, req.query));
   } catch (err) {
     res.status(400).send(err.message);
   }
