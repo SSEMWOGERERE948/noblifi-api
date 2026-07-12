@@ -124,8 +124,8 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	if err := Validate(assignments); err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(options.RadiusServer) == "" {
-		options.RadiusServer = "127.0.0.1"
+	if isPlaceholderRadiusServer(options.RadiusServer) {
+		return "", fmt.Errorf("NOBLIFI_RADIUS_SERVER must be set to the reachable IP address of the NobliFi/RADIUS server")
 	}
 	if isPlaceholderRadiusSecret(options.RadiusSecret) {
 		options.RadiusSecret = "noblifi"
@@ -305,6 +305,11 @@ func withDefaults(options RenderOptions) RenderOptions {
 func isPlaceholderRadiusSecret(value string) bool {
 	secret := strings.TrimSpace(value)
 	return secret == "" || secret == "CHANGE_ME_RADIUS_SECRET"
+}
+
+func isPlaceholderRadiusServer(value string) bool {
+	server := strings.TrimSpace(value)
+	return server == "" || server == "127.0.0.1" || server == "localhost" || server == "CHANGE_ME_RADIUS_SERVER_IP"
 }
 func routerOSDisabled(disabled bool) string {
 	if disabled {
