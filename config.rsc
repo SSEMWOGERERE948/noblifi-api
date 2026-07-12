@@ -1,6 +1,11 @@
 # NobliFi generated RouterOS configuration
 # Import this file with: /import file-name=noblifi-config.rsc
 
+:local radiusServer "CHANGE_ME_RADIUS_SERVER_IP"
+:local radiusSecret "CHANGE_ME_RADIUS_SECRET"
+:if ($radiusServer = "CHANGE_ME_RADIUS_SERVER_IP") do={ :error "Set radiusServer at the top of noblifi-config.rsc to your NobliFi/RADIUS server IP before importing." }
+:if ($radiusSecret = "CHANGE_ME_RADIUS_SECRET") do={ :error "Set radiusSecret at the top of noblifi-config.rsc before importing." }
+
 # Clean previous NobliFi-owned service setup
 /ip hotspot remove [find name="noblifi-hotspot"]
 /ip hotspot profile remove [find name="noblifi-hotspot-profile"]
@@ -52,13 +57,16 @@
 
 # HotSpot bridge, DHCP, and client addressing
 /interface bridge add name=br-hotspot protocol-mode=rstp comment="NobliFi HotSpot bridge"
-/interface bridge port add bridge=br-hotspot interface=ether2 comment="NobliFi HotSpot port"
+/interface bridge port remove [find interface=ether2]
+:if ([:len [/interface bridge port find bridge=br-hotspot interface=ether2]] = 0) do={/interface bridge port add bridge=br-hotspot interface=ether2 comment="NobliFi HotSpot port"}
 /interface list member remove [find list=LAN interface=ether2]
 /interface list member add list=LAN interface=ether2 comment="NobliFi LAN member"
-/interface bridge port add bridge=br-hotspot interface=ether3 comment="NobliFi HotSpot port"
+/interface bridge port remove [find interface=ether3]
+:if ([:len [/interface bridge port find bridge=br-hotspot interface=ether3]] = 0) do={/interface bridge port add bridge=br-hotspot interface=ether3 comment="NobliFi HotSpot port"}
 /interface list member remove [find list=LAN interface=ether3]
 /interface list member add list=LAN interface=ether3 comment="NobliFi LAN member"
-/interface bridge port add bridge=br-hotspot interface=ether4 comment="NobliFi HotSpot port"
+/interface bridge port remove [find interface=ether4]
+:if ([:len [/interface bridge port find bridge=br-hotspot interface=ether4]] = 0) do={/interface bridge port add bridge=br-hotspot interface=ether4 comment="NobliFi HotSpot port"}
 /interface list member remove [find list=LAN interface=ether4]
 /interface list member add list=LAN interface=ether4 comment="NobliFi LAN member"
 /ip address add address=10.10.10.1/24 interface=br-hotspot comment="NobliFi HotSpot gateway"
@@ -70,7 +78,7 @@
 # Keep ether5 out of HotSpot so you have a recovery/management port.
 /interface bridge add name=br-staff protocol-mode=rstp comment="NobliFi Staff management bridge"
 /interface bridge port remove [find interface=ether5]
-/interface bridge port add bridge=br-staff interface=ether5 comment="NobliFi Staff management port"
+:if ([:len [/interface bridge port find bridge=br-staff interface=ether5]] = 0) do={/interface bridge port add bridge=br-staff interface=ether5 comment="NobliFi Staff management port"}
 /interface list member remove [find list=LAN interface=ether5]
 /interface list member add list=LAN interface=ether5 comment="NobliFi management LAN member"
 /ip address add address=10.20.20.1/24 interface=br-staff comment="NobliFi Staff management gateway"
@@ -81,7 +89,7 @@
 # DNS, NAT, RADIUS, and HotSpot service setup
 /ip dns set allow-remote-requests=yes
 /ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="NobliFi client NAT"
-/radius add service=hotspot address=127.0.0.1 secret="CHANGE_ME_RADIUS_SECRET" authentication-port=1812 accounting-port=1813 timeout=3s comment="NobliFi RADIUS"
+/radius add service=hotspot address=$radiusServer secret=$radiusSecret authentication-port=1812 accounting-port=1813 timeout=3s comment="NobliFi RADIUS"
 /radius incoming set accept=yes
 /ip hotspot user profile add name=noblifi-voucher-profile shared-users=1 keepalive-timeout=2m status-autorefresh=1m transparent-proxy=no comment="NobliFi voucher profile"
 /ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=10.10.10.1 dns-name=login.noblifi.local use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap,http-pap comment="NobliFi HotSpot profile"
