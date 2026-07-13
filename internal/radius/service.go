@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/noblifi/noblifi/backend/internal/placeholders"
 	"github.com/noblifi/noblifi/backend/internal/plans"
 	"github.com/noblifi/noblifi/backend/internal/vouchers"
 	"gorm.io/gorm"
@@ -37,7 +38,7 @@ func (s *Service) RegisterNAS(nasName, shortName, secret, description string) er
 		shortName = nasName
 	}
 	secret = strings.TrimSpace(secret)
-	if isPlaceholderValue(secret) {
+	if placeholders.Is(secret) {
 		secret = "noblifi"
 	}
 
@@ -62,13 +63,6 @@ func (s *Service) RegisterNAS(nasName, shortName, secret, description string) er
 	nas.Secret = secret
 	nas.Description = description
 	return s.db.Save(&nas).Error
-}
-
-func isPlaceholderValue(value string) bool {
-	normalized := strings.ToUpper(strings.TrimSpace(value))
-	return normalized == "" ||
-		strings.HasPrefix(normalized, "CHANGE_ME") ||
-		strings.HasPrefix(normalized, "REPLACE_WITH")
 }
 
 func (s *Service) AuthorizeVoucher(code string) (bool, error) {
