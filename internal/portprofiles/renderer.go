@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/noblifi/noblifi/backend/internal/placeholders"
 )
 
 type Summary struct {
@@ -283,23 +285,16 @@ func withDefaults(options RenderOptions) RenderOptions {
 }
 
 func isPlaceholderRadiusSecret(value string) bool {
-	return isPlaceholderValue(value)
+	return placeholders.Is(value)
 }
 
 func isPlaceholderRadiusServer(value string) bool {
 	server := strings.TrimSpace(value)
-	return server == "" || server == "127.0.0.1" || strings.EqualFold(server, "localhost") || isPlaceholderValue(server)
+	return server == "" || server == "127.0.0.1" || strings.EqualFold(server, "localhost") || placeholders.Is(server)
 }
 
 func isPlaceholderAPIPassword(value string) bool {
-	return isPlaceholderValue(value)
-}
-
-func isPlaceholderValue(value string) bool {
-	normalized := strings.ToUpper(strings.TrimSpace(value))
-	return normalized == "" ||
-		strings.HasPrefix(normalized, "CHANGE_ME") ||
-		strings.HasPrefix(normalized, "REPLACE_WITH")
+	return placeholders.Is(value)
 }
 func routerOSDisabled(disabled bool) string {
 	if disabled {
