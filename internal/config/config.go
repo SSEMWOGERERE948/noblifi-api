@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"os"
 	"strings"
+
+	"github.com/noblifi/noblifi/backend/internal/placeholders"
 )
 
 type Config struct {
@@ -83,17 +85,10 @@ func Load() Config {
 }
 
 func normalizeRadiusSecret(value string) string {
-	if isPlaceholderValue(value) {
+	if placeholders.Is(value) {
 		return "noblifi"
 	}
 	return strings.TrimSpace(value)
-}
-
-func isPlaceholderValue(value string) bool {
-	normalized := strings.ToUpper(strings.TrimSpace(value))
-	return normalized == "" ||
-		strings.HasPrefix(normalized, "CHANGE_ME") ||
-		strings.HasPrefix(normalized, "REPLACE_WITH")
 }
 func getEnv(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {

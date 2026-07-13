@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/noblifi/noblifi/backend/internal/config"
+	"github.com/noblifi/noblifi/backend/internal/placeholders"
 	"github.com/noblifi/noblifi/backend/internal/portprofiles"
 )
 
@@ -442,26 +443,19 @@ func (s *Service) renderOptionsForRouter(routerID uuid.UUID) (portprofiles.Rende
 }
 
 func (s *Service) normalizeNetworkProfile(profile *RouterNetworkProfile) {
-	if isPlaceholderValue(profile.RadiusServer) {
-		profile.RadiusServer = s.cfg.RadiusServer
-	}
-	if isPlaceholderRadiusSecret(profile.RadiusSecret) {
-		profile.RadiusSecret = s.cfg.RadiusSecret
-	}
-	if isPlaceholderValue(profile.APIPassword) {
-		profile.APIPassword = s.cfg.RouterAPIPassword
-	}
+	NormalizeNetworkProfile(profile, s.cfg)
 }
 
-func isPlaceholderRadiusSecret(value string) bool {
-	return isPlaceholderValue(value)
-}
-
-func isPlaceholderValue(value string) bool {
-	normalized := strings.ToUpper(strings.TrimSpace(value))
-	return normalized == "" ||
-		strings.HasPrefix(normalized, "CHANGE_ME") ||
-		strings.HasPrefix(normalized, "REPLACE_WITH")
+func NormalizeNetworkProfile(profile *RouterNetworkProfile, cfg config.Config) {
+	if placeholders.Is(profile.RadiusServer) {
+		profile.RadiusServer = cfg.RadiusServer
+	}
+	if placeholders.Is(profile.RadiusSecret) {
+		profile.RadiusSecret = cfg.RadiusSecret
+	}
+	if placeholders.Is(profile.APIPassword) {
+		profile.APIPassword = cfg.RouterAPIPassword
+	}
 }
 func (s *Service) defaultNetworkProfile(routerID uuid.UUID, routerName string) RouterNetworkProfile {
 	return RouterNetworkProfile{
