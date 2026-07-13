@@ -24,7 +24,7 @@ env_variables:
   # MikroTik must reach this address from the internet/LAN.
   # App Engine Standard is not suitable for UDP RADIUS 1812/1813.
   # Use the public IP/domain of your actual RADIUS server.
-  NOBLIFI_RADIUS_SERVER: "10.10.10.254"
+  NOBLIFI_RADIUS_SERVER: "154.65.105.14"
   NOBLIFI_RADIUS_SECRET: "noblifi"
 
   NOBLIFI_ROUTER_IDENTITY_PREFIX: "NobliFi"

@@ -130,7 +130,7 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	}
 	options = withDefaults(options)
 	if isPlaceholderRadiusServer(options.RadiusServer) {
-		return "", fmt.Errorf("NOBLIFI_RADIUS_SERVER must be set to the reachable IP address of the NobliFi/RADIUS server")
+		return "", fmt.Errorf("NOBLIFI_RADIUS_SERVER is %q, but MikroTik routers cannot use localhost, empty values, or setup placeholders for RADIUS. Set it to the public IP or DNS name of the VM/server running NobliFi RADIUS, for example 154.65.105.14, and make sure UDP ports 1812 and 1813 are reachable from the router", options.RadiusServer)
 	}
 	if isPlaceholderRadiusSecret(options.RadiusSecret) {
 		options.RadiusSecret = "noblifi"
