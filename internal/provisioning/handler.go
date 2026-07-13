@@ -14,6 +14,7 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Post("/provisioning/check-in", h.checkIn)
 	router.Get("/provisioning/check-in", h.checkIn)
 	router.Get("/provisioning/bootstrap/:token", h.bootstrap)
+	router.Get("/provisioning/hotspot-login/:token", h.hotspotLogin)
 	router.Get("/provisioning/interface", h.interfaceCheckIn)
 	router.Post("/provisioning/interface", h.interfaceCheckIn)
 	router.Get("/provisioning/config.rsc", h.config)
@@ -30,6 +31,15 @@ func (h *Handler) bootstrap(c *fiber.Ctx) error {
 	c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
 	c.Set(fiber.HeaderContentDisposition, `attachment; filename="noblifi-bootstrap.rsc"`)
 	return c.SendString(script)
+}
+
+func (h *Handler) hotspotLogin(c *fiber.Ctx) error {
+	html, err := h.service.HotspotLoginPage(c.Params("token"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, err.Error())
+	}
+	c.Set(fiber.HeaderContentType, fiber.MIMETextHTMLCharsetUTF8)
+	return c.SendString(html)
 }
 
 func (h *Handler) checkIn(c *fiber.Ctx) error {
