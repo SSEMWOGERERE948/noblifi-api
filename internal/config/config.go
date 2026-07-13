@@ -83,11 +83,17 @@ func Load() Config {
 }
 
 func normalizeRadiusSecret(value string) string {
-	secret := strings.TrimSpace(value)
-	if secret == "" || secret == "CHANGE_ME_RADIUS_SECRET" {
+	if isPlaceholderValue(value) {
 		return "noblifi"
 	}
-	return secret
+	return strings.TrimSpace(value)
+}
+
+func isPlaceholderValue(value string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(value))
+	return normalized == "" ||
+		strings.HasPrefix(normalized, "CHANGE_ME") ||
+		strings.HasPrefix(normalized, "REPLACE_WITH")
 }
 func getEnv(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {

@@ -37,7 +37,7 @@ func (s *Service) RegisterNAS(nasName, shortName, secret, description string) er
 		shortName = nasName
 	}
 	secret = strings.TrimSpace(secret)
-	if secret == "" || secret == "CHANGE_ME_RADIUS_SECRET" {
+	if isPlaceholderValue(secret) {
 		secret = "noblifi"
 	}
 
@@ -63,6 +63,14 @@ func (s *Service) RegisterNAS(nasName, shortName, secret, description string) er
 	nas.Description = description
 	return s.db.Save(&nas).Error
 }
+
+func isPlaceholderValue(value string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(value))
+	return normalized == "" ||
+		strings.HasPrefix(normalized, "CHANGE_ME") ||
+		strings.HasPrefix(normalized, "REPLACE_WITH")
+}
+
 func (s *Service) AuthorizeVoucher(code string) (bool, error) {
 	var voucher vouchers.Voucher
 	if err := s.db.First(&voucher, "code = ?", strings.TrimSpace(code)).Error; err != nil {

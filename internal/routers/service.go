@@ -445,8 +445,14 @@ func (s *Service) normalizeNetworkProfile(profile *RouterNetworkProfile) {
 }
 
 func isPlaceholderRadiusSecret(value string) bool {
-	secret := strings.TrimSpace(value)
-	return secret == "" || secret == "CHANGE_ME_RADIUS_SECRET"
+	return isPlaceholderValue(value)
+}
+
+func isPlaceholderValue(value string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(value))
+	return normalized == "" ||
+		strings.HasPrefix(normalized, "CHANGE_ME") ||
+		strings.HasPrefix(normalized, "REPLACE_WITH")
 }
 func (s *Service) defaultNetworkProfile(routerID uuid.UUID, routerName string) RouterNetworkProfile {
 	return RouterNetworkProfile{

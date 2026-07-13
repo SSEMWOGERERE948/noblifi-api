@@ -126,13 +126,16 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	if err := Validate(assignments); err != nil {
 		return "", err
 	}
+	options = withDefaults(options)
 	if isPlaceholderRadiusServer(options.RadiusServer) {
 		return "", fmt.Errorf("NOBLIFI_RADIUS_SERVER must be set to the reachable IP address of the NobliFi/RADIUS server")
 	}
 	if isPlaceholderRadiusSecret(options.RadiusSecret) {
 		options.RadiusSecret = "noblifi"
 	}
-	options = withDefaults(options)
+	if isPlaceholderAPIPassword(options.APIPassword) {
+		return "", fmt.Errorf("NOBLIFI_ROUTER_API_PASSWORD must be set to a real router API password before provisioning")
+	}
 
 	summary := BuildSummary(assignments)
 	wan := summary.WAN[0]
@@ -142,14 +145,14 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString("# NobliFi generated RouterOS configuration\n")
 	builder.WriteString("# Import this file with: /import file-name=noblifi-config.rsc\n\n")
 	builder.WriteString("# Clean previous NobliFi-owned service setup\n")
-	builder.WriteString(fmt.Sprintf("/ip hotspot remove [find name=\"noblifi-hotspot\"]\n"))
-	builder.WriteString(fmt.Sprintf("/ip hotspot profile remove [find name=\"noblifi-hotspot-profile\"]\n"))
-	builder.WriteString(fmt.Sprintf("/ip hotspot user profile remove [find name=\"noblifi-voucher-profile\"]\n"))
-	builder.WriteString("/ip hotspot walled-garden remove [find comment=\"NobliFi captive portal\"]\n")
-	builder.WriteString("/file remove [find name=\"noblifi/login.html\"]\n")
-	builder.WriteString("/radius remove [find comment=\"NobliFi RADIUS\"]\n")
-	builder.WriteString("/ip firewall nat remove [find comment=\"NobliFi client NAT\"]\n")
-	builder.WriteString(fmt.Sprintf("/ip dhcp-client remove [find interface=%s]\n", wan))
+	writeSafe(&builder, "/ip hotspot remove [find name=\"noblifi-hotspot\"]", "cleanup hotspot server")
+	writeSafe(&builder, "/ip hotspot profile remove [find name=\"noblifi-hotspot-profile\"]", "cleanup hotspot profile")
+	writeSafe(&builder, "/ip hotspot user profile remove [find name=\"noblifi-voucher-profile\"]", "cleanup hotspot user profile")
+	writeSafe(&builder, "/ip hotspot walled-garden remove [find comment=\"NobliFi captive portal\"]", "cleanup captive portal walled garden")
+	writeSafe(&builder, "/file remove [find name=\"noblifi/login.html\"]", "cleanup hotspot login file")
+	writeSafe(&builder, "/radius remove [find comment=\"NobliFi RADIUS\"]", "cleanup radius client")
+	writeSafe(&builder, "/ip firewall nat remove [find comment=\"NobliFi client NAT\"]", "cleanup nat")
+	writeSafe(&builder, fmt.Sprintf("/ip dhcp-client remove [find interface=%s]", wan), "cleanup wan dhcp client")
 	writeCleanup(&builder, options.HotspotBridge, "dhcp-hotspot", "pool-hotspot", options.HotspotSubnet)
 	writeCleanup(&builder, options.StaffBridge, "dhcp-staff", "pool-staff", options.StaffSubnet)
 	writeCleanup(&builder, options.POSBridge, "dhcp-pos", "pool-pos", options.POSSubnet)
@@ -157,69 +160,32 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString("\n")
 
 	builder.WriteString("# Management and router services\n")
-	builder.WriteString(fmt.Sprintf("/system identity set name=\"%s\"\n", escape(options.RouterIdentity)))
-	builder.WriteString(fmt.Sprintf("/user remove [find name=%s comment=\"NobliFi API management user\"]\n", options.APIUsername))
-	builder.WriteString(fmt.Sprintf("/user add name=%s group=full password=\"%s\" comment=\"NobliFi API management user\"\n", options.APIUsername, escape(options.APIPassword)))
-	builder.WriteString("/ip service set telnet disabled=yes\n")
-	builder.WriteString("/ip service set ftp disabled=yes\n")
+	writeSafe(&builder, fmt.Sprintf("/system identity set name=\"%s\"", escape(options.RouterIdentity)), "set identity")
+	writeSafe(&builder, fmt.Sprintf("/user remove [find name=%s comment=\"NobliFi API management user\"]", options.APIUsername), "cleanup api user")
+	writeSafe(&builder, fmt.Sprintf("/user add name=%s group=full password=\"%s\" comment=\"NobliFi API management user\"", options.APIUsername, escape(options.APIPassword)), "add api user")
+	writeSafe(&builder, "/ip service set telnet disabled=yes", "disable telnet")
+	writeSafe(&builder, "/ip service set ftp disabled=yes", "disable ftp")
 	if options.DisableWWWService {
-		builder.WriteString("/ip service set www disabled=yes\n")
+		writeSafe(&builder, "/ip service set www disabled=yes", "disable www")
 	}
-	builder.WriteString(fmt.Sprintf("/ip service set api disabled=%s\n", routerOSDisabled(!options.EnableAPIService)))
-	builder.WriteString(fmt.Sprintf("/ip service set api-ssl disabled=%s\n\n", routerOSDisabled(!options.EnableAPISSLService)))
+	writeSafe(&builder, fmt.Sprintf("/ip service set api disabled=%s", routerOSDisabled(!options.EnableAPIService)), "set api service")
+	writeSafe(&builder, fmt.Sprintf("/ip service set api-ssl disabled=%s", routerOSDisabled(!options.EnableAPISSLService)), "set api-ssl service")
+	builder.WriteString("\n")
 
 	builder.WriteString("# Interface lists and WAN internet\n")
-	builder.WriteString(":if ([:len [/interface list find name=WAN]] = 0) do={/interface list add name=WAN comment=\"NobliFi WAN list\"}\n")
-	builder.WriteString(":if ([:len [/interface list find name=LAN]] = 0) do={/interface list add name=LAN comment=\"NobliFi LAN list\"}\n")
-	builder.WriteString(fmt.Sprintf("/interface list member remove [find list=WAN interface=%s]\n", wan))
-	builder.WriteString(fmt.Sprintf("/interface list member add list=WAN interface=%s comment=\"NobliFi WAN member\"\n", wan))
-	builder.WriteString(fmt.Sprintf("/ip dhcp-client add interface=%s disabled=no comment=\"NobliFi WAN DHCP client\"\n\n", wan))
+	writeSafe(&builder, ":if ([:len [/interface list find name=WAN]] = 0) do={/interface list add name=WAN comment=\"NobliFi WAN list\"}", "ensure WAN list")
+	writeSafe(&builder, ":if ([:len [/interface list find name=LAN]] = 0) do={/interface list add name=LAN comment=\"NobliFi LAN list\"}", "ensure LAN list")
+	writeSafe(&builder, fmt.Sprintf("/interface list member remove [find list=WAN interface=%s]", wan), "cleanup WAN list member")
+	writeSafe(&builder, fmt.Sprintf("/interface list member add list=WAN interface=%s comment=\"NobliFi WAN member\"", wan), "add WAN list member")
+	writeSafe(&builder, fmt.Sprintf("/ip dhcp-client add interface=%s disabled=no comment=\"NobliFi WAN DHCP client\"", wan), "add WAN dhcp client")
+	builder.WriteString("\n")
+
+	writeHotspotNetwork(&builder, options, summary.HotspotLAN, hotspotGateway)
+	writeHotspotServices(&builder, options, hotspotGateway)
 
 	writeBridge(&builder, options.StaffBridge, summary.StaffLAN, options.StaffGateway, "pool-staff", options.StaffPool, options.StaffSubnet)
-
-	builder.WriteString("# HotSpot bridge, DHCP, and client addressing\n")
-	builder.WriteString(fmt.Sprintf("/interface bridge add name=%s protocol-mode=rstp comment=\"NobliFi HotSpot bridge\"\n", options.HotspotBridge))
-	for _, iface := range summary.HotspotLAN {
-		builder.WriteString(fmt.Sprintf("/interface bridge port remove [find interface=%s]\n", iface))
-		builder.WriteString(fmt.Sprintf(":if ([:len [/interface bridge port find bridge=%s interface=%s]] = 0) do={/interface bridge port add bridge=%s interface=%s comment=\"NobliFi HotSpot port\"}\n", options.HotspotBridge, iface, options.HotspotBridge, iface))
-		builder.WriteString(fmt.Sprintf("/interface list member remove [find list=LAN interface=%s]\n", iface))
-		builder.WriteString(fmt.Sprintf("/interface list member add list=LAN interface=%s comment=\"NobliFi LAN member\"\n", iface))
-	}
-	builder.WriteString(fmt.Sprintf("/ip address add address=%s interface=%s comment=\"NobliFi HotSpot gateway\"\n", options.HotspotGateway, options.HotspotBridge))
-	builder.WriteString(fmt.Sprintf("/ip pool add name=pool-hotspot ranges=%s comment=\"NobliFi HotSpot pool\"\n", options.HotspotPool))
-	builder.WriteString(fmt.Sprintf("/ip dhcp-server add name=dhcp-hotspot interface=%s address-pool=pool-hotspot lease-time=1h disabled=no\n", options.HotspotBridge))
-	builder.WriteString(fmt.Sprintf("/ip dhcp-server network add address=%s gateway=%s dns-server=%s\n\n", options.HotspotSubnet, hotspotGateway, hotspotGateway))
-
 	writeBridge(&builder, options.POSBridge, summary.POSLAN, options.POSGateway, "pool-pos", options.POSPool, options.POSSubnet)
 	writeBridge(&builder, options.CCTVBridge, summary.CCTVLAN, options.CCTVGateway, "pool-cctv", options.CCTVPool, options.CCTVSubnet)
-
-	builder.WriteString("# DNS, NAT, RADIUS, and HotSpot service setup\n")
-	builder.WriteString("/ip dns set allow-remote-requests=yes\n")
-	builder.WriteString("/ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment=\"NobliFi client NAT\"\n")
-	builder.WriteString(fmt.Sprintf("/radius add service=hotspot address=%s secret=\"%s\" authentication-port=1812 accounting-port=1813 timeout=3s comment=\"NobliFi RADIUS\"\n", options.RadiusServer, escape(options.RadiusSecret)))
-	builder.WriteString("/radius incoming set accept=yes\n")
-	builder.WriteString(":put \"NobliFi RADIUS client configured\"\n")
-	builder.WriteString("/ip hotspot user profile add name=noblifi-voucher-profile\n")
-	builder.WriteString("/ip hotspot user profile set noblifi-voucher-profile shared-users=1\n")
-	builder.WriteString("/ip hotspot user profile set noblifi-voucher-profile keepalive-timeout=2m\n")
-	builder.WriteString("/ip hotspot user profile set noblifi-voucher-profile status-autorefresh=1m\n")
-	builder.WriteString(fmt.Sprintf("/ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=%s dns-name=%s use-radius=yes login-by=http-chap,http-pap html-directory=noblifi\n", hotspotGateway, options.HotspotDNSName))
-	builder.WriteString("/ip hotspot profile set noblifi-hotspot-profile radius-accounting=yes\n")
-	builder.WriteString("/ip hotspot profile set noblifi-hotspot-profile radius-interim-update=5m\n")
-	for _, host := range options.WalledGardenHosts {
-		builder.WriteString(fmt.Sprintf("/ip hotspot walled-garden add dst-host=%s comment=\"NobliFi captive portal\"\n", host))
-	}
-	if strings.TrimSpace(options.LoginPageURL) != "" {
-		mode := "http"
-		if strings.HasPrefix(strings.ToLower(options.LoginPageURL), "https://") {
-			mode = "https"
-		}
-		builder.WriteString(":if ([:len [/file find name=\"noblifi\"]] = 0) do={ /file make-directory noblifi }\n")
-		builder.WriteString(fmt.Sprintf("/tool fetch url=\"%s\" mode=%s dst-path=\"noblifi/login.html\"\n", escape(options.LoginPageURL), mode))
-		builder.WriteString("/ip hotspot profile set noblifi-hotspot-profile html-directory=noblifi\n")
-		builder.WriteString(":put \"NobliFi HotSpot login.html installed\"\n")
-	}
-	builder.WriteString(fmt.Sprintf("/ip hotspot add name=noblifi-hotspot interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no\n", options.HotspotBridge))
 	return builder.String(), nil
 }
 func withDefaults(options RenderOptions) RenderOptions {
@@ -317,13 +283,23 @@ func withDefaults(options RenderOptions) RenderOptions {
 }
 
 func isPlaceholderRadiusSecret(value string) bool {
-	secret := strings.TrimSpace(value)
-	return secret == "" || secret == "CHANGE_ME_RADIUS_SECRET"
+	return isPlaceholderValue(value)
 }
 
 func isPlaceholderRadiusServer(value string) bool {
 	server := strings.TrimSpace(value)
-	return server == "" || server == "127.0.0.1" || server == "localhost" || server == "CHANGE_ME_RADIUS_SERVER_IP"
+	return server == "" || server == "127.0.0.1" || strings.EqualFold(server, "localhost") || isPlaceholderValue(server)
+}
+
+func isPlaceholderAPIPassword(value string) bool {
+	return isPlaceholderValue(value)
+}
+
+func isPlaceholderValue(value string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(value))
+	return normalized == "" ||
+		strings.HasPrefix(normalized, "CHANGE_ME") ||
+		strings.HasPrefix(normalized, "REPLACE_WITH")
 }
 func routerOSDisabled(disabled bool) string {
 	if disabled {
@@ -336,16 +312,67 @@ func escape(value string) string {
 	return strings.ReplaceAll(value, `"`, `\"`)
 }
 
+func writeSafe(builder *strings.Builder, command string, label string) {
+	builder.WriteString(fmt.Sprintf(":do { %s } on-error={ :put \"NobliFi skipped %s\" }\n", command, escape(label)))
+}
+
 func writeCleanup(builder *strings.Builder, bridge string, dhcpServer string, pool string, subnet string) {
 	if bridge == "" {
 		return
 	}
-	builder.WriteString(fmt.Sprintf("/ip dhcp-server remove [find name=\"%s\"]\n", dhcpServer))
-	builder.WriteString(fmt.Sprintf("/ip dhcp-server network remove [find address=%s]\n", subnet))
-	builder.WriteString(fmt.Sprintf("/ip address remove [find interface=%s]\n", bridge))
-	builder.WriteString(fmt.Sprintf("/ip pool remove [find name=\"%s\"]\n", pool))
-	builder.WriteString(fmt.Sprintf("/interface bridge port remove [find bridge=%s]\n", bridge))
-	builder.WriteString(fmt.Sprintf("/interface bridge remove [find name=%s]\n", bridge))
+	writeSafe(builder, fmt.Sprintf("/ip dhcp-server remove [find name=\"%s\"]", dhcpServer), "cleanup dhcp server")
+	writeSafe(builder, fmt.Sprintf("/ip dhcp-server network remove [find address=%s]", subnet), "cleanup dhcp network")
+	writeSafe(builder, fmt.Sprintf("/ip address remove [find interface=%s]", bridge), "cleanup bridge address")
+	writeSafe(builder, fmt.Sprintf("/ip pool remove [find name=\"%s\"]", pool), "cleanup address pool")
+	writeSafe(builder, fmt.Sprintf("/interface bridge port remove [find bridge=%s]", bridge), "cleanup bridge ports")
+	writeSafe(builder, fmt.Sprintf("/interface bridge remove [find name=%s]", bridge), "cleanup bridge")
+}
+
+func writeHotspotNetwork(builder *strings.Builder, options RenderOptions, interfaces []string, hotspotGateway string) {
+	builder.WriteString("# HotSpot bridge, DHCP, and client addressing\n")
+	writeSafe(builder, fmt.Sprintf(":if ([:len [/interface bridge find name=%s]] = 0) do={ /interface bridge add name=%s protocol-mode=rstp comment=\"NobliFi HotSpot bridge\" }", options.HotspotBridge, options.HotspotBridge), "ensure hotspot bridge")
+	for _, iface := range interfaces {
+		writeSafe(builder, fmt.Sprintf("/interface bridge port remove [find interface=%s]", iface), "cleanup hotspot bridge port")
+		writeSafe(builder, fmt.Sprintf(":if ([:len [/interface bridge port find bridge=%s interface=%s]] = 0) do={/interface bridge port add bridge=%s interface=%s comment=\"NobliFi HotSpot port\"}", options.HotspotBridge, iface, options.HotspotBridge, iface), "add hotspot bridge port")
+		writeSafe(builder, fmt.Sprintf("/interface list member remove [find list=LAN interface=%s]", iface), "cleanup LAN list member")
+		writeSafe(builder, fmt.Sprintf("/interface list member add list=LAN interface=%s comment=\"NobliFi LAN member\"", iface), "add LAN list member")
+	}
+	writeSafe(builder, fmt.Sprintf("/ip address add address=%s interface=%s comment=\"NobliFi HotSpot gateway\"", options.HotspotGateway, options.HotspotBridge), "add hotspot gateway")
+	writeSafe(builder, fmt.Sprintf("/ip pool add name=pool-hotspot ranges=%s comment=\"NobliFi HotSpot pool\"", options.HotspotPool), "add hotspot pool")
+	writeSafe(builder, fmt.Sprintf("/ip dhcp-server add name=dhcp-hotspot interface=%s address-pool=pool-hotspot lease-time=1h disabled=no", options.HotspotBridge), "add hotspot dhcp")
+	writeSafe(builder, fmt.Sprintf("/ip dhcp-server network add address=%s gateway=%s dns-server=%s", options.HotspotSubnet, hotspotGateway, hotspotGateway), "add hotspot dhcp network")
+	builder.WriteString("\n")
+}
+
+func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotspotGateway string) {
+	builder.WriteString("# DNS, NAT, RADIUS, and HotSpot service setup\n")
+	writeSafe(builder, "/ip dns set allow-remote-requests=yes", "enable dns forwarding")
+	writeSafe(builder, "/ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment=\"NobliFi client NAT\"", "add nat")
+	writeSafe(builder, fmt.Sprintf("/radius add service=hotspot address=%s secret=\"%s\" authentication-port=1812 accounting-port=1813 timeout=3s comment=\"NobliFi RADIUS\"", options.RadiusServer, escape(options.RadiusSecret)), "add radius client")
+	writeSafe(builder, "/radius incoming set accept=yes", "enable radius incoming")
+	builder.WriteString(":put \"NobliFi RADIUS client configured\"\n")
+	writeSafe(builder, ":if ([:len [/file find name=\"noblifi\"]] = 0) do={ /file make-directory noblifi }", "ensure hotspot html directory")
+	writeSafe(builder, "/ip hotspot user profile add name=noblifi-voucher-profile", "add hotspot user profile")
+	writeSafe(builder, "/ip hotspot user profile set noblifi-voucher-profile shared-users=1", "set shared users")
+	writeSafe(builder, "/ip hotspot user profile set noblifi-voucher-profile keepalive-timeout=2m", "set keepalive")
+	writeSafe(builder, "/ip hotspot user profile set noblifi-voucher-profile status-autorefresh=1m", "set status autorefresh")
+	writeSafe(builder, fmt.Sprintf("/ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=%s dns-name=%s use-radius=yes login-by=http-chap,http-pap html-directory=noblifi", hotspotGateway, options.HotspotDNSName), "add hotspot profile")
+	writeSafe(builder, "/ip hotspot profile set noblifi-hotspot-profile radius-accounting=yes", "enable radius accounting")
+	writeSafe(builder, "/ip hotspot profile set noblifi-hotspot-profile radius-interim-update=5m", "set radius interim update")
+	for _, host := range options.WalledGardenHosts {
+		writeSafe(builder, fmt.Sprintf("/ip hotspot walled-garden add dst-host=%s comment=\"NobliFi captive portal\"", host), "add captive portal walled garden")
+	}
+	if strings.TrimSpace(options.LoginPageURL) != "" {
+		mode := "http"
+		if strings.HasPrefix(strings.ToLower(options.LoginPageURL), "https://") {
+			mode = "https"
+		}
+		writeSafe(builder, fmt.Sprintf("/tool fetch url=\"%s\" mode=%s dst-path=\"noblifi/login.html\"", escape(options.LoginPageURL), mode), "fetch hotspot login")
+		writeSafe(builder, "/ip hotspot profile set noblifi-hotspot-profile html-directory=noblifi", "set html directory")
+		builder.WriteString(":put \"NobliFi HotSpot login.html installed\"\n")
+	}
+	writeSafe(builder, fmt.Sprintf("/ip hotspot add name=noblifi-hotspot interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no", options.HotspotBridge), "add hotspot server")
+	builder.WriteString("\n")
 }
 
 func writeBridge(builder *strings.Builder, bridge string, interfaces []string, address string, pool string, ranges string, subnet string) {
@@ -355,17 +382,18 @@ func writeBridge(builder *strings.Builder, bridge string, interfaces []string, a
 	role := strings.TrimPrefix(bridge, "br-")
 	gateway := strings.Split(address, "/")[0]
 	builder.WriteString(fmt.Sprintf("# %s bridge, DHCP, and client addressing\n", strings.ToUpper(role)))
-	builder.WriteString(fmt.Sprintf("/interface bridge add name=%s protocol-mode=rstp comment=\"NobliFi %s bridge\"\n", bridge, role))
+	writeSafe(builder, fmt.Sprintf(":if ([:len [/interface bridge find name=%s]] = 0) do={ /interface bridge add name=%s protocol-mode=rstp comment=\"NobliFi %s bridge\" }", bridge, bridge, role), "ensure bridge")
 	for _, iface := range interfaces {
-		builder.WriteString(fmt.Sprintf("/interface bridge port remove [find interface=%s]\n", iface))
-		builder.WriteString(fmt.Sprintf(":if ([:len [/interface bridge port find bridge=%s interface=%s]] = 0) do={/interface bridge port add bridge=%s interface=%s comment=\"NobliFi %s port\"}\n", bridge, iface, bridge, iface, role))
-		builder.WriteString(fmt.Sprintf("/interface list member remove [find list=LAN interface=%s]\n", iface))
-		builder.WriteString(fmt.Sprintf("/interface list member add list=LAN interface=%s comment=\"NobliFi LAN member\"\n", iface))
+		writeSafe(builder, fmt.Sprintf("/interface bridge port remove [find interface=%s]", iface), "cleanup bridge port")
+		writeSafe(builder, fmt.Sprintf(":if ([:len [/interface bridge port find bridge=%s interface=%s]] = 0) do={/interface bridge port add bridge=%s interface=%s comment=\"NobliFi %s port\"}", bridge, iface, bridge, iface, role), "add bridge port")
+		writeSafe(builder, fmt.Sprintf("/interface list member remove [find list=LAN interface=%s]", iface), "cleanup LAN list member")
+		writeSafe(builder, fmt.Sprintf("/interface list member add list=LAN interface=%s comment=\"NobliFi LAN member\"", iface), "add LAN list member")
 	}
-	builder.WriteString(fmt.Sprintf("/ip address add address=%s interface=%s comment=\"NobliFi %s gateway\"\n", address, bridge, role))
-	builder.WriteString(fmt.Sprintf("/ip pool add name=%s ranges=%s comment=\"NobliFi %s pool\"\n", pool, ranges, role))
-	builder.WriteString(fmt.Sprintf("/ip dhcp-server add name=dhcp-%s interface=%s address-pool=%s lease-time=1h disabled=no\n", role, bridge, pool))
-	builder.WriteString(fmt.Sprintf("/ip dhcp-server network add address=%s gateway=%s dns-server=%s\n\n", subnet, gateway, gateway))
+	writeSafe(builder, fmt.Sprintf("/ip address add address=%s interface=%s comment=\"NobliFi %s gateway\"", address, bridge, role), "add bridge gateway")
+	writeSafe(builder, fmt.Sprintf("/ip pool add name=%s ranges=%s comment=\"NobliFi %s pool\"", pool, ranges, role), "add address pool")
+	writeSafe(builder, fmt.Sprintf("/ip dhcp-server add name=dhcp-%s interface=%s address-pool=%s lease-time=1h disabled=no", role, bridge, pool), "add dhcp server")
+	writeSafe(builder, fmt.Sprintf("/ip dhcp-server network add address=%s gateway=%s dns-server=%s", subnet, gateway, gateway), "add dhcp network")
+	builder.WriteString("\n")
 }
 
 func defaultWalledGardenHosts() []string {
