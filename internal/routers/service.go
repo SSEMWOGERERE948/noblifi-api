@@ -263,6 +263,9 @@ func (s *Service) BootstrapScript(routerID uuid.UUID) (string, error) {
 }
 
 func (s *Service) ConfigInstallCommand(routerID uuid.UUID) (string, error) {
+	if _, err := s.ConfigPreview(routerID); err != nil {
+		return "", err
+	}
 	router, err := s.repo.Find(routerID)
 	if err != nil {
 		return "", err
@@ -439,8 +442,14 @@ func (s *Service) renderOptionsForRouter(routerID uuid.UUID) (portprofiles.Rende
 }
 
 func (s *Service) normalizeNetworkProfile(profile *RouterNetworkProfile) {
+	if isPlaceholderValue(profile.RadiusServer) {
+		profile.RadiusServer = s.cfg.RadiusServer
+	}
 	if isPlaceholderRadiusSecret(profile.RadiusSecret) {
 		profile.RadiusSecret = s.cfg.RadiusSecret
+	}
+	if isPlaceholderValue(profile.APIPassword) {
+		profile.APIPassword = s.cfg.RouterAPIPassword
 	}
 }
 

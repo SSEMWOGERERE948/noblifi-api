@@ -128,10 +128,13 @@ func sanitizeNASName(value string) string {
 }
 func (s *Service) renderOptionsForRouter(router routers.Router) portprofiles.RenderOptions {
 	if router.NetworkProfile != nil {
-		return router.NetworkProfile.RenderOptions()
+		profile := *router.NetworkProfile
+		s.normalizeNetworkProfile(&profile)
+		return profile.RenderOptions()
 	}
 	profile, err := s.repo.NetworkProfile(router.ID)
 	if err == nil {
+		s.normalizeNetworkProfile(&profile)
 		return profile.RenderOptions()
 	}
 	return portprofiles.RenderOptions{
@@ -162,6 +165,25 @@ func (s *Service) renderOptionsForRouter(router routers.Router) portprofiles.Ren
 		EnableAPIService:    s.cfg.EnableAPIService,
 		EnableAPISSLService: s.cfg.EnableAPISSLService,
 	}
+}
+
+func (s *Service) normalizeNetworkProfile(profile *routers.RouterNetworkProfile) {
+	if isPlaceholderValue(profile.RadiusServer) {
+		profile.RadiusServer = s.cfg.RadiusServer
+	}
+	if isPlaceholderValue(profile.RadiusSecret) {
+		profile.RadiusSecret = s.cfg.RadiusSecret
+	}
+	if isPlaceholderValue(profile.APIPassword) {
+		profile.APIPassword = s.cfg.RouterAPIPassword
+	}
+}
+
+func isPlaceholderValue(value string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(value))
+	return normalized == "" ||
+		strings.HasPrefix(normalized, "CHANGE_ME") ||
+		strings.HasPrefix(normalized, "REPLACE_WITH")
 }
 
 type InterfaceCheckIn struct {
