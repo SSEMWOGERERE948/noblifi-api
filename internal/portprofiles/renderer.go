@@ -18,6 +18,7 @@ type Summary struct {
 type RenderOptions struct {
 	RadiusServer        string
 	RadiusSecret        string
+	LoginPageURL        string
 	RouterIdentity      string
 	APIUsername         string
 	APIPassword         string
@@ -93,6 +94,7 @@ func RenderRouterOS(assignments []Assignment) (string, error) {
 	return RenderRouterOSWithOptions(assignments, RenderOptions{
 		RadiusServer:        "127.0.0.1",
 		RadiusSecret:        "noblifi",
+		LoginPageURL:        "",
 		RouterIdentity:      "NobliFi-Router",
 		APIUsername:         "noblifi-api",
 		APIPassword:         "CHANGE_ME_API_PASSWORD",
@@ -144,6 +146,7 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString(fmt.Sprintf("/ip hotspot profile remove [find name=\"noblifi-hotspot-profile\"]\n"))
 	builder.WriteString(fmt.Sprintf("/ip hotspot user profile remove [find name=\"noblifi-voucher-profile\"]\n"))
 	builder.WriteString("/ip hotspot walled-garden remove [find comment=\"NobliFi captive portal\"]\n")
+	builder.WriteString("/file remove [find name=\"noblifi/login.html\"]\n")
 	builder.WriteString("/radius remove [find comment=\"NobliFi RADIUS\"]\n")
 	builder.WriteString("/ip firewall nat remove [find comment=\"NobliFi client NAT\"]\n")
 	builder.WriteString(fmt.Sprintf("/ip dhcp-client remove [find interface=%s]\n", wan))
@@ -195,15 +198,26 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString("/ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment=\"NobliFi client NAT\"\n")
 	builder.WriteString(fmt.Sprintf("/radius add service=hotspot address=%s secret=\"%s\" authentication-port=1812 accounting-port=1813 timeout=3s comment=\"NobliFi RADIUS\"\n", options.RadiusServer, escape(options.RadiusSecret)))
 	builder.WriteString("/radius incoming set accept=yes\n")
+	builder.WriteString(":put \"NobliFi RADIUS client configured\"\n")
 	builder.WriteString("/ip hotspot user profile add name=noblifi-voucher-profile\n")
 	builder.WriteString("/ip hotspot user profile set noblifi-voucher-profile shared-users=1\n")
 	builder.WriteString("/ip hotspot user profile set noblifi-voucher-profile keepalive-timeout=2m\n")
 	builder.WriteString("/ip hotspot user profile set noblifi-voucher-profile status-autorefresh=1m\n")
-	builder.WriteString(fmt.Sprintf("/ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=%s dns-name=%s use-radius=yes login-by=http-chap,http-pap\n", hotspotGateway, options.HotspotDNSName))
+	builder.WriteString(fmt.Sprintf("/ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=%s dns-name=%s use-radius=yes login-by=http-chap,http-pap html-directory=noblifi\n", hotspotGateway, options.HotspotDNSName))
 	builder.WriteString("/ip hotspot profile set noblifi-hotspot-profile radius-accounting=yes\n")
 	builder.WriteString("/ip hotspot profile set noblifi-hotspot-profile radius-interim-update=5m\n")
 	for _, host := range options.WalledGardenHosts {
-		builder.WriteString(fmt.Sprintf("/ip hotspot walled-garden add dst-host=%s action=allow comment=\"NobliFi captive portal\"\n", host))
+		builder.WriteString(fmt.Sprintf("/ip hotspot walled-garden add dst-host=%s comment=\"NobliFi captive portal\"\n", host))
+	}
+	if strings.TrimSpace(options.LoginPageURL) != "" {
+		mode := "http"
+		if strings.HasPrefix(strings.ToLower(options.LoginPageURL), "https://") {
+			mode = "https"
+		}
+		builder.WriteString(":if ([:len [/file find name=\"noblifi\"]] = 0) do={ /file make-directory noblifi }\n")
+		builder.WriteString(fmt.Sprintf("/tool fetch url=\"%s\" mode=%s dst-path=\"noblifi/login.html\"\n", escape(options.LoginPageURL), mode))
+		builder.WriteString("/ip hotspot profile set noblifi-hotspot-profile html-directory=noblifi\n")
+		builder.WriteString(":put \"NobliFi HotSpot login.html installed\"\n")
 	}
 	builder.WriteString(fmt.Sprintf("/ip hotspot add name=noblifi-hotspot interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no\n", options.HotspotBridge))
 	return builder.String(), nil

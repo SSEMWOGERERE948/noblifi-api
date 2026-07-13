@@ -1,4 +1,4 @@
-﻿package routers
+package routers
 
 import (
 	"crypto/rand"
@@ -289,6 +289,7 @@ func (s *Service) ConfigPreview(routerID uuid.UUID) (ConfigPreview, error) {
 	if err != nil {
 		return ConfigPreview{}, err
 	}
+	options.LoginPageURL = hotspotLoginURL(router.ClaimToken, s.cfg.ProvisioningBaseURL)
 	script, err := portprofiles.RenderRouterOSWithOptions(assignments, options)
 	if err != nil {
 		return ConfigPreview{}, err
@@ -359,6 +360,10 @@ func configInstallCommand(token, baseURL string) string {
 
 	return fmt.Sprintf(`/tool fetch url="%s" mode=%s dst-path=noblifi-config.rsc
 /import file-name=noblifi-config.rsc`, configURL, fetchMode)
+}
+
+func hotspotLoginURL(token, baseURL string) string {
+	return normalizeProvisioningBaseURL(baseURL) + "/hotspot-login/" + token
 }
 
 func legacyRandomToken() string {

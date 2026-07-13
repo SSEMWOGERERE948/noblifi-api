@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -36,6 +37,17 @@ func (s *Service) BootstrapScript(token string) (string, error) {
 	return renderBootstrapScript(token, s.cfg.ProvisioningBaseURL), nil
 }
 
+func (s *Service) HotspotLoginPage(token string) (string, error) {
+	router, err := s.repo.FindByClaimToken(token)
+	if err != nil {
+		return "", errors.New("invalid claim token")
+	}
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
+		return "", errors.New("claim token expired")
+	}
+	return renderHotspotLoginPage(), nil
+}
+
 func (s *Service) ClaimConfig(token, serial string, sourceIP string) (string, error) {
 	router, err := s.repo.FindByClaimToken(token)
 	if err != nil {
@@ -61,14 +73,16 @@ func (s *Service) ClaimConfig(token, serial string, sourceIP string) (string, er
 		assignments = portprofiles.DefaultAssignments()
 	}
 	options := s.renderOptionsForRouter(router)
+	options.LoginPageURL = hotspotLoginURL(token, s.cfg.ProvisioningBaseURL)
 	if err := s.registerRadiusNAS(router, options, sourceIP); err != nil {
-		return "", err
+		log.Printf("provisioning: radius NAS registration failed for router %s from %q: %v", router.ID, sourceIP, err)
 	}
 	return portprofiles.RenderRouterOSWithOptions(assignments, options)
 }
 
 func (s *Service) registerRadiusNAS(router routers.Router, options portprofiles.RenderOptions, sourceIP string) error {
 	if s.radius == nil {
+		log.Printf("provisioning: radius NAS registration skipped for router %s: radius registrar is nil", router.ID)
 		return nil
 	}
 	nasName := firstForwardedIP(sourceIP)
@@ -370,6 +384,52 @@ func renderBootstrapScript(token, baseURL string) string {
 /tool fetch url=$statusUrl mode=%s keep-result=no
 
 :put "NobliFi router linked. Return to the dashboard and choose automatic or manual setup."`, token, baseURL, fetchMode, fetchMode, fetchMode)
+}
+
+func hotspotLoginURL(token, baseURL string) string {
+	return normalizeProvisioningBaseURL(baseURL) + "/hotspot-login/" + token
+}
+
+func renderHotspotLoginPage() string {
+	return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NobliFi WiFi Login</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #050b12; color: #f8fbff; }
+    main { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+    form { width: 100%; max-width: 380px; background: #0b1420; border: 1px solid #1f3044; border-radius: 10px; padding: 24px; box-sizing: border-box; }
+    h1 { margin: 0 0 8px; font-size: 24px; }
+    p { margin: 0 0 20px; color: #9aa8ba; line-height: 1.5; }
+    label { display: block; margin-bottom: 8px; font-weight: 700; }
+    input { width: 100%; box-sizing: border-box; border: 1px solid #1f3044; background: #050b12; color: #f8fbff; border-radius: 8px; padding: 12px; font-size: 16px; }
+    button { width: 100%; margin-top: 16px; border: 0; border-radius: 8px; padding: 12px; background: #7dd3fc; color: #06111f; font-weight: 700; font-size: 16px; }
+    .error { margin-top: 14px; color: #fca5a5; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <form name="login" action="$(link-login-only)" method="post">
+      <input type="hidden" name="dst" value="$(link-orig)">
+      <input type="hidden" name="popup" value="true">
+      <h1>NobliFi WiFi</h1>
+      <p>Enter your voucher code to connect.</p>
+      <label for="username">Voucher code</label>
+      <input id="username" name="username" autocomplete="one-time-code" autofocus>
+      <input id="password" name="password" type="hidden">
+      <button type="submit">Connect</button>
+      <div class="error">$(if error)$(error)$(endif)</div>
+    </form>
+  </main>
+  <script>
+    document.forms.login.addEventListener("submit", function () {
+      this.password.value = this.username.value;
+    });
+  </script>
+</body>
+</html>`
 }
 
 func normalizeProvisioningBaseURL(baseURL string) string {
