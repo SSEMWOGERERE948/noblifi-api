@@ -154,9 +154,9 @@ function renderSetupScript(router, account, opts = {}) {
     throw new Error("Refusing to generate script: assign at least one HOTSPOT_LAN port first.");
   }
   const hotspotBridge = bridgeConfigs.HOTSPOT_LAN;
-  const managementComments = managementPorts.map((port) => `# Management port preserved outside HotSpot bridge: ${port}`);
   const bridgeCommands = [
-    "# Management ports are deliberately left on their current bridge to prevent lockout.",
+    "# Management ports are configured outside the HotSpot bridge to prevent lockout.",
+    ...renderBridge("STAFF_LAN", bridgeConfigs.STAFF_LAN, managementPorts, false),
     ...renderBridge("HOTSPOT_LAN", hotspotBridge, hotspotPorts, true),
     ...renderBridge("POS_LAN", bridgeConfigs.POS_LAN, portsFor(assignments, "POS_LAN"), false),
     ...renderBridge("CCTV_LAN", bridgeConfigs.CCTV_LAN, portsFor(assignments, "CCTV_LAN"), false)
@@ -166,13 +166,14 @@ function renderSetupScript(router, account, opts = {}) {
     `# NobliFi setup for ${account.name} / ${router.name}`,
     `# Paste into MikroTik terminal after confirming WAN is ${wanInterface}.`,
     `# Generated from dynamic MikroTik port topology. Only selected ports are changed.`,
-    ...managementComments,
     `/ip hotspot remove [find name="noblifi-hotspot"]`,
     `/ip hotspot profile remove [find name="noblifi-profile"]`,
     `/ip hotspot user profile remove [find name="noblifi-voucher-profile"]`,
     `/radius remove [find comment="NobliFi RADIUS"]`,
     `/ip firewall nat remove [find comment="NobliFi client NAT"]`,
+    `/ip firewall mangle remove [find comment="NobliFi prevent hotspot sharing"]`,
     ...bridgeCommands,
+    `/ip dns set allow-remote-requests=yes`,
     `/ip firewall nat add chain=srcnat out-interface=${wanInterface} action=masquerade comment="NobliFi client NAT"`,
     `/radius add service=hotspot address=${radiusAddress} secret="${router.radius_secret}" authentication-port=1812 accounting-port=1813 timeout=3s comment="NobliFi RADIUS"`,
     `/radius incoming set accept=yes`,
@@ -317,6 +318,7 @@ function renderBridge(role, bridge, ports, hotspot) {
     `/ip address remove [find comment="NobliFi ${role} gateway"]`,
     `/ip address add address=${bridge.gateway} interface=${bridge.name} comment="NobliFi ${role} gateway"`,
     `/ip dhcp-server remove [find name="${bridge.dhcpName}"]`,
+    `/ip dhcp-server network remove [find address=${network}]`,
     `/ip pool remove [find name="${bridge.poolName}"]`,
     `/ip pool add name=${bridge.poolName} ranges=${bridge.pool}`,
     `/ip dhcp-server add name=${bridge.dhcpName} interface=${bridge.name} address-pool=${bridge.poolName} disabled=no`,
