@@ -41,6 +41,7 @@ type RenderOptions struct {
 	CCTVGateway         string
 	CCTVPool            string
 	HotspotDNSName      string
+	HotspotPortalName   string
 	DisableWWWService   bool
 	EnableAPIService    bool
 	EnableAPISSLService bool
@@ -117,6 +118,7 @@ func RenderRouterOS(assignments []Assignment) (string, error) {
 		CCTVGateway:         "10.40.40.1/24",
 		CCTVPool:            "10.40.40.10-10.40.40.254",
 		HotspotDNSName:      "login.noblifi.local",
+		HotspotPortalName:   "NobliFi WiFi",
 		DisableWWWService:   true,
 		EnableAPIService:    true,
 		EnableAPISSLService: true,
@@ -212,6 +214,7 @@ func withDefaults(options RenderOptions) RenderOptions {
 		CCTVGateway:         "10.40.40.1/24",
 		CCTVPool:            "10.40.40.10-10.40.40.254",
 		HotspotDNSName:      "login.noblifi.local",
+		HotspotPortalName:   "NobliFi WiFi",
 		DisableWWWService:   true,
 		EnableAPIService:    true,
 		EnableAPISSLService: true,
@@ -276,6 +279,9 @@ func withDefaults(options RenderOptions) RenderOptions {
 	}
 	if options.HotspotDNSName == "" {
 		options.HotspotDNSName = defaults.HotspotDNSName
+	}
+	if options.HotspotPortalName == "" {
+		options.HotspotPortalName = defaults.HotspotPortalName
 	}
 	if len(options.WalledGardenHosts) == 0 {
 		options.WalledGardenHosts = defaults.WalledGardenHosts
