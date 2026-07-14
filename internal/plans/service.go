@@ -20,6 +20,10 @@ func (s *Service) List() ([]Plan, error) {
 	return s.repo.List()
 }
 
+func (s *Service) ActiveList() ([]Plan, error) {
+	return s.repo.ActiveList()
+}
+
 func (s *Service) Find(id uuid.UUID) (Plan, error) {
 	return s.repo.Find(id)
 }

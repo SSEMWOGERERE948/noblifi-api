@@ -23,6 +23,12 @@ func (r *Repository) List() ([]Plan, error) {
 	return plans, err
 }
 
+func (r *Repository) ActiveList() ([]Plan, error) {
+	var plans []Plan
+	err := r.db.Where("is_active = ?", true).Order("price asc, duration_minutes asc, created_at desc").Find(&plans).Error
+	return plans, err
+}
+
 func (r *Repository) Find(id uuid.UUID) (Plan, error) {
 	var plan Plan
 	err := r.db.First(&plan, "id = ?", id).Error
