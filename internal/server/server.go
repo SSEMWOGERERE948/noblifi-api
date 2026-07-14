@@ -43,11 +43,12 @@ func Run() {
 	routerRepo := routers.NewRepository(db)
 	radiusService := radius.NewService(db)
 	routerService := routers.NewService(routerRepo, cfg)
-	routers.NewHandler(routerService).RegisterRoutes(api)
-	provisioning.NewHandler(provisioning.NewService(routerRepo, cfg, radiusService)).RegisterRoutes(api)
-
 	planRepo := plans.NewRepository(db)
-	plans.NewHandler(plans.NewService(planRepo)).RegisterRoutes(api)
+	planService := plans.NewService(planRepo)
+	routers.NewHandler(routerService).RegisterRoutes(api)
+	provisioning.NewHandler(provisioning.NewService(routerRepo, cfg, radiusService, planService)).RegisterRoutes(api)
+
+	plans.NewHandler(planService).RegisterRoutes(api)
 
 	radius.NewHandler(radiusService).RegisterRoutes(api)
 
@@ -57,30 +58,30 @@ func Run() {
 	vouchers.NewHandler(voucherService).RegisterRoutes(api)
 
 	app.Get("/", func(c *fiber.Ctx) error {
-	return c.JSON(fiber.Map{
-		"service": "noblifi-api",
-		"status":  "running",
-		"version": "2026-07-04-router-provisioning",
+		return c.JSON(fiber.Map{
+			"service": "noblifi-api",
+			"status":  "running",
+			"version": "2026-07-04-router-provisioning",
+		})
 	})
-})
 
-app.Get("/healthz", func(c *fiber.Ctx) error {
-	return c.JSON(fiber.Map{
-		"status":  "ok",
-		"service": "noblifi-api",
+	app.Get("/healthz", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{
+			"status":  "ok",
+			"service": "noblifi-api",
+		})
 	})
-})
 
-app.Get("/debug/routes", func(c *fiber.Ctx) error {
-	routes := app.GetRoutes()
-	out := make([]string, 0, len(routes))
+	app.Get("/debug/routes", func(c *fiber.Ctx) error {
+		routes := app.GetRoutes()
+		out := make([]string, 0, len(routes))
 
-	for _, route := range routes {
-		out = append(out, route.Method+" "+route.Path)
-	}
+		for _, route := range routes {
+			out = append(out, route.Method+" "+route.Path)
+		}
 
-	return c.JSON(out)
-})
+		return c.JSON(out)
+	})
 
 	log.Fatal(app.Listen(":" + cfg.Port))
 }

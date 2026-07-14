@@ -364,6 +364,8 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		}
 		writeSafe(builder, fmt.Sprintf("/tool fetch url=\"%s\" mode=%s dst-path=\"noblifi/login.html\"", escape(options.LoginPageURL), mode), "fetch hotspot login")
 		writeSafe(builder, "/ip hotspot profile set noblifi-hotspot-profile html-directory=noblifi", "set html directory")
+		writeSafe(builder, "/system scheduler remove [find name=noblifi-hotspot-login-refresh]", "cleanup hotspot login refresh")
+		writeSafe(builder, fmt.Sprintf("/system scheduler add name=noblifi-hotspot-login-refresh interval=10m on-event=\"/tool fetch url=\\\"%s\\\" mode=%s dst-path=\\\"noblifi/login.html\\\"\" comment=\"NobliFi HotSpot login refresh\"", escape(options.LoginPageURL), mode), "schedule hotspot login refresh")
 		builder.WriteString(":put \"NobliFi HotSpot login.html installed\"\n")
 	}
 	writeSafe(builder, fmt.Sprintf("/ip hotspot add name=noblifi-hotspot interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no", options.HotspotBridge), "add hotspot server")
