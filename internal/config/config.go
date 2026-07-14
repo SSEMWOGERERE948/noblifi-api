@@ -8,6 +8,8 @@ import (
 	"github.com/noblifi/noblifi/backend/internal/placeholders"
 )
 
+const defaultRadiusServer = "154.65.105.14"
+
 type Config struct {
 	Port                     string
 	DatabaseURL              string
@@ -54,7 +56,7 @@ func Load() Config {
 		AppEnv:                   getEnv("APP_ENV", "development"),
 		PublicAPIBaseURL:         getEnv("PUBLIC_API_BASE_URL", "http://localhost:8080"),
 		ProvisioningBaseURL:      getEnv("NOBLIFI_PROVISIONING_BASE_URL", "http://localhost:8080/api/v1/provisioning"),
-		RadiusServer:             getEnv("NOBLIFI_RADIUS_SERVER", ""),
+		RadiusServer:             getEnv("NOBLIFI_RADIUS_SERVER", defaultRadiusServer),
 		RadiusSecret:             normalizeRadiusSecret(getEnv("NOBLIFI_RADIUS_SECRET", "noblifi")),
 		RouterIdentityPrefix:     getEnv("NOBLIFI_ROUTER_IDENTITY_PREFIX", "NobliFi"),
 		RouterAPIUsername:        getEnv("NOBLIFI_ROUTER_API_USERNAME", "noblifi-api"),
