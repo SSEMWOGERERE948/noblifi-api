@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS router_network_profiles (
   cctv_gateway text NOT NULL,
   cctv_pool text NOT NULL,
   hotspot_dns_name text NOT NULL,
+  hotspot_portal_name text NOT NULL DEFAULT 'NobliFi WiFi',
   wan_mode text NOT NULL DEFAULT 'dhcp',
   pppoe_username text NULL,
   pppoe_password text NULL,

@@ -39,10 +39,13 @@ type Config struct {
 	CCTVGatewayCIDR          string
 	CCTVPoolRange            string
 	HotspotDNSName           string
+	HotspotPortalName        string
 	HotspotWalledGardenHosts []string
 	DisableWWWService        bool
 	EnableAPIService         bool
 	EnableAPISSLService      bool
+	RadiusAuthPort           int
+	RadiusAcctPort           int
 	ProvisioningTokenTTLHour int
 }
 
@@ -78,10 +81,13 @@ func Load() Config {
 		CCTVGatewayCIDR:          getEnv("NOBLIFI_CCTV_GATEWAY", "10.40.40.1/24"),
 		CCTVPoolRange:            getEnv("NOBLIFI_CCTV_POOL", "10.40.40.10-10.40.40.254"),
 		HotspotDNSName:           getEnv("NOBLIFI_HOTSPOT_DNS_NAME", "login.noblifi.local"),
+		HotspotPortalName:        getEnv("NOBLIFI_HOTSPOT_PORTAL_NAME", "NobliFi WiFi"),
 		HotspotWalledGardenHosts: getListEnv("NOBLIFI_HOTSPOT_WALLED_GARDEN_HOSTS", "noblifi-frontend.vercel.app,noblifi.ew.r.appspot.com,noblifi.uc.r.appspot.com"),
 		DisableWWWService:        getBoolEnv("NOBLIFI_DISABLE_WWW_SERVICE", true),
 		EnableAPIService:         getBoolEnv("NOBLIFI_ENABLE_API_SERVICE", true),
 		EnableAPISSLService:      getBoolEnv("NOBLIFI_ENABLE_API_SSL_SERVICE", true),
+		RadiusAuthPort:           getIntEnv("NOBLIFI_RADIUS_AUTH_PORT", 1812),
+		RadiusAcctPort:           getIntEnv("NOBLIFI_RADIUS_ACCT_PORT", 1813),
 		ProvisioningTokenTTLHour: 24,
 	}
 }
@@ -118,6 +124,24 @@ func getBoolEnv(key string, fallback bool) bool {
 		return fallback
 	}
 	return value == "1" || value == "true" || value == "yes" || value == "on"
+}
+
+func getIntEnv(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	result := 0
+	for _, ch := range value {
+		if ch < '0' || ch > '9' {
+			return fallback
+		}
+		result = result*10 + int(ch-'0')
+	}
+	if result == 0 {
+		return fallback
+	}
+	return result
 }
 
 func loadDotEnv(path string) {

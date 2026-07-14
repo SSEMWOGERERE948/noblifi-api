@@ -427,6 +427,7 @@ func renderOptions(cfg config.Config) portprofiles.RenderOptions {
 		CCTVGateway:         cfg.CCTVGatewayCIDR,
 		CCTVPool:            cfg.CCTVPoolRange,
 		HotspotDNSName:      cfg.HotspotDNSName,
+		HotspotPortalName:   cfg.HotspotPortalName,
 		WalledGardenHosts:   cfg.HotspotWalledGardenHosts,
 		DisableWWWService:   cfg.DisableWWWService,
 		EnableAPIService:    cfg.EnableAPIService,
@@ -483,6 +484,7 @@ func (s *Service) defaultNetworkProfile(routerID uuid.UUID, routerName string) R
 		CCTVGateway:         s.cfg.CCTVGatewayCIDR,
 		CCTVPool:            s.cfg.CCTVPoolRange,
 		HotspotDNSName:      s.cfg.HotspotDNSName,
+		HotspotPortalName:   s.cfg.HotspotPortalName,
 		WANMode:             "dhcp",
 		DisableWWWService:   s.cfg.DisableWWWService,
 		EnableAPIService:    s.cfg.EnableAPIService,
@@ -514,6 +516,7 @@ func (p RouterNetworkProfile) RenderOptions() portprofiles.RenderOptions {
 		CCTVGateway:         p.CCTVGateway,
 		CCTVPool:            p.CCTVPool,
 		HotspotDNSName:      p.HotspotDNSName,
+		HotspotPortalName:   p.HotspotPortalName,
 		DisableWWWService:   p.DisableWWWService,
 		EnableAPIService:    p.EnableAPIService,
 		EnableAPISSLService: p.EnableAPISSLService,
@@ -589,6 +592,9 @@ func mergeNetworkProfile(profile *RouterNetworkProfile, input RouterNetworkProfi
 	}
 	if input.HotspotDNSName != "" {
 		profile.HotspotDNSName = input.HotspotDNSName
+	}
+	if input.HotspotPortalName != "" {
+		profile.HotspotPortalName = input.HotspotPortalName
 	}
 	if input.WANMode != "" {
 		profile.WANMode = input.WANMode

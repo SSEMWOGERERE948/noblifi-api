@@ -10,5 +10,7 @@ FROM alpine:3.20
 WORKDIR /app
 COPY --from=build /out/noblifi-api /app/noblifi-api
 EXPOSE 8080
+EXPOSE 1812/udp
+EXPOSE 1813/udp
 CMD ["/app/noblifi-api"]
 

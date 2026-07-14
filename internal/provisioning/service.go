@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/noblifi/noblifi/backend/internal/config"
-	"github.com/noblifi/noblifi/backend/internal/plans"
 	"github.com/noblifi/noblifi/backend/internal/portprofiles"
 	"github.com/noblifi/noblifi/backend/internal/routers"
 )
@@ -19,19 +18,14 @@ type RadiusRegistrar interface {
 	RegisterNAS(nasName, shortName, secret, description string) error
 }
 
-type PlanLister interface {
-	ActiveList() ([]plans.Plan, error)
-}
-
 type Service struct {
 	repo   *routers.Repository
 	cfg    config.Config
 	radius RadiusRegistrar
-	plans  PlanLister
 }
 
-func NewService(repo *routers.Repository, cfg config.Config, radius RadiusRegistrar, planLister PlanLister) *Service {
-	return &Service{repo: repo, cfg: cfg, radius: radius, plans: planLister}
+func NewService(repo *routers.Repository, cfg config.Config, radius RadiusRegistrar) *Service {
+	return &Service{repo: repo, cfg: cfg, radius: radius}
 }
 func (s *Service) BootstrapScript(token string) (string, error) {
 	router, err := s.repo.FindByClaimToken(token)
@@ -52,18 +46,8 @@ func (s *Service) HotspotLoginPage(token string) (string, error) {
 	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
 		return "", errors.New("claim token expired")
 	}
-	activePlans, err := s.activePlans()
-	if err != nil {
-		log.Printf("provisioning: hotspot login packages unavailable: %v", err)
-	}
-	return renderHotspotLoginPage(activePlans), nil
-}
-
-func (s *Service) activePlans() ([]plans.Plan, error) {
-	if s.plans == nil {
-		return nil, nil
-	}
-	return s.plans.ActiveList()
+	options := s.renderOptionsForRouter(router)
+	return renderHotspotLoginPage(options.HotspotPortalName), nil
 }
 
 func (s *Service) ClaimConfig(token, serial string, sourceIP string) (string, error) {
@@ -178,6 +162,7 @@ func (s *Service) renderOptionsForRouter(router routers.Router) portprofiles.Ren
 		CCTVGateway:         s.cfg.CCTVGatewayCIDR,
 		CCTVPool:            s.cfg.CCTVPoolRange,
 		HotspotDNSName:      s.cfg.HotspotDNSName,
+		HotspotPortalName:   s.cfg.HotspotPortalName,
 		WalledGardenHosts:   s.cfg.HotspotWalledGardenHosts,
 		DisableWWWService:   s.cfg.DisableWWWService,
 		EnableAPIService:    s.cfg.EnableAPIService,
@@ -411,58 +396,50 @@ func hotspotLoginURL(token, baseURL string) string {
 	return normalizeProvisioningBaseURL(baseURL) + "/hotspot-login/" + token
 }
 
-func renderHotspotLoginPage(activePlans []plans.Plan) string {
+func renderHotspotLoginPage(portalName string) string {
+	portalName = strings.TrimSpace(portalName)
+	if portalName == "" {
+		portalName = "NobliFi WiFi"
+	}
+	escapedPortalName := html.EscapeString(portalName)
 	return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NobliFi WiFi Login</title>
+  <title>` + escapedPortalName + ` Login</title>
   <style>
-    :root { color-scheme: dark; --bg: #06111f; --panel: #0b1727; --panel2: #102033; --line: #24384f; --text: #f8fbff; --muted: #9fb0c5; --brand: #7dd3fc; --accent: #34d399; --danger: #fca5a5; }
+    :root { color-scheme: dark; --bg: #06111f; --panel: #0b1727; --line: #24384f; --text: #f8fbff; --muted: #9fb0c5; --brand: #7dd3fc; --accent: #34d399; --danger: #fca5a5; }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: Arial, sans-serif; background: radial-gradient(circle at top left, rgba(125,211,252,.18), transparent 34%), var(--bg); color: var(--text); }
-    main { min-height: 100vh; display: grid; align-items: center; padding: 28px 16px; }
-    .shell { width: min(960px, 100%); margin: 0 auto; display: grid; gap: 18px; grid-template-columns: 1.1fr .9fr; }
-    .brand, form { border: 1px solid var(--line); background: rgba(11,23,39,.92); border-radius: 12px; padding: 24px; box-shadow: 0 18px 50px rgba(0,0,0,.28); }
-    .mark { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 10px; background: var(--brand); color: #06111f; font-weight: 900; letter-spacing: 0; }
-    h1 { margin: 16px 0 8px; font-size: 30px; line-height: 1.1; letter-spacing: 0; }
-    h2 { margin: 0 0 12px; font-size: 18px; letter-spacing: 0; }
-    p { margin: 0; color: var(--muted); line-height: 1.5; }
-    .plans { display: grid; gap: 10px; margin-top: 20px; }
-    .plan { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel2); }
-    .plan strong { font-size: 15px; }
-    .price { color: var(--accent); font-weight: 800; white-space: nowrap; }
-    .meta { grid-column: 1 / -1; color: var(--muted); font-size: 13px; }
+    body { margin: 0; font-family: Arial, sans-serif; background: linear-gradient(145deg, #06111f 0%, #0b1727 52%, #102033 100%); color: var(--text); }
+    main { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; }
+    form { width: min(420px, 100%); border: 1px solid var(--line); background: rgba(11,23,39,.94); border-radius: 12px; padding: 26px; box-shadow: 0 18px 50px rgba(0,0,0,.32); }
+    .mark { width: 48px; height: 48px; display: grid; place-items: center; margin: 0 auto 16px; border-radius: 10px; background: var(--brand); color: #06111f; font-weight: 900; letter-spacing: 0; }
+    h1 { margin: 0 0 8px; text-align: center; font-size: 30px; line-height: 1.1; letter-spacing: 0; }
+    p { margin: 0 0 22px; color: var(--muted); line-height: 1.5; text-align: center; }
     label { display: block; margin-bottom: 8px; font-weight: 700; }
     input { width: 100%; border: 1px solid var(--line); background: #07111d; color: var(--text); border-radius: 9px; padding: 13px; font-size: 16px; }
     button { width: 100%; margin-top: 16px; border: 0; border-radius: 9px; padding: 13px; background: var(--brand); color: #06111f; font-weight: 800; font-size: 16px; }
-    .hint { margin-top: 14px; font-size: 13px; }
+    .hint { margin: 14px 0 0; font-size: 13px; }
     .error { margin-top: 14px; color: var(--danger); font-size: 14px; min-height: 18px; }
-    @media (max-width: 760px) { .shell { grid-template-columns: 1fr; } h1 { font-size: 25px; } }
+    @media (max-width: 420px) { form { padding: 22px; } h1 { font-size: 26px; } }
   </style>
 </head>
 <body>
   <main>
-    <div class="shell">
-      <section class="brand">
-        <div class="mark">NF</div>
-        <h1>NobliFi WiFi</h1>
-        <p>Choose a package, get a voucher code, then connect here. Packages are managed in NobliFi and appear automatically on this MikroTik login page after the router refreshes its portal file.</p>
-        <div class="plans">` + renderPlanCards(activePlans) + `</div>
-      </section>
-      <form name="login" action="$(link-login-only)" method="post">
-        <input type="hidden" name="dst" value="$(link-orig)">
-        <input type="hidden" name="popup" value="true">
-        <h2>Connect with voucher</h2>
-        <label for="username">Voucher code</label>
-        <input id="username" name="username" autocomplete="one-time-code" autofocus>
-        <input id="password" name="password" type="hidden">
-        <button type="submit">Connect</button>
-        <p class="hint">Use the same voucher code for username and password. NobliFi syncs generated vouchers to RADIUS for MikroTik authentication.</p>
-        <div class="error">$(if error)$(error)$(endif)</div>
-      </form>
-    </div>
+    <form name="login" action="$(link-login-only)" method="post">
+      <input type="hidden" name="dst" value="$(link-orig)">
+      <input type="hidden" name="popup" value="true">
+      <div class="mark">NF</div>
+      <h1>` + escapedPortalName + `</h1>
+      <p>Enter your voucher code to connect.</p>
+      <label for="username">Voucher code</label>
+      <input id="username" name="username" autocomplete="one-time-code" placeholder="NF-XXXXXXXX" autofocus>
+      <input id="password" name="password" type="hidden">
+      <button type="submit">Connect</button>
+      <p class="hint">Your voucher code is used for both username and password.</p>
+      <div class="error">$(if error)$(error)$(endif)</div>
+    </form>
   </main>
   <script>
     document.forms.login.addEventListener("submit", function () {
@@ -471,76 +448,6 @@ func renderHotspotLoginPage(activePlans []plans.Plan) string {
   </script>
 </body>
 </html>`
-}
-
-func renderPlanCards(activePlans []plans.Plan) string {
-	if len(activePlans) == 0 {
-		return `<div class="plan"><strong>Packages coming soon</strong><span class="price">NobliFi</span><span class="meta">Ask the attendant for an active voucher code.</span></div>`
-	}
-	var builder strings.Builder
-	for _, plan := range activePlans {
-		builder.WriteString(`<div class="plan"><strong>`)
-		builder.WriteString(html.EscapeString(plan.Name))
-		builder.WriteString(`</strong><span class="price">UGX `)
-		builder.WriteString(formatUGX(plan.Price))
-		builder.WriteString(`</span><span class="meta">`)
-		builder.WriteString(formatDuration(plan.DurationMinutes))
-		builder.WriteString(` access`)
-		if plan.DownloadSpeed != "" || plan.UploadSpeed != "" {
-			builder.WriteString(` - `)
-			builder.WriteString(html.EscapeString(plan.DownloadSpeed))
-			if plan.UploadSpeed != "" {
-				builder.WriteString(` down / `)
-				builder.WriteString(html.EscapeString(plan.UploadSpeed))
-				builder.WriteString(` up`)
-			}
-		}
-		if plan.MaxDevices > 0 {
-			builder.WriteString(` - `)
-			builder.WriteString(fmt.Sprintf("%d device", plan.MaxDevices))
-			if plan.MaxDevices != 1 {
-				builder.WriteString(`s`)
-			}
-		}
-		builder.WriteString(`</span></div>`)
-	}
-	return builder.String()
-}
-
-func formatDuration(minutes int) string {
-	if minutes <= 0 {
-		return "Timed"
-	}
-	if minutes%1440 == 0 {
-		days := minutes / 1440
-		return fmt.Sprintf("%d day%s", days, plural(days))
-	}
-	if minutes%60 == 0 {
-		hours := minutes / 60
-		return fmt.Sprintf("%d hour%s", hours, plural(hours))
-	}
-	return fmt.Sprintf("%d min", minutes)
-}
-
-func formatUGX(value int) string {
-	raw := fmt.Sprintf("%d", value)
-	if len(raw) <= 3 {
-		return raw
-	}
-	var parts []string
-	for len(raw) > 3 {
-		parts = append([]string{raw[len(raw)-3:]}, parts...)
-		raw = raw[:len(raw)-3]
-	}
-	parts = append([]string{raw}, parts...)
-	return strings.Join(parts, ",")
-}
-
-func plural(value int) string {
-	if value == 1 {
-		return ""
-	}
-	return "s"
 }
 
 func normalizeProvisioningBaseURL(baseURL string) string {

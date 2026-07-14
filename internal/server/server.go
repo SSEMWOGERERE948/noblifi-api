@@ -42,11 +42,12 @@ func Run() {
 
 	routerRepo := routers.NewRepository(db)
 	radiusService := radius.NewService(db)
+	radiusService.StartUDPServers(cfg.RadiusAuthPort, cfg.RadiusAcctPort, cfg.RadiusSecret)
 	routerService := routers.NewService(routerRepo, cfg)
 	planRepo := plans.NewRepository(db)
 	planService := plans.NewService(planRepo)
 	routers.NewHandler(routerService).RegisterRoutes(api)
-	provisioning.NewHandler(provisioning.NewService(routerRepo, cfg, radiusService, planService)).RegisterRoutes(api)
+	provisioning.NewHandler(provisioning.NewService(routerRepo, cfg, radiusService)).RegisterRoutes(api)
 
 	plans.NewHandler(planService).RegisterRoutes(api)
 

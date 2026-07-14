@@ -72,6 +72,7 @@ type RouterNetworkProfile struct {
 	CCTVGateway         string    `json:"cctv_gateway"`
 	CCTVPool            string    `json:"cctv_pool"`
 	HotspotDNSName      string    `json:"hotspot_dns_name"`
+	HotspotPortalName   string    `json:"hotspot_portal_name"`
 	WANMode             string    `gorm:"default:dhcp" json:"wan_mode"`
 	PPPoEUsername       *string   `json:"pppoe_username"`
 	PPPoEPassword       *string   `json:"pppoe_password"`
