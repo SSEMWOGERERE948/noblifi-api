@@ -46,6 +46,14 @@ type Config struct {
 	EnableAPISSLService      bool
 	RadiusAuthPort           int
 	RadiusAcctPort           int
+	WireGuardEnabled         bool
+	WireGuardEndpoint        string
+	WireGuardPort            int
+	WireGuardPublicKey       string
+	WireGuardInterface       string
+	WireGuardServerIP        string
+	WireGuardSubnetCIDR      string
+	WireGuardKeepalive       int
 	ProvisioningTokenTTLHour int
 }
 
@@ -88,6 +96,14 @@ func Load() Config {
 		EnableAPISSLService:      getBoolEnv("NOBLIFI_ENABLE_API_SSL_SERVICE", true),
 		RadiusAuthPort:           getIntEnv("NOBLIFI_RADIUS_AUTH_PORT", 1812),
 		RadiusAcctPort:           getIntEnv("NOBLIFI_RADIUS_ACCT_PORT", 1813),
+		WireGuardEnabled:         getBoolEnv("NOBLIFI_WIREGUARD_ENABLED", false),
+		WireGuardEndpoint:        strings.TrimSpace(getEnv("NOBLIFI_WIREGUARD_ENDPOINT", "")),
+		WireGuardPort:            getIntEnv("NOBLIFI_WIREGUARD_PORT", 51820),
+		WireGuardPublicKey:       strings.TrimSpace(getEnv("NOBLIFI_WIREGUARD_PUBLIC_KEY", "")),
+		WireGuardInterface:       getEnv("NOBLIFI_WIREGUARD_INTERFACE", "wg0"),
+		WireGuardServerIP:        getEnv("NOBLIFI_WIREGUARD_SERVER_IP", "10.77.0.1"),
+		WireGuardSubnetCIDR:      getEnv("NOBLIFI_WIREGUARD_SUBNET", "10.77.0.0/24"),
+		WireGuardKeepalive:       getIntEnv("NOBLIFI_WIREGUARD_KEEPALIVE", 25),
 		ProvisioningTokenTTLHour: 24,
 	}
 }

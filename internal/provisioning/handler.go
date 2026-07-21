@@ -14,13 +14,38 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Post("/provisioning/check-in", h.checkIn)
 	router.Get("/provisioning/check-in", h.checkIn)
 	router.Get("/provisioning/bootstrap/:token", h.bootstrap)
+	router.Get("/provisioning/wireguard/:token", h.wireGuard)
 	router.Get("/provisioning/hotspot-login/:token", h.hotspotLogin)
 	router.Get("/provisioning/interface", h.interfaceCheckIn)
 	router.Post("/provisioning/interface", h.interfaceCheckIn)
 	router.Get("/provisioning/config.rsc", h.config)
 	router.Get("/provisioning/config/:token", h.configByToken)
+	router.Post("/provisioning/wireguard-key", h.wireGuardKey)
+	router.Post("/provisioning/wireguard-status", h.wireGuardStatus)
 	router.Post("/provisioning/status", h.status)
 	router.Get("/provisioning/status", h.status)
+}
+
+func (h *Handler) wireGuardKey(c *fiber.Ctx) error {
+	var input WireGuardKeyInput
+	if err := c.BodyParser(&input); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	}
+	if err := h.service.WireGuardKey(input); err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
+	}
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+func (h *Handler) wireGuardStatus(c *fiber.Ctx) error {
+	var input WireGuardStatusInput
+	if err := c.BodyParser(&input); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	}
+	if err := h.service.WireGuardStatus(input); err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
+	}
+	return c.JSON(fiber.Map{"status": "ok"})
 }
 
 func (h *Handler) bootstrap(c *fiber.Ctx) error {
@@ -30,6 +55,16 @@ func (h *Handler) bootstrap(c *fiber.Ctx) error {
 	}
 	c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
 	c.Set(fiber.HeaderContentDisposition, `attachment; filename="noblifi-bootstrap.rsc"`)
+	return c.SendString(script)
+}
+
+func (h *Handler) wireGuard(c *fiber.Ctx) error {
+	script, err := h.service.WireGuardScript(c.Params("token"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, err.Error())
+	}
+	c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
+	c.Set(fiber.HeaderContentDisposition, `attachment; filename="noblifi-wireguard.rsc"`)
 	return c.SendString(script)
 }
 

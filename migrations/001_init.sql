@@ -32,6 +32,10 @@ CREATE TABLE IF NOT EXISTS routers (
   api_username text NULL,
   api_password_encrypted text NULL,
   radius_secret_encrypted text NULL,
+  wire_guard_tunnel_ip text UNIQUE NULL,
+  wire_guard_public_key text UNIQUE NULL,
+  wire_guard_status text NOT NULL DEFAULT 'disabled',
+  wire_guard_last_seen_at timestamp NULL,
   status text NOT NULL DEFAULT 'pending',
   claim_token text UNIQUE NOT NULL,
   claim_token_expires_at timestamp NULL,
@@ -40,6 +44,11 @@ CREATE TABLE IF NOT EXISTS routers (
   created_at timestamp NOT NULL DEFAULT now(),
   updated_at timestamp NOT NULL DEFAULT now()
 );
+
+ALTER TABLE routers ADD COLUMN IF NOT EXISTS wire_guard_tunnel_ip text UNIQUE;
+ALTER TABLE routers ADD COLUMN IF NOT EXISTS wire_guard_public_key text UNIQUE;
+ALTER TABLE routers ADD COLUMN IF NOT EXISTS wire_guard_status text NOT NULL DEFAULT 'disabled';
+ALTER TABLE routers ADD COLUMN IF NOT EXISTS wire_guard_last_seen_at timestamp NULL;
 
 CREATE TABLE IF NOT EXISTS router_setup_sessions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

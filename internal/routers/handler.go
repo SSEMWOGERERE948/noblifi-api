@@ -20,6 +20,8 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Get("/routers/:id", h.get)
 	router.Post("/routers/:id/regenerate-claim-token", h.regenerateClaimToken)
 	router.Post("/routers/:id/setup/remote-access", h.remoteAccess)
+	router.Get("/routers/:id/wireguard", h.wireGuard)
+	router.Post("/routers/:id/wireguard/prepare", h.prepareWireGuard)
 	router.Post("/routers/:id/setup/method", h.method)
 	router.Get("/routers/:id/network-profile", h.networkProfile)
 	router.Put("/routers/:id/network-profile", h.updateNetworkProfile)
@@ -28,6 +30,7 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Get("/routers/:id/bootstrap-script", h.bootstrapScript)
 	router.Get("/routers/:id/config-preview", h.configPreview)
 	router.Get("/routers/:id/config-install-command", h.configInstallCommand)
+	router.Get("/routers/:id/hotspot-install-command", h.hotspotInstallCommand)
 	router.Post("/routers/:id/deploy", h.deploy)
 	router.Post("/routers/:id/apply-config", h.applyConfig)
 }
@@ -120,6 +123,30 @@ func (h *Handler) remoteAccess(c *fiber.Ctx) error {
 	return c.JSON(session)
 }
 
+func (h *Handler) wireGuard(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
+	}
+	setup, err := h.service.WireGuardSetup(id)
+	if err != nil {
+		return err
+	}
+	return c.JSON(setup)
+}
+
+func (h *Handler) prepareWireGuard(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
+	}
+	setup, err := h.service.PrepareWireGuard(id)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	return c.JSON(setup)
+}
+
 func (h *Handler) method(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
@@ -194,6 +221,18 @@ func (h *Handler) configInstallCommand(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
 	}
 	command, err := h.service.ConfigInstallCommand(id)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	return c.JSON(fiber.Map{"script": command})
+}
+
+func (h *Handler) hotspotInstallCommand(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
+	}
+	command, err := h.service.HotspotInstallCommand(id)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
