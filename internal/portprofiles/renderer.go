@@ -154,6 +154,7 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	writeSafe(&builder, "/ip hotspot user profile remove [find name=\"noblifi-voucher-profile\"]", "cleanup hotspot user profile")
 	writeSafe(&builder, "/ip hotspot walled-garden remove [find comment=\"NobliFi captive portal\"]", "cleanup captive portal walled garden")
 	writeSafe(&builder, "/file remove [find name=\"noblifi/login.html\"]", "cleanup hotspot login file")
+	writeSafe(&builder, "/file remove [find name=\"noblifi/index.html\"]", "cleanup hotspot index file")
 	writeSafe(&builder, "/radius remove [find comment=\"NobliFi RADIUS\"]", "cleanup radius client")
 	writeSafe(&builder, "/ip firewall nat remove [find comment=\"NobliFi client NAT\"]", "cleanup nat")
 	writeSafe(&builder, fmt.Sprintf("/ip dhcp-client remove [find interface=%s]", wan), "cleanup wan dhcp client")
@@ -369,10 +370,11 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 			mode = "https"
 		}
 		writeSafe(builder, fmt.Sprintf("/tool fetch url=\"%s\" mode=%s dst-path=\"noblifi/login.html\"", escape(options.LoginPageURL), mode), "fetch hotspot login")
+		writeSafe(builder, fmt.Sprintf("/tool fetch url=\"%s\" mode=%s dst-path=\"noblifi/index.html\"", escape(options.LoginPageURL), mode), "fetch hotspot index")
 		writeSafe(builder, "/ip hotspot profile set noblifi-hotspot-profile html-directory=noblifi", "set html directory")
 		writeSafe(builder, "/system scheduler remove [find name=noblifi-hotspot-login-refresh]", "cleanup hotspot login refresh")
-		writeSafe(builder, fmt.Sprintf("/system scheduler add name=noblifi-hotspot-login-refresh interval=10m on-event=\"/tool fetch url=\\\"%s\\\" mode=%s dst-path=\\\"noblifi/login.html\\\"\" comment=\"NobliFi HotSpot login refresh\"", escape(options.LoginPageURL), mode), "schedule hotspot login refresh")
-		builder.WriteString(":put \"NobliFi HotSpot login.html installed\"\n")
+		writeSafe(builder, fmt.Sprintf("/system scheduler add name=noblifi-hotspot-login-refresh interval=10m on-event=\"/tool fetch url=\\\"%s\\\" mode=%s dst-path=\\\"noblifi/login.html\\\"; /tool fetch url=\\\"%s\\\" mode=%s dst-path=\\\"noblifi/index.html\\\"\" comment=\"NobliFi HotSpot login refresh\"", escape(options.LoginPageURL), mode, escape(options.LoginPageURL), mode), "schedule hotspot login refresh")
+		builder.WriteString(":put \"NobliFi HotSpot login and index pages installed\"\n")
 	}
 	writeSafe(builder, fmt.Sprintf("/ip hotspot add name=noblifi-hotspot interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no", options.HotspotBridge), "add hotspot server")
 	builder.WriteString("\n")
