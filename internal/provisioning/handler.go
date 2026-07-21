@@ -14,6 +14,7 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Post("/provisioning/check-in", h.checkIn)
 	router.Get("/provisioning/check-in", h.checkIn)
 	router.Get("/provisioning/bootstrap/:token", h.bootstrap)
+	router.Get("/provisioning/install/:token", h.install)
 	router.Get("/provisioning/wireguard/:token", h.wireGuard)
 	router.Get("/provisioning/hotspot-login/:token", h.hotspotLogin)
 	router.Get("/provisioning/interface", h.interfaceCheckIn)
@@ -55,6 +56,16 @@ func (h *Handler) bootstrap(c *fiber.Ctx) error {
 	}
 	c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
 	c.Set(fiber.HeaderContentDisposition, `attachment; filename="noblifi-bootstrap.rsc"`)
+	return c.SendString(script)
+}
+
+func (h *Handler) install(c *fiber.Ctx) error {
+	script, err := h.service.InstallScript(c.Params("token"), clientIP(c))
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, err.Error())
+	}
+	c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
+	c.Set(fiber.HeaderContentDisposition, `attachment; filename="noblifi-install.rsc"`)
 	return c.SendString(script)
 }
 

@@ -129,30 +129,19 @@ func TestConfigInstallCommandFetchesImportsAndCleansUp(t *testing.T) {
 	}
 }
 
-func TestHotspotInstallCommandRunsDiscoveryConfigAndStatus(t *testing.T) {
+func TestHotspotInstallCommandFetchesSingleCombinedInstallScript(t *testing.T) {
 	script := hotspotInstallCommand("NOB-1234-5678", "https://api.example.com/api/v1/provisioning")
 
 	required := []string{
-		`NobliFi HotSpot install starting`,
-		`/tool fetch url="https://api.example.com/api/v1/provisioning/bootstrap/NOB-1234-5678" mode=https dst-path="noblifi-bootstrap.rsc"`,
-		`/import file-name="noblifi-bootstrap.rsc"`,
-		`/file remove "noblifi-bootstrap.rsc"`,
-		`/tool fetch url="https://api.example.com/api/v1/provisioning/config/NOB-1234-5678" mode=https dst-path="noblifi-config.rsc"`,
-		`/import file-name="noblifi-config.rsc"`,
-		`/file remove "noblifi-config.rsc"`,
-		`/tool fetch url="https://api.example.com/api/v1/provisioning/status?token=NOB-1234-5678&status=installed" mode=https keep-result=no`,
-		`NobliFi HotSpot install completed`,
+		`/tool fetch url="https://api.example.com/api/v1/provisioning/install/NOB-1234-5678" mode=https dst-path="noblifi-install.rsc"`,
+		`:delay 2s`,
+		`/import file-name="noblifi-install.rsc"`,
+		`:delay 1s`,
+		`/file remove "noblifi-install.rsc"`,
 	}
 	for _, item := range required {
 		if !strings.Contains(script, item) {
-			t.Fatalf("expected complete install command to contain %q, got:\n%s", item, script)
+			t.Fatalf("expected combined install command to contain %q, got:\n%s", item, script)
 		}
-	}
-
-	bootstrapIndex := strings.Index(script, "/bootstrap/NOB-1234-5678")
-	configIndex := strings.Index(script, "/config/NOB-1234-5678")
-	statusIndex := strings.Index(script, "/status?token=NOB-1234-5678&status=installed")
-	if bootstrapIndex == -1 || configIndex == -1 || statusIndex == -1 || !(bootstrapIndex < configIndex && configIndex < statusIndex) {
-		t.Fatalf("expected bootstrap, config, then status order, got:\n%s", script)
 	}
 }
