@@ -170,6 +170,72 @@ func (s *Service) renderOptionsForRouter(router routers.Router) portprofiles.Ren
 	}
 }
 
+func (s *Service) WireGuardScript(token string) (string, error) {
+	router, err := s.repo.FindByClaimToken(token)
+	if err != nil {
+		return "", errors.New("invalid claim token")
+	}
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) {
+		return "", errors.New("claim token expired")
+	}
+	return routers.RenderWireGuardRouterOS(router, s.cfg), nil
+}
+
+type WireGuardKeyInput struct {
+	ClaimToken string `json:"claim_token"`
+	Token      string `json:"token"`
+	PublicKey  string `json:"public_key"`
+}
+
+type WireGuardStatusInput struct {
+	ClaimToken string `json:"claim_token"`
+	Token      string `json:"token"`
+	Status     string `json:"status"`
+}
+
+func (s *Service) WireGuardKey(input WireGuardKeyInput) error {
+	token := strings.TrimSpace(input.ClaimToken)
+	if token == "" {
+		token = strings.TrimSpace(input.Token)
+	}
+	if token == "" {
+		return errors.New("invalid claim token")
+	}
+	if strings.TrimSpace(input.PublicKey) == "" {
+		return errors.New("invalid public key")
+	}
+	if err := routers.ValidateWireGuardPublicKey(input.PublicKey); err != nil {
+		return err
+	}
+	router, err := s.repo.FindByClaimToken(token)
+	if err != nil {
+		return errors.New("invalid claim token")
+	}
+	key := strings.TrimSpace(input.PublicKey)
+	router.WireGuardPublicKey = &key
+	router.WireGuardStatus = "awaiting_vps_peer"
+	return s.repo.Save(&router)
+}
+
+func (s *Service) WireGuardStatus(input WireGuardStatusInput) error {
+	token := strings.TrimSpace(input.ClaimToken)
+	if token == "" {
+		token = strings.TrimSpace(input.Token)
+	}
+	if token == "" {
+		return errors.New("invalid claim token")
+	}
+	if strings.TrimSpace(input.Status) == "" {
+		return errors.New("status required")
+	}
+	router, err := s.repo.FindByClaimToken(token)
+	if err != nil {
+		return errors.New("invalid claim token")
+	}
+	router.WireGuardStatus = strings.TrimSpace(input.Status)
+	return s.repo.Save(&router)
+}
+
 type InterfaceCheckIn struct {
 	Name       string `json:"name"`
 	Type       string `json:"type"`

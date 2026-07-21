@@ -18,6 +18,9 @@ type Router struct {
 	MacAddress            *string                `json:"mac_address"`
 	RouterOSVersion       *string                `json:"routeros_version"`
 	ManagementIP          *string                `json:"management_ip"`
+	WireGuardTunnelIP     *string                `gorm:"type:inet" json:"wireguard_tunnel_ip"`
+	WireGuardPublicKey    *string                `json:"wireguard_public_key"`
+	WireGuardStatus       string                 `gorm:"default:''" json:"wireguard_status"`
 	APIUsername           *string                `json:"api_username"`
 	APIPasswordEncrypted  *string                `json:"api_password_encrypted"`
 	RadiusSecretEncrypted *string                `json:"radius_secret_encrypted"`

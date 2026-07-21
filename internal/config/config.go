@@ -22,6 +22,14 @@ type Config struct {
 	RouterIdentityPrefix     string
 	RouterAPIUsername        string
 	RouterAPIPassword        string
+	WireGuardEnabled         bool
+	WireGuardInterface       string
+	WireGuardEndpoint        string
+	WireGuardPublicKey       string
+	WireGuardServerIP        string
+	WireGuardPort            int
+	WireGuardSubnetCIDR      string
+	WireGuardKeepalive       int
 	HotspotBridgeName        string
 	StaffBridgeName          string
 	POSBridgeName            string
