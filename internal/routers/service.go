@@ -162,7 +162,16 @@ func (s *Service) validateAssignablePorts(routerID uuid.UUID, inputs []portprofi
 func isVirtualInterface(iface RouterInterface) bool {
 	typeName := strings.ToLower(interfaceType(iface))
 	name := strings.ToLower(iface.Name)
-	return strings.Contains(typeName, "bridge") || strings.Contains(name, "bridge") || strings.HasPrefix(name, "br-") || strings.Contains(typeName, "loopback") || strings.Contains(typeName, "tunnel")
+	return strings.Contains(typeName, "bridge") ||
+		strings.Contains(typeName, "loopback") ||
+		strings.Contains(typeName, "tunnel") ||
+		strings.Contains(typeName, "wireguard") ||
+		typeName == "wg" ||
+		strings.Contains(name, "bridge") ||
+		strings.HasPrefix(name, "br-") ||
+		strings.Contains(name, "wireguard") ||
+		strings.HasPrefix(name, "wg") ||
+		strings.Contains(name, "-wg")
 }
 
 func interfaceType(iface RouterInterface) string {
@@ -317,6 +326,9 @@ func (s *Service) ConfigPreview(routerID uuid.UUID) (ConfigPreview, error) {
 		assignments = portprofiles.DefaultAssignments()
 	}
 	if err := portprofiles.Validate(assignments); err != nil {
+		return ConfigPreview{}, err
+	}
+	if err := s.validateAssignablePorts(routerID, assignments); err != nil {
 		return ConfigPreview{}, err
 	}
 	options, err := s.renderOptionsForRouter(routerID)

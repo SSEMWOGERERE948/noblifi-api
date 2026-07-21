@@ -95,6 +95,25 @@ func TestRouterSupportsWireGuardRequiresRouterOS7(t *testing.T) {
 	}
 }
 
+func TestWireGuardInterfacesAreVirtual(t *testing.T) {
+	cases := []RouterInterface{
+		{Name: "noblifi-wg"},
+		{Name: "wg0"},
+		{Name: "ether2", Type: stringPtr("wg")},
+		{Name: "ether3", Type: stringPtr("wireguard")},
+	}
+	for _, iface := range cases {
+		if !isVirtualInterface(iface) {
+			t.Fatalf("expected %s/%s to be virtual", iface.Name, interfaceType(iface))
+		}
+	}
+
+	ether := RouterInterface{Name: "ether2", Type: stringPtr("ether")}
+	if isVirtualInterface(ether) {
+		t.Fatalf("expected %s/%s to be assignable", ether.Name, interfaceType(ether))
+	}
+}
+
 func TestBootstrapScriptFetchesImportsAndCleansUp(t *testing.T) {
 	script := bootstrapScript("NOB-1234-5678", "https://api.example.com/api/v1/provisioning")
 
@@ -110,6 +129,10 @@ func TestBootstrapScriptFetchesImportsAndCleansUp(t *testing.T) {
 			t.Fatalf("expected bootstrap command to contain %q, got:\n%s", item, script)
 		}
 	}
+}
+
+func stringPtr(value string) *string {
+	return &value
 }
 
 func TestConfigInstallCommandFetchesImportsAndCleansUp(t *testing.T) {
