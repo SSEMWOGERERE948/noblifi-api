@@ -3,6 +3,9 @@ package provisioning
 import (
 	"strings"
 	"testing"
+
+	"github.com/noblifi/noblifi/backend/internal/portprofiles"
+	"github.com/noblifi/noblifi/backend/internal/routers"
 )
 
 func TestRenderHotspotLoginPageIsVoucherOnlyNobliFiPortal(t *testing.T) {
@@ -26,6 +29,30 @@ func TestRenderHotspotLoginPageIsVoucherOnlyNobliFiPortal(t *testing.T) {
 		if strings.Contains(html, item) {
 			t.Fatalf("voucher-only hotspot login page must not contain %q, got:\n%s", item, html)
 		}
+	}
+}
+
+type radiusRegistration struct {
+	nasName string
+}
+
+func (r *radiusRegistration) RegisterNAS(nasName, shortName, secret, description string) error {
+	r.nasName = nasName
+	return nil
+}
+
+func TestRegisterRadiusNASPrefersWireGuardTunnelAddress(t *testing.T) {
+	tunnelIP := "10.77.0.12"
+	registrar := &radiusRegistration{}
+	service := Service{radius: registrar}
+	router := routers.Router{Name: "Branch", WireGuardTunnelIP: &tunnelIP}
+	options := portprofiles.RenderOptions{RouterIdentity: "NobliFi-Branch", RadiusSecret: "noblifi"}
+
+	if err := service.registerRadiusNAS(router, options, "198.51.100.20"); err != nil {
+		t.Fatalf("register NAS: %v", err)
+	}
+	if registrar.nasName != tunnelIP {
+		t.Fatalf("expected tunnel NAS address %q, got %q", tunnelIP, registrar.nasName)
 	}
 }
 

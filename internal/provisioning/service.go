@@ -38,6 +38,23 @@ func (s *Service) BootstrapScript(token string) (string, error) {
 	return renderBootstrapScript(token, s.cfg.ProvisioningBaseURL), nil
 }
 
+func (s *Service) WireGuardScript(token string) (string, error) {
+	if err := routers.ValidateWireGuardConfig(s.cfg); err != nil {
+		return "", err
+	}
+	router, err := s.repo.FindByClaimToken(token)
+	if err != nil {
+		return "", errors.New("invalid claim token")
+	}
+	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
+		return "", errors.New("WireGuard has not been prepared for this router")
+	}
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
+		return "", errors.New("claim token expired")
+	}
+	return routers.RenderWireGuardRouterOS(router, s.cfg), nil
+}
+
 func (s *Service) HotspotLoginPage(token string) (string, error) {
 	router, err := s.repo.FindByClaimToken(token)
 	if err != nil {
@@ -88,6 +105,9 @@ func (s *Service) registerRadiusNAS(router routers.Router, options portprofiles.
 		return nil
 	}
 	nasName := firstForwardedIP(sourceIP)
+	if router.WireGuardTunnelIP != nil && strings.TrimSpace(*router.WireGuardTunnelIP) != "" {
+		nasName = strings.TrimSpace(*router.WireGuardTunnelIP)
+	}
 	if nasName == "" {
 		return nil
 	}
@@ -100,6 +120,99 @@ func (s *Service) registerRadiusNAS(router routers.Router, options portprofiles.
 		description += " serial=" + strings.TrimSpace(*router.SerialNumber)
 	}
 	return s.radius.RegisterNAS(nasName, shortName, options.RadiusSecret, description)
+}
+
+type WireGuardKeyInput struct {
+	ClaimToken string `json:"claim_token"`
+	Token      string `json:"token"`
+	PublicKey  string `json:"public_key"`
+}
+
+type WireGuardStatusInput struct {
+	ClaimToken string `json:"claim_token"`
+	Token      string `json:"token"`
+	Status     string `json:"status"`
+}
+
+func (s *Service) WireGuardKey(input WireGuardKeyInput) error {
+	token := strings.TrimSpace(input.ClaimToken)
+	if token == "" {
+		token = strings.TrimSpace(input.Token)
+	}
+	if token == "" {
+		return errors.New("claim token is required")
+	}
+	if err := routers.ValidateWireGuardPublicKey(input.PublicKey); err != nil {
+		return err
+	}
+	router, err := s.repo.FindByClaimToken(token)
+	if err != nil {
+		return errors.New("invalid claim token")
+	}
+	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
+		return errors.New("WireGuard has not been prepared for this router")
+	}
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
+		return errors.New("claim token expired")
+	}
+	publicKey := strings.TrimSpace(input.PublicKey)
+	now := time.Now()
+	router.WireGuardPublicKey = &publicKey
+	router.WireGuardStatus = "awaiting_vps_peer"
+	router.WireGuardLastSeenAt = &now
+	if err := s.repo.Save(&router); err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]string{
+		"public_key": publicKey,
+		"tunnel_ip":  strings.TrimSpace(*router.WireGuardTunnelIP),
+	})
+	return s.repo.CreateConfigLog(&routers.RouterConfigLog{
+		RouterID:        router.ID,
+		Action:          "wireguard_key_reported",
+		Status:          router.WireGuardStatus,
+		ResponsePayload: payload,
+	})
+}
+
+func (s *Service) WireGuardStatus(input WireGuardStatusInput) error {
+	token := strings.TrimSpace(input.ClaimToken)
+	if token == "" {
+		token = strings.TrimSpace(input.Token)
+	}
+	status := strings.ToLower(strings.TrimSpace(input.Status))
+	if token == "" {
+		return errors.New("claim token is required")
+	}
+	if status != "connected" && status != "failed" {
+		return errors.New("WireGuard status must be connected or failed")
+	}
+	router, err := s.repo.FindByClaimToken(token)
+	if err != nil {
+		return errors.New("invalid claim token")
+	}
+	if router.WireGuardTunnelIP == nil || router.WireGuardPublicKey == nil {
+		return errors.New("WireGuard setup is incomplete for this router")
+	}
+	now := time.Now()
+	router.WireGuardStatus = status
+	router.WireGuardLastSeenAt = &now
+	if status == "connected" {
+		router.ManagementIP = router.WireGuardTunnelIP
+	}
+	if err := s.repo.Save(&router); err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]string{
+		"status":    status,
+		"tunnel_ip": strings.TrimSpace(*router.WireGuardTunnelIP),
+	})
+	return s.repo.CreateConfigLog(&routers.RouterConfigLog{
+		RouterID:        router.ID,
+		Action:          "wireguard_status",
+		Status:          status,
+		ResponsePayload: payload,
+	})
 }
 
 func firstForwardedIP(value string) string {

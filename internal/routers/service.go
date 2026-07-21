@@ -191,8 +191,8 @@ type ConfigPreview struct {
 
 func (s *Service) SaveRemoteAccess(routerID uuid.UUID, input RemoteAccessInput) (RouterSetupSession, error) {
 	method := strings.TrimSpace(input.RemoteAccessMethod)
-	if method != "bootstrap" && method != "direct_api" {
-		return RouterSetupSession{}, errors.New("remote_access_method must be bootstrap or direct_api")
+	if method != "bootstrap" && method != "direct_api" && method != "wireguard" {
+		return RouterSetupSession{}, errors.New("remote_access_method must be bootstrap, direct_api, or wireguard")
 	}
 	router, err := s.repo.Find(routerID)
 	if err != nil {
@@ -210,6 +210,11 @@ func (s *Service) SaveRemoteAccess(routerID uuid.UUID, input RemoteAccessInput) 
 		encrypted := "encrypted-placeholder:" + input.Password
 		router.APIPasswordEncrypted = &encrypted
 		if err := s.repo.Save(&router); err != nil {
+			return RouterSetupSession{}, err
+		}
+	}
+	if method == "wireguard" {
+		if _, err := s.PrepareWireGuard(routerID); err != nil {
 			return RouterSetupSession{}, err
 		}
 	}
@@ -272,6 +277,17 @@ func (s *Service) ConfigInstallCommand(routerID uuid.UUID) (string, error) {
 		return "", err
 	}
 	return configInstallCommand(router.ClaimToken, s.cfg.ProvisioningBaseURL), nil
+}
+
+func (s *Service) HotspotInstallCommand(routerID uuid.UUID) (string, error) {
+	if _, err := s.ConfigPreview(routerID); err != nil {
+		return "", err
+	}
+	router, err := s.repo.Find(routerID)
+	if err != nil {
+		return "", err
+	}
+	return hotspotInstallCommand(router.ClaimToken, s.cfg.ProvisioningBaseURL), nil
 }
 
 func (s *Service) ConfigPreview(routerID uuid.UUID) (ConfigPreview, error) {
@@ -353,8 +369,7 @@ func bootstrapScript(token, baseURL string) string {
 	fetchMode := provisioningFetchMode(baseURL)
 	bootstrapURL := baseURL + "/bootstrap/" + token
 
-	return fmt.Sprintf(`/tool fetch url="%s" mode=%s dst-path=noblifi-bootstrap.rsc
-/import file-name=noblifi-bootstrap.rsc`, bootstrapURL, fetchMode)
+	return routerOSFetchImportCommand(bootstrapURL, fetchMode, "noblifi-bootstrap.rsc")
 }
 
 func configInstallCommand(token, baseURL string) string {
@@ -362,8 +377,28 @@ func configInstallCommand(token, baseURL string) string {
 	fetchMode := provisioningFetchMode(baseURL)
 	configURL := baseURL + "/config/" + token
 
-	return fmt.Sprintf(`/tool fetch url="%s" mode=%s dst-path=noblifi-config.rsc
-/import file-name=noblifi-config.rsc`, configURL, fetchMode)
+	return routerOSFetchImportCommand(configURL, fetchMode, "noblifi-config.rsc")
+}
+
+func hotspotInstallCommand(token, baseURL string) string {
+	baseURL = normalizeProvisioningBaseURL(baseURL)
+	fetchMode := provisioningFetchMode(baseURL)
+	bootstrapURL := baseURL + "/bootstrap/" + token
+	configURL := baseURL + "/config/" + token
+	statusURL := baseURL + "/status?token=" + token + "&status=installed"
+
+	return strings.Join([]string{
+		`:put "NobliFi HotSpot install starting"`,
+		routerOSFetchImportCommand(bootstrapURL, fetchMode, "noblifi-bootstrap.rsc"),
+		`:put "NobliFi router discovery completed"`,
+		routerOSFetchImportCommand(configURL, fetchMode, "noblifi-config.rsc"),
+		fmt.Sprintf(`/tool fetch url="%s" mode=%s keep-result=no`, statusURL, fetchMode),
+		`:put "NobliFi HotSpot install completed"`,
+	}, "; ")
+}
+
+func routerOSFetchImportCommand(url, mode, filename string) string {
+	return fmt.Sprintf(`/tool fetch url="%s" mode=%s dst-path="%s"; :delay 2s; /import file-name="%s"; :delay 1s; /file remove "%s"`, url, mode, filename, filename, filename)
 }
 
 func hotspotLoginURL(token, baseURL string) string {
