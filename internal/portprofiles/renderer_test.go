@@ -121,6 +121,10 @@ func TestRenderRouterOSInstallsHotspotLoginTemplate(t *testing.T) {
 		"/tool fetch url=\"https://api.example.com/api/v1/provisioning/hotspot-login/NOB-1234-5678\" mode=https dst-path=($hotspotHtmlPath . \"/login.html\")",
 		"/tool fetch url=\"https://api.example.com/api/v1/provisioning/hotspot-login/NOB-1234-5678\" mode=https dst-path=($hotspotHtmlPath . \"/index.html\")",
 		"/ip hotspot profile set noblifi-hotspot-profile html-directory=$hotspotHtmlDir",
+		"/ip hotspot add name=noblifi-hotspot interface=br-hotspot address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no",
+		"/ip hotspot set [find name=noblifi-hotspot] interface=br-hotspot address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no",
+		`:if ([:len [/interface bridge port find bridge=br-hotspot]] = 0) do={ :error "No HotSpot LAN ports were added to br-hotspot" }`,
+		`:if ([:len [/ip hotspot find name=noblifi-hotspot interface=br-hotspot disabled=no]] = 0) do={ :error "NobliFi HotSpot server is not enabled on br-hotspot" }`,
 		"/system scheduler add name=noblifi-hotspot-login-refresh interval=10m",
 		`/index.html\"`,
 	}
