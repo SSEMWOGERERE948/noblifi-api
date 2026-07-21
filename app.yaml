@@ -21,11 +21,20 @@ env_variables:
 
   # IMPORTANT:
   # Do NOT use 127.0.0.1 unless the RADIUS server is running on the same machine.
-  # MikroTik must reach this address from the internet/LAN.
-  # App Engine Standard is not suitable for UDP RADIUS 1812/1813.
-  # Use the public IP/domain of your actual RADIUS server.
-  NOBLIFI_RADIUS_SERVER: "154.65.105.14"
+  # MikroTik reaches RADIUS through the WireGuard tunnel.
+  # App Engine Standard is not suitable for hosting UDP RADIUS 1812/1813.
+  # Run RADIUS on the VPS at the WireGuard server address below.
+  NOBLIFI_RADIUS_SERVER: "10.77.0.1"
   NOBLIFI_RADIUS_SECRET: "noblifi"
+
+  NOBLIFI_WIREGUARD_ENABLED: "true"
+  NOBLIFI_WIREGUARD_ENDPOINT: "154.65.105.14"
+  NOBLIFI_WIREGUARD_PORT: "51820"
+  NOBLIFI_WIREGUARD_PUBLIC_KEY: "/b1RR6PVO9LE6+Dp5BBgioQ0APg3LhfSqP2RkJ/Gxm0="
+  NOBLIFI_WIREGUARD_INTERFACE: "wg0"
+  NOBLIFI_WIREGUARD_SERVER_IP: "10.77.0.1"
+  NOBLIFI_WIREGUARD_SUBNET: "10.77.0.0/24"
+  NOBLIFI_WIREGUARD_KEEPALIVE: "25"
 
   NOBLIFI_ROUTER_IDENTITY_PREFIX: "NobliFi"
   NOBLIFI_ROUTER_API_USERNAME: "noblifi-api"

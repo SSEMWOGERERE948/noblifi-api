@@ -261,11 +261,7 @@ func (s *Service) Interfaces(routerID uuid.UUID) ([]RouterInterface, error) {
 }
 
 func (s *Service) BootstrapScript(routerID uuid.UUID) (string, error) {
-	router, err := s.repo.Find(routerID)
-	if err != nil {
-		return "", err
-	}
-	return bootstrapScript(router.ClaimToken, s.cfg.ProvisioningBaseURL), nil
+	return s.HotspotInstallCommand(routerID)
 }
 
 func (s *Service) ConfigInstallCommand(routerID uuid.UUID) (string, error) {
