@@ -115,13 +115,14 @@ func TestRenderRouterOSInstallsHotspotLoginTemplate(t *testing.T) {
 
 	required := []string{
 		"/radius add service=hotspot address=203.0.113.10",
-		"html-directory=noblifi",
-		":if ([:len [/file find name=\"noblifi\"]] = 0) do={ /file make-directory noblifi }",
-		"/tool fetch url=\"https://api.example.com/api/v1/provisioning/hotspot-login/NOB-1234-5678\" mode=https dst-path=\"noblifi/login.html\"",
-		"/tool fetch url=\"https://api.example.com/api/v1/provisioning/hotspot-login/NOB-1234-5678\" mode=https dst-path=\"noblifi/index.html\"",
-		"/ip hotspot profile set noblifi-hotspot-profile html-directory=noblifi",
+		`:if ([:len [/file find name="flash" type="directory"]] > 0) do={ :set hotspotHtmlDir "flash/noblifi"; :set hotspotHtmlPath "flash/noblifi" }`,
+		"html-directory=$hotspotHtmlDir",
+		":if ([:len [/file find name=$hotspotHtmlPath]] = 0) do={ /file make-directory $hotspotHtmlPath }",
+		"/tool fetch url=\"https://api.example.com/api/v1/provisioning/hotspot-login/NOB-1234-5678\" mode=https dst-path=($hotspotHtmlPath . \"/login.html\")",
+		"/tool fetch url=\"https://api.example.com/api/v1/provisioning/hotspot-login/NOB-1234-5678\" mode=https dst-path=($hotspotHtmlPath . \"/index.html\")",
+		"/ip hotspot profile set noblifi-hotspot-profile html-directory=$hotspotHtmlDir",
 		"/system scheduler add name=noblifi-hotspot-login-refresh interval=10m",
-		`dst-path=\"noblifi/index.html\"`,
+		`/index.html\"`,
 	}
 	for _, item := range required {
 		if !strings.Contains(script, item) {
