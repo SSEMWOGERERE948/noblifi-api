@@ -280,6 +280,9 @@ func (s *Service) ConfigInstallCommand(routerID uuid.UUID) (string, error) {
 }
 
 func (s *Service) HotspotInstallCommand(routerID uuid.UUID) (string, error) {
+	if err := s.prepareWireGuardForInstall(routerID); err != nil {
+		return "", err
+	}
 	if _, err := s.ConfigPreview(routerID); err != nil {
 		return "", err
 	}
@@ -288,6 +291,21 @@ func (s *Service) HotspotInstallCommand(routerID uuid.UUID) (string, error) {
 		return "", err
 	}
 	return hotspotInstallCommand(router.ClaimToken, s.cfg.ProvisioningBaseURL), nil
+}
+
+func (s *Service) prepareWireGuardForInstall(routerID uuid.UUID) error {
+	if !s.cfg.WireGuardEnabled || ValidateWireGuardConfig(s.cfg) != nil {
+		return nil
+	}
+	router, err := s.repo.Find(routerID)
+	if err != nil {
+		return err
+	}
+	if !routerSupportsWireGuard(router.RouterOSVersion) {
+		return nil
+	}
+	_, err = s.PrepareWireGuard(routerID)
+	return err
 }
 
 func (s *Service) ConfigPreview(routerID uuid.UUID) (ConfigPreview, error) {
@@ -383,18 +401,9 @@ func configInstallCommand(token, baseURL string) string {
 func hotspotInstallCommand(token, baseURL string) string {
 	baseURL = normalizeProvisioningBaseURL(baseURL)
 	fetchMode := provisioningFetchMode(baseURL)
-	bootstrapURL := baseURL + "/bootstrap/" + token
-	configURL := baseURL + "/config/" + token
-	statusURL := baseURL + "/status?token=" + token + "&status=installed"
+	installURL := baseURL + "/install/" + token
 
-	return strings.Join([]string{
-		`:put "NobliFi HotSpot install starting"`,
-		routerOSFetchImportCommand(bootstrapURL, fetchMode, "noblifi-bootstrap.rsc"),
-		`:put "NobliFi router discovery completed"`,
-		routerOSFetchImportCommand(configURL, fetchMode, "noblifi-config.rsc"),
-		fmt.Sprintf(`/tool fetch url="%s" mode=%s keep-result=no`, statusURL, fetchMode),
-		`:put "NobliFi HotSpot install completed"`,
-	}, "; ")
+	return routerOSFetchImportCommand(installURL, fetchMode, "noblifi-install.rsc")
 }
 
 func routerOSFetchImportCommand(url, mode, filename string) string {

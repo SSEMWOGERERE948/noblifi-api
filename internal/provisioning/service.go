@@ -38,6 +38,42 @@ func (s *Service) BootstrapScript(token string) (string, error) {
 	return renderBootstrapScript(token, s.cfg.ProvisioningBaseURL), nil
 }
 
+func (s *Service) InstallScript(token, sourceIP string) (string, error) {
+	router, err := s.repo.FindByClaimToken(token)
+	if err != nil {
+		return "", errors.New("invalid claim token")
+	}
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
+		return "", errors.New("claim token expired")
+	}
+
+	configScript, err := s.ClaimConfig(token, "", sourceIP)
+	if err != nil {
+		return "", err
+	}
+
+	var builder strings.Builder
+	builder.WriteString("# NobliFi complete MikroTik install\n")
+	builder.WriteString("# Discovery, management tunnel when prepared, HotSpot, RADIUS, NAT, DHCP, captive portal, and install status.\n\n")
+	builder.WriteString(`:put "NobliFi complete install starting"`)
+	builder.WriteString("\n\n")
+	builder.WriteString(renderBootstrapScript(token, s.cfg.ProvisioningBaseURL))
+	builder.WriteString("\n\n")
+	if shouldIncludeWireGuard(router, s.cfg) {
+		builder.WriteString(routers.RenderWireGuardRouterOS(router, s.cfg))
+		builder.WriteString("\n\n")
+	} else {
+		builder.WriteString(`:put "NobliFi WireGuard skipped: not enabled or not prepared for this router"`)
+		builder.WriteString("\n\n")
+	}
+	builder.WriteString(configScript)
+	builder.WriteString("\n")
+	builder.WriteString(renderStatusCommand(token, "installed", s.cfg.ProvisioningBaseURL))
+	builder.WriteString("\n")
+	builder.WriteString(`:put "NobliFi complete install completed"`)
+	return builder.String(), nil
+}
+
 func (s *Service) WireGuardScript(token string) (string, error) {
 	if err := routers.ValidateWireGuardConfig(s.cfg); err != nil {
 		return "", err
@@ -503,6 +539,20 @@ func renderBootstrapScript(token, baseURL string) string {
 /tool fetch url=$statusUrl mode=%s keep-result=no
 
 :put "NobliFi router linked. Return to the dashboard and choose automatic or manual setup."`, token, baseURL, fetchMode, fetchMode, fetchMode)
+}
+
+func shouldIncludeWireGuard(router routers.Router, cfg config.Config) bool {
+	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
+		return false
+	}
+	return routers.ValidateWireGuardConfig(cfg) == nil
+}
+
+func renderStatusCommand(token, status, baseURL string) string {
+	baseURL = normalizeProvisioningBaseURL(baseURL)
+	fetchMode := provisioningFetchMode(baseURL)
+	statusURL := baseURL + "/status?token=" + token + "&status=" + status
+	return fmt.Sprintf(`/tool fetch url="%s" mode=%s keep-result=no`, statusURL, fetchMode)
 }
 
 func hotspotLoginURL(token, baseURL string) string {
