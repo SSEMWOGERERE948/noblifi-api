@@ -358,10 +358,10 @@ func writeHotspotNetwork(builder *strings.Builder, options RenderOptions, interf
 
 func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotspotGateway string) {
 	builder.WriteString("# DNS, NAT, RADIUS, and HotSpot service setup\n")
-	writeSafe(builder, "/ip dns set allow-remote-requests=yes", "enable dns forwarding")
-	writeSafe(builder, "/ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment=\"NobliFi client NAT\"", "add nat")
-	writeSafe(builder, fmt.Sprintf("/radius add service=hotspot address=%s secret=\"%s\" authentication-port=1812 accounting-port=1813 timeout=3s comment=\"NobliFi RADIUS\"", options.RadiusServer, escape(options.RadiusSecret)), "add radius client")
-	writeSafe(builder, "/radius incoming set accept=yes", "enable radius incoming")
+	writeCritical(builder, "/ip dns set allow-remote-requests=yes", "enable dns forwarding")
+	writeCritical(builder, "/ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment=\"NobliFi client NAT\"", "add nat")
+	writeCritical(builder, fmt.Sprintf("/radius add service=hotspot address=%s secret=\"%s\" authentication-port=1812 accounting-port=1813 timeout=3s comment=\"NobliFi RADIUS\"", options.RadiusServer, escape(options.RadiusSecret)), "add radius client")
+	writeCritical(builder, "/radius incoming set accept=yes", "enable radius incoming")
 	builder.WriteString(":put \"NobliFi RADIUS client configured\"\n")
 	writeSafe(builder, ":if ([:len [/file find name=$hotspotHtmlPath]] = 0) do={ /file make-directory $hotspotHtmlPath }", "ensure hotspot html directory")
 	writeSafe(builder, "/ip hotspot user profile add name=noblifi-voucher-profile", "add hotspot user profile")
@@ -397,6 +397,9 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	}
 	writeCritical(builder, fmt.Sprintf("/ip hotspot add name=noblifi-hotspot interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no", options.HotspotBridge), "add hotspot server")
 	writeCritical(builder, fmt.Sprintf("/ip hotspot set [find name=noblifi-hotspot] interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no", options.HotspotBridge), "enable hotspot server")
+	writeCritical(builder, fmt.Sprintf(":if ([:len [/ip dhcp-server find name=dhcp-hotspot interface=%s disabled=no]] = 0) do={ :error \"NobliFi HotSpot DHCP is not enabled on %s\" }", options.HotspotBridge, options.HotspotBridge), "verify hotspot dhcp")
+	writeCritical(builder, ":if ([:len [/radius find comment=\"NobliFi RADIUS\"]] = 0) do={ :error \"NobliFi RADIUS client is missing\" }", "verify radius client")
+	writeCritical(builder, ":if ([:len [/ip firewall nat find comment=\"NobliFi client NAT\"]] = 0) do={ :error \"NobliFi client NAT is missing\" }", "verify nat")
 	writeCritical(builder, fmt.Sprintf(":if ([:len [/ip hotspot find name=noblifi-hotspot interface=%s disabled=no]] = 0) do={ :error \"NobliFi HotSpot server is not enabled on %s\" }", options.HotspotBridge, options.HotspotBridge), "verify hotspot server")
 	builder.WriteString("\n")
 }
