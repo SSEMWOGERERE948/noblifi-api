@@ -1,9 +1,13 @@
 package routers
 
 import (
+	"errors"
+
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+var ErrNotFound = errors.New("router not found")
 
 type Repository struct {
 	db *gorm.DB
@@ -26,12 +30,18 @@ func (r *Repository) List() ([]Router, error) {
 func (r *Repository) Find(id uuid.UUID) (Router, error) {
 	var router Router
 	err := r.db.Preload("Interfaces").Preload("PortAssignments").Preload("SetupSession").Preload("NetworkProfile").First(&router, "id = ?", id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return router, ErrNotFound
+	}
 	return router, err
 }
 
 func (r *Repository) FindByClaimToken(token string) (Router, error) {
 	var router Router
 	err := r.db.Preload("PortAssignments").Preload("SetupSession").Preload("NetworkProfile").First(&router, "claim_token = ?", token).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return router, ErrNotFound
+	}
 	return router, err
 }
 

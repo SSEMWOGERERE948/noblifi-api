@@ -1,6 +1,8 @@
 package routers
 
 import (
+	"errors"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/noblifi/noblifi/backend/internal/portprofiles"
@@ -61,7 +63,7 @@ func (h *Handler) list(c *fiber.Ctx) error {
 func (h *Handler) get(c *fiber.Ctx) error {
 	router, err := h.find(c)
 	if err != nil {
-		return err
+		return routerError(err)
 	}
 	return c.JSON(router)
 }
@@ -73,7 +75,7 @@ func (h *Handler) regenerateClaimToken(c *fiber.Ctx) error {
 	}
 	router, err := h.service.RegenerateClaimToken(id)
 	if err != nil {
-		return err
+		return routerError(err)
 	}
 	return c.JSON(router)
 }
@@ -85,7 +87,7 @@ func (h *Handler) interfaces(c *fiber.Ctx) error {
 	}
 	interfaces, err := h.service.Interfaces(id)
 	if err != nil {
-		return err
+		return routerError(err)
 	}
 	return c.JSON(fiber.Map{"interfaces": interfaces})
 }
@@ -130,7 +132,7 @@ func (h *Handler) wireGuard(c *fiber.Ctx) error {
 	}
 	setup, err := h.service.WireGuardSetup(id)
 	if err != nil {
-		return err
+		return routerError(err)
 	}
 	return c.JSON(setup)
 }
@@ -170,7 +172,7 @@ func (h *Handler) networkProfile(c *fiber.Ctx) error {
 	}
 	profile, err := h.service.NetworkProfile(id)
 	if err != nil {
-		return err
+		return routerError(err)
 	}
 	return c.JSON(profile)
 }
@@ -198,7 +200,7 @@ func (h *Handler) bootstrapScript(c *fiber.Ctx) error {
 	}
 	script, err := h.service.BootstrapScript(id)
 	if err != nil {
-		return err
+		return routerError(err)
 	}
 	return c.JSON(fiber.Map{"script": script})
 }
@@ -268,4 +270,11 @@ func (h *Handler) find(c *fiber.Ctx) (Router, error) {
 		return Router{}, fiber.NewError(fiber.StatusBadRequest, "invalid router id")
 	}
 	return h.service.Find(id)
+}
+
+func routerError(err error) error {
+	if errors.Is(err, ErrNotFound) {
+		return fiber.NewError(fiber.StatusNotFound, "router not found")
+	}
+	return err
 }
