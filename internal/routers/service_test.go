@@ -131,6 +131,17 @@ func TestBootstrapScriptFetchesImportsAndCleansUp(t *testing.T) {
 	}
 }
 
+func TestBootstrapScriptDoesNotFetchCombinedInstaller(t *testing.T) {
+	script := bootstrapScript("NOB-1234-5678", "https://api.example.com/api/v1/provisioning")
+
+	if strings.Contains(script, "/install/NOB-1234-5678") {
+		t.Fatalf("bootstrap script must stay registration-only, got:\n%s", script)
+	}
+	if !strings.Contains(script, "/bootstrap/NOB-1234-5678") {
+		t.Fatalf("expected bootstrap command, got:\n%s", script)
+	}
+}
+
 func stringPtr(value string) *string {
 	return &value
 }
