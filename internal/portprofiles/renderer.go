@@ -369,11 +369,18 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	writeSafe(builder, "/ip hotspot user profile set noblifi-voucher-profile keepalive-timeout=2m", "set keepalive")
 	writeSafe(builder, "/ip hotspot user profile set noblifi-voucher-profile status-autorefresh=1m", "set status autorefresh")
 	writeCritical(builder, fmt.Sprintf("/ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=%s dns-name=%s use-radius=yes login-by=http-chap,http-pap", hotspotGateway, options.HotspotDNSName), "add hotspot profile")
-	writeCritical(builder, "/ip hotspot profile set noblifi-hotspot-profile html-directory=$hotspotHtmlDir", "set html directory")
 	writeCritical(builder, "/ip hotspot profile set noblifi-hotspot-profile use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap,http-pap", "configure hotspot radius profile")
 	for _, host := range options.WalledGardenHosts {
 		writeSafe(builder, fmt.Sprintf("/ip hotspot walled-garden add dst-host=%s comment=\"NobliFi captive portal\"", host), "add captive portal walled garden")
 	}
+	// IMPORTANT: html-directory is only pointed at the NobliFi-owned folder when we
+	// actually fetch custom login pages into it below. If LoginPageURL is empty
+	// (the default from RenderRouterOS()), that folder is created but stays empty,
+	// so we explicitly keep/restore RouterOS's built-in "hotspot" template
+	// directory. Previously this was set unconditionally to $hotspotHtmlDir right
+	// after profile creation, which silently broke the captive portal on every
+	// router provisioned without a custom login page (empty html-directory ->
+	// no login.html to serve once a client is redirected).
 	if strings.TrimSpace(options.LoginPageURL) != "" {
 		mode := "http"
 		if strings.HasPrefix(strings.ToLower(options.LoginPageURL), "https://") {
@@ -385,6 +392,8 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		writeSafe(builder, "/system scheduler remove [find name=noblifi-hotspot-login-refresh]", "cleanup hotspot login refresh")
 		writeSafe(builder, fmt.Sprintf("/system scheduler add name=noblifi-hotspot-login-refresh interval=10m on-event=(\"/tool fetch url=\\\"%s\\\" mode=%s dst-path=\\\"\" . $hotspotHtmlPath . \"/login.html\\\"; /tool fetch url=\\\"%s\\\" mode=%s dst-path=\\\"\" . $hotspotHtmlPath . \"/index.html\\\"\") comment=\"NobliFi HotSpot login refresh\"", escape(options.LoginPageURL), mode, escape(options.LoginPageURL), mode), "schedule hotspot login refresh")
 		builder.WriteString(":put \"NobliFi HotSpot login and index pages installed\"\n")
+	} else {
+		writeCritical(builder, "/ip hotspot profile set noblifi-hotspot-profile html-directory=hotspot", "set default html directory")
 	}
 	writeCritical(builder, fmt.Sprintf("/ip hotspot add name=noblifi-hotspot interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no", options.HotspotBridge), "add hotspot server")
 	writeCritical(builder, fmt.Sprintf("/ip hotspot set [find name=noblifi-hotspot] interface=%s address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no", options.HotspotBridge), "enable hotspot server")
