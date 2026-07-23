@@ -184,9 +184,9 @@ func TestRenderRouterOSInstallsHotspotLoginTemplate(t *testing.T) {
 		t.Fatalf("custom login fetch failures must fail the install instead of silently falling back, got:\n%s", script)
 	}
 
-	radiusIndex := strings.Index(script, "/radius add service=hotspot address=203.0.113.10")
 	staffIndex := strings.Index(script, "# STAFF bridge, DHCP, and client addressing")
-	if radiusIndex == -1 || staffIndex == -1 || radiusIndex > staffIndex {
-		t.Fatalf("expected RADIUS and HotSpot setup before staff bridge setup, got:\n%s", script)
+	radiusIndex := strings.Index(script, "/radius add service=hotspot address=203.0.113.10")
+	if staffIndex == -1 || radiusIndex == -1 || staffIndex > radiusIndex {
+		t.Fatalf("expected selected staff port setup before critical HotSpot services, got:\n%s", script)
 	}
 }
