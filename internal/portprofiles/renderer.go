@@ -424,8 +424,8 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	writeSafe(builder, ":if ([:len [/file find name=$hotspotHtmlPath]] = 0) do={ /file make-directory $hotspotHtmlPath }", "ensure hotspot html directory")
 	writeCritical(builder, ":if ([:len [/ip hotspot user profile find name=noblifi-voucher-profile]] = 0) do={ /ip hotspot user profile add name=noblifi-voucher-profile }", "ensure hotspot user profile")
 	writeCritical(builder, "/ip hotspot user profile set [find name=noblifi-voucher-profile] shared-users=1 keepalive-timeout=2m status-autorefresh=1m", "configure hotspot user profile")
-	writeCritical(builder, fmt.Sprintf(":if ([:len [/ip hotspot profile find name=noblifi-hotspot-profile]] = 0) do={ /ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=%s dns-name=%s use-radius=yes login-by=http-chap,http-pap }", hotspotGateway, options.HotspotDNSName), "ensure hotspot server profile")
-	writeCritical(builder, fmt.Sprintf("/ip hotspot profile set [find name=noblifi-hotspot-profile] hotspot-address=%s dns-name=%s use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap,http-pap", hotspotGateway, options.HotspotDNSName), "configure hotspot server profile")
+	writeCritical(builder, fmt.Sprintf(":if ([:len [/ip hotspot profile find name=noblifi-hotspot-profile]] = 0) do={ /ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=%s }", hotspotGateway), "ensure hotspot server profile")
+	writeCritical(builder, fmt.Sprintf("/ip hotspot profile set [find name=noblifi-hotspot-profile] hotspot-address=%s dns-name=\"%s\" use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap,http-pap", hotspotGateway, escape(options.HotspotDNSName)), "configure hotspot server profile")
 	for _, host := range options.WalledGardenHosts {
 		writeSafe(builder, fmt.Sprintf("/ip hotspot walled-garden add dst-host=%s comment=\"NobliFi captive portal\"", host), "add captive portal walled garden")
 	}
