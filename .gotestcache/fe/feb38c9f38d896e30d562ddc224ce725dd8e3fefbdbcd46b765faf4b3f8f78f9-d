@@ -1,0 +1,18 @@
+=== RUN   TestRenderRouterOSUsesIdempotentBridgePortAdds
+--- PASS: TestRenderRouterOSUsesIdempotentBridgePortAdds (0.00s)
+=== RUN   TestRenderRouterOSRejectsNoManagementPort
+--- PASS: TestRenderRouterOSRejectsNoManagementPort (0.00s)
+=== RUN   TestRenderRouterOSRejectsPlaceholderRadiusServer
+--- PASS: TestRenderRouterOSRejectsPlaceholderRadiusServer (0.00s)
+=== RUN   TestRenderRouterOSRejectsReplaceWithRadiusServer
+--- PASS: TestRenderRouterOSRejectsReplaceWithRadiusServer (0.00s)
+=== RUN   TestRenderRouterOSRejectsPlaceholderAPIPassword
+--- PASS: TestRenderRouterOSRejectsPlaceholderAPIPassword (0.00s)
+=== RUN   TestRenderRouterOSRejectsFrontendLoginPageURL
+--- PASS: TestRenderRouterOSRejectsFrontendLoginPageURL (0.00s)
+=== RUN   TestRenderRouterOSRejectsNonProvisioningLoginPageURL
+--- PASS: TestRenderRouterOSRejectsNonProvisioningLoginPageURL (0.00s)
+=== RUN   TestRenderRouterOSInstallsHotspotLoginTemplate
+--- PASS: TestRenderRouterOSInstallsHotspotLoginTemplate (0.00s)
+PASS
+ok  	github.com/noblifi/noblifi/backend/internal/portprofiles	0.627s
