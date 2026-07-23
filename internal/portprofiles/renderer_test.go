@@ -99,6 +99,36 @@ func TestRenderRouterOSRejectsPlaceholderAPIPassword(t *testing.T) {
 	}
 }
 
+func TestRenderRouterOSRejectsFrontendLoginPageURL(t *testing.T) {
+	assignments := []Assignment{
+		{InterfaceName: "ether1", Role: "WAN"},
+		{InterfaceName: "ether2", Role: "HOTSPOT_LAN"},
+		{InterfaceName: "ether5", Role: "STAFF_LAN"},
+	}
+
+	options := validRenderOptions()
+	options.LoginPageURL = "https://noblifi-frontend.vercel.app/hotspot-login/NOB-1234-5678"
+	_, err := RenderRouterOSWithOptions(assignments, options)
+	if err == nil || !strings.Contains(err.Error(), "NOBLIFI_PROVISIONING_BASE_URL points at the frontend host") {
+		t.Fatalf("expected frontend host config error, got %v", err)
+	}
+}
+
+func TestRenderRouterOSRejectsNonProvisioningLoginPageURL(t *testing.T) {
+	assignments := []Assignment{
+		{InterfaceName: "ether1", Role: "WAN"},
+		{InterfaceName: "ether2", Role: "HOTSPOT_LAN"},
+		{InterfaceName: "ether5", Role: "STAFF_LAN"},
+	}
+
+	options := validRenderOptions()
+	options.LoginPageURL = "https://noblifi.ew.r.appspot.com/dashboard"
+	_, err := RenderRouterOSWithOptions(assignments, options)
+	if err == nil || !strings.Contains(err.Error(), "backend /api/v1/provisioning/hotspot-login/:token route") {
+		t.Fatalf("expected provisioning route config error, got %v", err)
+	}
+}
+
 func TestRenderRouterOSInstallsHotspotLoginTemplate(t *testing.T) {
 	assignments := []Assignment{
 		{InterfaceName: "ether1", Role: "WAN"},
