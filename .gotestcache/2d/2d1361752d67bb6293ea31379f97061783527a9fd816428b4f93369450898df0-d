@@ -1,0 +1,4 @@
+=== RUN   TestRenderRouterOSInstallsHotspotLoginTemplate
+--- PASS: TestRenderRouterOSInstallsHotspotLoginTemplate (0.01s)
+PASS
+ok  	github.com/noblifi/noblifi/backend/internal/portprofiles	2.189s
