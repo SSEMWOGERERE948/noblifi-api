@@ -4,12 +4,23 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/noblifi/noblifi/backend/internal/plans"
 	"github.com/noblifi/noblifi/backend/internal/portprofiles"
 	"github.com/noblifi/noblifi/backend/internal/routers"
 )
 
-func TestRenderHotspotLoginPageIsVoucherOnlyNobliFiPortal(t *testing.T) {
-	html := renderHotspotLoginPage("NobliFi WiFi")
+func TestRenderHotspotLoginPageShowsVoucherLoginAndPackages(t *testing.T) {
+	html := renderHotspotLoginPage("NobliFi WiFi", []plans.Plan{
+		{
+			ID:              uuid.New(),
+			Name:            "Daily Unlimited",
+			Price:           1000,
+			DurationMinutes: 1440,
+			DownloadSpeed:   "10M",
+			IsActive:        true,
+		},
+	})
 
 	required := []string{
 		"NobliFi WiFi",
@@ -17,6 +28,9 @@ func TestRenderHotspotLoginPageIsVoucherOnlyNobliFiPortal(t *testing.T) {
 		`<input id="username" name="username" autocomplete="one-time-code" placeholder="NF-XXXXXXXX" autofocus>`,
 		`<input id="password" name="password" type="hidden">`,
 		"Your voucher code is used for both username and password.",
+		"Packages",
+		"Daily Unlimited",
+		"UGX 1,000",
 	}
 	for _, item := range required {
 		if !strings.Contains(html, item) {
@@ -24,10 +38,10 @@ func TestRenderHotspotLoginPageIsVoucherOnlyNobliFiPortal(t *testing.T) {
 		}
 	}
 
-	forbidden := []string{"password\" type=\"password", "Daily Unlimited", "Packages"}
+	forbidden := []string{"password\" type=\"password"}
 	for _, item := range forbidden {
 		if strings.Contains(html, item) {
-			t.Fatalf("voucher-only hotspot login page must not contain %q, got:\n%s", item, html)
+			t.Fatalf("hotspot login page must not contain %q, got:\n%s", item, html)
 		}
 	}
 }
@@ -58,7 +72,7 @@ func TestRegisterRadiusNASPrefersWireGuardTunnelAddress(t *testing.T) {
 
 func TestRenderHotspotLoginPageEscapesPortalName(t *testing.T) {
 	rawName := `<script>alert("x")</script>`
-	html := renderHotspotLoginPage(rawName)
+	html := renderHotspotLoginPage(rawName, nil)
 
 	if strings.Contains(html, `<h1>`+rawName+`</h1>`) || strings.Contains(html, `<title>`+rawName+` Login</title>`) {
 		t.Fatalf("expected portal name to be escaped, got:\n%s", html)

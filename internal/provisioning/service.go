@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/noblifi/noblifi/backend/internal/config"
+	"github.com/noblifi/noblifi/backend/internal/plans"
 	"github.com/noblifi/noblifi/backend/internal/portprofiles"
 	"github.com/noblifi/noblifi/backend/internal/routers"
 )
@@ -18,14 +19,19 @@ type RadiusRegistrar interface {
 	RegisterNAS(nasName, shortName, secret, description string) error
 }
 
+type PlanLister interface {
+	ActiveList() ([]plans.Plan, error)
+}
+
 type Service struct {
 	repo   *routers.Repository
 	cfg    config.Config
 	radius RadiusRegistrar
+	plans  PlanLister
 }
 
-func NewService(repo *routers.Repository, cfg config.Config, radius RadiusRegistrar) *Service {
-	return &Service{repo: repo, cfg: cfg, radius: radius}
+func NewService(repo *routers.Repository, cfg config.Config, radius RadiusRegistrar, plans PlanLister) *Service {
+	return &Service{repo: repo, cfg: cfg, radius: radius, plans: plans}
 }
 func (s *Service) BootstrapScript(token string) (string, error) {
 	router, err := s.repo.FindByClaimToken(token)
@@ -100,7 +106,16 @@ func (s *Service) HotspotLoginPage(token string) (string, error) {
 		return "", errors.New("claim token expired")
 	}
 	options := s.renderOptionsForRouter(router)
-	return renderHotspotLoginPage(options.HotspotPortalName), nil
+	planList := []plans.Plan{}
+	if s.plans != nil {
+		items, err := s.plans.ActiveList()
+		if err != nil {
+			log.Printf("provisioning: plan list unavailable for hotspot login page: %v", err)
+		} else {
+			planList = items
+		}
+	}
+	return renderHotspotLoginPage(options.HotspotPortalName, planList), nil
 }
 
 func (s *Service) ClaimConfig(token, serial string, sourceIP string) (string, error) {
@@ -559,12 +574,13 @@ func hotspotLoginURL(token, baseURL string) string {
 	return normalizeProvisioningBaseURL(baseURL) + "/hotspot-login/" + token
 }
 
-func renderHotspotLoginPage(portalName string) string {
+func renderHotspotLoginPage(portalName string, planList []plans.Plan) string {
 	portalName = strings.TrimSpace(portalName)
 	if portalName == "" {
 		portalName = "NobliFi WiFi"
 	}
 	escapedPortalName := html.EscapeString(portalName)
+	packageHTML := renderHotspotPackageList(planList)
 	return `<!doctype html>
 <html>
 <head>
@@ -580,6 +596,13 @@ func renderHotspotLoginPage(portalName string) string {
     .mark { width: 48px; height: 48px; display: grid; place-items: center; margin: 0 auto 16px; border-radius: 10px; background: var(--brand); color: #06111f; font-weight: 900; letter-spacing: 0; }
     h1 { margin: 0 0 8px; text-align: center; font-size: 30px; line-height: 1.1; letter-spacing: 0; }
     p { margin: 0 0 22px; color: var(--muted); line-height: 1.5; text-align: center; }
+    .packages { width: min(420px, 100%); margin-top: 14px; border: 1px solid var(--line); background: rgba(7,17,29,.86); border-radius: 12px; padding: 18px; }
+    .packages h2 { margin: 0 0 12px; font-size: 16px; letter-spacing: 0; }
+    .package-list { display: grid; gap: 10px; }
+    .package { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 9px; padding: 12px; background: #07111d; }
+    .package strong { display: block; font-size: 15px; }
+    .package span { color: var(--muted); font-size: 13px; }
+    .price { font-weight: 900; color: var(--accent); white-space: nowrap; }
     label { display: block; margin-bottom: 8px; font-weight: 700; }
     input { width: 100%; border: 1px solid var(--line); background: #07111d; color: var(--text); border-radius: 9px; padding: 13px; font-size: 16px; }
     button { width: 100%; margin-top: 16px; border: 0; border-radius: 9px; padding: 13px; background: var(--brand); color: #06111f; font-weight: 800; font-size: 16px; }
@@ -603,6 +626,7 @@ func renderHotspotLoginPage(portalName string) string {
       <p class="hint">Your voucher code is used for both username and password.</p>
       <div class="error">$(if error)$(error)$(endif)</div>
     </form>
+    ` + packageHTML + `
   </main>
   <script>
     document.forms.login.addEventListener("submit", function () {
@@ -611,6 +635,71 @@ func renderHotspotLoginPage(portalName string) string {
   </script>
 </body>
 </html>`
+}
+
+func renderHotspotPackageList(planList []plans.Plan) string {
+	if len(planList) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	builder.WriteString(`<section class="packages" aria-label="Packages"><h2>Packages</h2><div class="package-list">`)
+	for _, plan := range planList {
+		if !plan.IsActive {
+			continue
+		}
+		builder.WriteString(`<div class="package"><div><strong>`)
+		builder.WriteString(html.EscapeString(plan.Name))
+		builder.WriteString(`</strong><span>`)
+		builder.WriteString(html.EscapeString(planDuration(plan.DurationMinutes)))
+		if plan.DownloadSpeed != "" {
+			builder.WriteString(` - Down `)
+			builder.WriteString(html.EscapeString(plan.DownloadSpeed))
+		}
+		builder.WriteString(`</span></div><div class="price">UGX `)
+		builder.WriteString(formatUGX(plan.Price))
+		builder.WriteString(`</div></div>`)
+	}
+	builder.WriteString(`</div></section>`)
+	return builder.String()
+}
+
+func planDuration(minutes int) string {
+	if minutes <= 0 {
+		return "Time limited"
+	}
+	if minutes%1440 == 0 {
+		days := minutes / 1440
+		if days == 1 {
+			return "1 day"
+		}
+		return fmt.Sprintf("%d days", days)
+	}
+	if minutes%60 == 0 {
+		hours := minutes / 60
+		if hours == 1 {
+			return "1 hour"
+		}
+		return fmt.Sprintf("%d hours", hours)
+	}
+	return fmt.Sprintf("%d minutes", minutes)
+}
+
+func formatUGX(amount int) string {
+	raw := fmt.Sprintf("%d", amount)
+	if len(raw) <= 3 {
+		return raw
+	}
+	first := len(raw) % 3
+	if first == 0 {
+		first = 3
+	}
+	var builder strings.Builder
+	builder.WriteString(raw[:first])
+	for i := first; i < len(raw); i += 3 {
+		builder.WriteString(",")
+		builder.WriteString(raw[i : i+3])
+	}
+	return builder.String()
 }
 
 func normalizeProvisioningBaseURL(baseURL string) string {

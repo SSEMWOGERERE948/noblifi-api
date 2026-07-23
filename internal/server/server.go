@@ -47,7 +47,7 @@ func Run() {
 	planRepo := plans.NewRepository(db)
 	planService := plans.NewService(planRepo)
 	routers.NewHandler(routerService).RegisterRoutes(api)
-	provisioning.NewHandler(provisioning.NewService(routerRepo, cfg, radiusService)).RegisterRoutes(api)
+	provisioning.NewHandler(provisioning.NewService(routerRepo, cfg, radiusService, planService)).RegisterRoutes(api)
 
 	plans.NewHandler(planService).RegisterRoutes(api)
 
