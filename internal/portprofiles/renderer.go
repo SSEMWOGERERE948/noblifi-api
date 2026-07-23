@@ -118,7 +118,7 @@ func RenderRouterOS(assignments []Assignment) (string, error) {
 		CCTVSubnet:          "10.40.40.0/24",
 		CCTVGateway:         "10.40.40.1/24",
 		CCTVPool:            "10.40.40.10-10.40.40.254",
-		HotspotDNSName:      "login.noblifi.local",
+		HotspotDNSName:      "noblifi",
 		HotspotPortalName:   "NobliFi WiFi",
 		DisableWWWService:   true,
 		EnableAPIService:    true,
@@ -154,7 +154,7 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString("# Import this file with: /import file-name=noblifi-config.rsc\n\n")
 	builder.WriteString(":local hotspotHtmlDir \"noblifi\"\n")
 	builder.WriteString(":local hotspotHtmlPath \"noblifi\"\n")
-	builder.WriteString(":if ([:len [/file find name=\"flash\" type=\"directory\"]] > 0) do={ :set hotspotHtmlDir \"flash/noblifi\"; :set hotspotHtmlPath \"flash/noblifi\" }\n\n")
+	builder.WriteString(":if ([:len [/file find name=\"flash\" type=\"directory\"]] > 0) do={ :set hotspotHtmlPath \"flash/noblifi\" }\n\n")
 	builder.WriteString("# Clean previous NobliFi-owned service setup\n")
 	writeSafe(&builder, "/ip hotspot remove [find name=\"noblifi-hotspot\"]", "cleanup hotspot server")
 	writeSafe(&builder, "/ip hotspot profile remove [find name=\"noblifi-hotspot-profile\"]", "cleanup hotspot profile")
@@ -239,7 +239,7 @@ func withDefaults(options RenderOptions) RenderOptions {
 		CCTVSubnet:          "10.40.40.0/24",
 		CCTVGateway:         "10.40.40.1/24",
 		CCTVPool:            "10.40.40.10-10.40.40.254",
-		HotspotDNSName:      "login.noblifi.local",
+		HotspotDNSName:      "noblifi",
 		HotspotPortalName:   "NobliFi WiFi",
 		DisableWWWService:   true,
 		EnableAPIService:    true,
@@ -446,9 +446,9 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		builder.WriteString(":local hotspotIndexFile ($hotspotHtmlPath . \"/index.html\")\n")
 		writeCritical(builder, fmt.Sprintf("/tool fetch url=\"%s\" mode=%s dst-path=$hotspotLoginFile", escape(options.LoginPageURL), mode), "fetch hotspot login")
 		writeCritical(builder, fmt.Sprintf("/tool fetch url=\"%s\" mode=%s dst-path=$hotspotIndexFile", escape(options.LoginPageURL), mode), "fetch hotspot index")
-		writeCritical(builder, ":if ([:len [/file find name=$hotspotLoginFile]] > 0) do={ /ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=$hotspotHtmlDir; :put \"NobliFi HotSpot login and index pages installed\" } else={ :error \"NobliFi HotSpot login fetch did not create login.html\" }", "set html directory")
+		writeCritical(builder, ":if (([:len [/file find name=$hotspotLoginFile]] > 0) && ([:len [/file find name=$hotspotIndexFile]] > 0)) do={ /ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=$hotspotHtmlDir; :put \"NobliFi HotSpot login and index pages installed\" } else={ :error \"NobliFi HotSpot login fetch did not create login.html and index.html\" }", "set html directory")
 		writeSafe(builder, "/system scheduler remove [find name=noblifi-hotspot-login-refresh]", "cleanup hotspot login refresh")
-		writeSafe(builder, fmt.Sprintf("/system scheduler add name=noblifi-hotspot-login-refresh interval=10m on-event=(\":local hotspotHtmlPath \\\"noblifi\\\"; :if ([:len [/file find name=\\\"flash\\\" type=\\\"directory\\\"]] > 0) do={ :set hotspotHtmlPath \\\"flash/noblifi\\\" }; :local hotspotLoginFile (\\$hotspotHtmlPath . \\\"/login.html\\\"); :local hotspotIndexFile (\\$hotspotHtmlPath . \\\"/index.html\\\"); /tool fetch url=\\\"%s\\\" mode=%s dst-path=\\$hotspotLoginFile; /tool fetch url=\\\"%s\\\" mode=%s dst-path=\\$hotspotIndexFile\") comment=\"NobliFi HotSpot login refresh\"", escape(options.LoginPageURL), mode, escape(options.LoginPageURL), mode), "schedule hotspot login refresh")
+		writeSafe(builder, fmt.Sprintf("/system scheduler add name=noblifi-hotspot-login-refresh interval=10m on-event=(\":local hotspotHtmlPath \\\"noblifi\\\"; :if ([:len [/file find name=\\\"flash\\\" type=\\\"directory\\\"]] > 0) do={ :set hotspotHtmlPath \\\"flash/noblifi\\\" }; :local hotspotLoginFile (\\$hotspotHtmlPath . \\\"/login.html\\\"); :local hotspotIndexFile (\\$hotspotHtmlPath . \\\"/index.html\\\"); /tool fetch url=\\\"%s\\\" mode=%s dst-path=\\$hotspotLoginFile; /tool fetch url=\\\"%s\\\" mode=%s dst-path=\\$hotspotIndexFile; /ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=\\\"noblifi\\\"\") comment=\"NobliFi HotSpot login refresh\"", escape(options.LoginPageURL), mode, escape(options.LoginPageURL), mode), "schedule hotspot login refresh")
 	} else {
 		writeCritical(builder, "/ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=hotspot", "set default html directory")
 	}

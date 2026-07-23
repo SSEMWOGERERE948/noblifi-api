@@ -92,5 +92,5 @@
 /radius add service=hotspot address=$radiusServer secret=$radiusSecret authentication-port=1812 accounting-port=1813 timeout=3s comment="NobliFi RADIUS"
 /radius incoming set accept=yes
 /ip hotspot user profile add name=noblifi-voucher-profile shared-users=1 keepalive-timeout=2m status-autorefresh=1m transparent-proxy=no comment="NobliFi voucher profile"
-/ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=10.10.10.1 dns-name=login.noblifi.local use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap,http-pap comment="NobliFi HotSpot profile"
+/ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=10.10.10.1 dns-name=noblifi use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap,http-pap comment="NobliFi HotSpot profile"
 /ip hotspot add name=noblifi-hotspot interface=br-hotspot address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no comment="NobliFi HotSpot server"

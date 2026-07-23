@@ -88,7 +88,7 @@ func Load() Config {
 		CCTVSubnetCIDR:           getEnv("NOBLIFI_CCTV_SUBNET", "10.40.40.0/24"),
 		CCTVGatewayCIDR:          getEnv("NOBLIFI_CCTV_GATEWAY", "10.40.40.1/24"),
 		CCTVPoolRange:            getEnv("NOBLIFI_CCTV_POOL", "10.40.40.10-10.40.40.254"),
-		HotspotDNSName:           getEnv("NOBLIFI_HOTSPOT_DNS_NAME", "login.noblifi.local"),
+		HotspotDNSName:           getEnv("NOBLIFI_HOTSPOT_DNS_NAME", "noblifi"),
 		HotspotPortalName:        getEnv("NOBLIFI_HOTSPOT_PORTAL_NAME", "NobliFi WiFi"),
 		HotspotWalledGardenHosts: getListEnv("NOBLIFI_HOTSPOT_WALLED_GARDEN_HOSTS", "noblifi-frontend.vercel.app,noblifi.ew.r.appspot.com,noblifi.uc.r.appspot.com"),
 		DisableWWWService:        getBoolEnv("NOBLIFI_DISABLE_WWW_SERVICE", true),
