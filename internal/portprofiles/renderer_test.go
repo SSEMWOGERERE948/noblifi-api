@@ -126,7 +126,7 @@ func TestRenderRouterOSInstallsHotspotLoginTemplate(t *testing.T) {
 		"/ip hotspot user profile set [find name=noblifi-voucher-profile] shared-users=1 keepalive-timeout=2m status-autorefresh=1m",
 		`:if ([:len [/ip hotspot profile find name=noblifi-hotspot-profile]] = 0) do={ /ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=10.10.10.1 dns-name=login.noblifi.local use-radius=yes login-by=http-chap,http-pap }`,
 		"/ip hotspot profile set [find name=noblifi-hotspot-profile] hotspot-address=10.10.10.1 dns-name=login.noblifi.local use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap,http-pap",
-		`:if ([:len [/file find name=$hotspotLoginFile]] > 0) do={ /ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=$hotspotHtmlDir } else={ /ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=hotspot`,
+		`:if ([:len [/file find name=$hotspotLoginFile]] > 0) do={ /ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=$hotspotHtmlDir; :put "NobliFi HotSpot login and index pages installed" } else={ :error "NobliFi HotSpot login fetch did not create login.html" }`,
 		`:if ([:len [/ip hotspot find name=noblifi-hotspot]] = 0) do={ /ip hotspot add name=noblifi-hotspot interface=br-hotspot address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no }`,
 		"/ip hotspot set [find name=noblifi-hotspot] interface=br-hotspot address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no",
 		`:if ([:len [/interface bridge port find bridge=br-hotspot]] = 0) do={ :error "No HotSpot LAN ports were added to br-hotspot" }`,
@@ -149,6 +149,9 @@ func TestRenderRouterOSInstallsHotspotLoginTemplate(t *testing.T) {
 
 	if strings.Contains(script, "action=allow comment=\"NobliFi captive portal\"") {
 		t.Fatalf("RouterOS 6 compatible walled garden entries must not use action=allow, got:\n%s", script)
+	}
+	if strings.Contains(script, "NobliFi skipped fetch hotspot") || strings.Contains(script, "using default RouterOS login page") {
+		t.Fatalf("custom login fetch failures must fail the install instead of silently falling back, got:\n%s", script)
 	}
 
 	radiusIndex := strings.Index(script, "/radius add service=hotspot address=203.0.113.10")
