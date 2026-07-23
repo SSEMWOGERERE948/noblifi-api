@@ -212,11 +212,10 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString("\n")
 
 	writeHotspotNetwork(&builder, options, summary.HotspotLAN, hotspotGateway)
-	writeHotspotServices(&builder, options, hotspotGateway)
-
 	writeBridge(&builder, options.StaffBridge, summary.StaffLAN, options.StaffGateway, "pool-staff", options.StaffPool, options.StaffSubnet)
 	writeBridge(&builder, options.POSBridge, summary.POSLAN, options.POSGateway, "pool-pos", options.POSPool, options.POSSubnet)
 	writeBridge(&builder, options.CCTVBridge, summary.CCTVLAN, options.CCTVGateway, "pool-cctv", options.CCTVPool, options.CCTVSubnet)
+	writeHotspotServices(&builder, options, hotspotGateway)
 	return builder.String(), nil
 }
 func withDefaults(options RenderOptions) RenderOptions {
