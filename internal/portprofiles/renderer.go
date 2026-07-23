@@ -118,7 +118,7 @@ func RenderRouterOS(assignments []Assignment) (string, error) {
 		CCTVSubnet:          "10.40.40.0/24",
 		CCTVGateway:         "10.40.40.1/24",
 		CCTVPool:            "10.40.40.10-10.40.40.254",
-		HotspotDNSName:      "login.noblifi.local",
+		HotspotDNSName:      "noblifi",
 		HotspotPortalName:   "NobliFi WiFi",
 		DisableWWWService:   true,
 		EnableAPIService:    true,
@@ -192,6 +192,23 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	writeSafe(&builder, fmt.Sprintf("/interface list member remove [find list=WAN interface=%s]", wan), "cleanup WAN list member")
 	writeSafe(&builder, fmt.Sprintf("/interface list member add list=WAN interface=%s comment=\"NobliFi WAN member\"", wan), "add WAN list member")
 	writeSafe(&builder, fmt.Sprintf("/ip dhcp-client add interface=%s disabled=no comment=\"NobliFi WAN DHCP client\"", wan), "add WAN dhcp client")
+	// IMPORTANT: /ip dhcp-client add does not block until a lease is obtained.
+	// The cleanup step above tore down whatever DHCP client (often the
+	// factory-default one) was already bound and giving this router internet
+	// access; the line above re-creates the client but returns immediately,
+	// before DISCOVER/OFFER/REQUEST/ACK has completed. Everything from here
+	// down (bridges, hotspot DHCP, and especially the /tool fetch of the
+	// hotspot login page in writeHotspotServices) runs within milliseconds of
+	// that line executing. Without waiting, the WAN interface frequently has
+	// no IP yet by the time the login-page fetch runs, so that fetch fails
+	// with "status: failed" even though the backend route is completely
+	// healthy - confirmed by curl returning 200 for the exact same URL while
+	// the router-side fetch failed in the same install run. This wait gives
+	// the DHCP client up to 20 seconds to reach status=bound before the rest
+	// of the script continues, and only warns (does not abort) on timeout,
+	// since later verify steps already :error out if the hotspot server
+	// itself never comes up.
+	writeWANDHCPWait(&builder, wan)
 	builder.WriteString("\n")
 
 	writeHotspotNetwork(&builder, options, summary.HotspotLAN, hotspotGateway)
@@ -223,7 +240,7 @@ func withDefaults(options RenderOptions) RenderOptions {
 		CCTVSubnet:          "10.40.40.0/24",
 		CCTVGateway:         "10.40.40.1/24",
 		CCTVPool:            "10.40.40.10-10.40.40.254",
-		HotspotDNSName:      "login.noblifi.local",
+		HotspotDNSName:      "noblifi",
 		HotspotPortalName:   "NobliFi WiFi",
 		DisableWWWService:   true,
 		EnableAPIService:    true,
@@ -348,6 +365,25 @@ func writeSafe(builder *strings.Builder, command string, label string) {
 
 func writeCritical(builder *strings.Builder, command string, label string) {
 	builder.WriteString(fmt.Sprintf(":do { %s } on-error={ :error \"NobliFi failed %s\" }\n", command, escape(label)))
+}
+
+// writeWANDHCPWait polls the WAN DHCP client for up to 20 seconds, waiting
+// for status=bound before the rest of the script proceeds. See the comment
+// at its call site in RenderRouterOSWithOptions for why this is necessary:
+// the WAN dhcp-client is torn down and re-created earlier in this same
+// script, and /ip dhcp-client add does not block until a lease is acquired.
+// This deliberately warns rather than :error's out on timeout, because a
+// genuinely dead WAN link is already caught by the later "verify hotspot
+// server" critical checks, and aborting here would duplicate that failure
+// mode with a less specific message.
+func writeWANDHCPWait(builder *strings.Builder, wan string) {
+	builder.WriteString(":local wanBound false\n")
+	builder.WriteString(":for i from=1 to=20 do={\n")
+	builder.WriteString(fmt.Sprintf("  :if ([:len [/ip dhcp-client find where interface=%s status=bound]] > 0) do={ :set wanBound true }\n", wan))
+	builder.WriteString("  :if ($wanBound) do={ :set i 20 } else={ :delay 1s }\n")
+	builder.WriteString("}\n")
+	builder.WriteString(fmt.Sprintf(":if (!$wanBound) do={ :put \"NobliFi WARNING: WAN DHCP client on %s did not bind within 20s, continuing anyway\" } else={ :put \"NobliFi WAN DHCP client on %s is bound\" }\n", wan, wan))
+	builder.WriteString("\n")
 }
 
 func writeCleanup(builder *strings.Builder, bridge string, dhcpServer string, pool string, subnet string) {
