@@ -162,7 +162,7 @@ func TestRenderRouterOSInstallsHotspotLoginTemplate(t *testing.T) {
 		`:if ([:len [/interface bridge port find bridge=br-hotspot]] = 0) do={ :error "No HotSpot LAN ports were added to br-hotspot" }`,
 		`:if ([:len [/ip pool find name=pool-hotspot]] = 0) do={ /ip pool add name=pool-hotspot`,
 		`:if ([:len [/ip dhcp-server find name=dhcp-hotspot]] = 0) do={ /ip dhcp-server add name=dhcp-hotspot interface=br-hotspot`,
-		`:if ([:len [/ip dhcp-server network find where address=10.10.10.0/24]] = 0) do={ /ip dhcp-server network add address=10.10.10.0/24 gateway=10.10.10.1 dns-server=10.10.10.1 } else={ /ip dhcp-server network set [find where address=10.10.10.0/24] gateway=10.10.10.1 dns-server=10.10.10.1 }`,
+		`:if ([:len [/ip dhcp-server network find address="10.10.10.0/24"]] = 0) do={ /ip dhcp-server network add address="10.10.10.0/24" gateway="10.10.10.1" dns-server="10.10.10.1" } else={ /ip dhcp-server network set [find address="10.10.10.0/24"] gateway="10.10.10.1" dns-server="10.10.10.1" }`,
 		`:if ([:len [/ip dhcp-server find name=dhcp-hotspot interface=br-hotspot disabled=no]] = 0) do={ :error "NobliFi HotSpot DHCP is not enabled on br-hotspot" }`,
 		`:if ([:len [/radius find comment="NobliFi RADIUS"]] = 0) do={ :error "NobliFi RADIUS client is missing" }`,
 		`:if ([:len [/ip firewall nat find comment="NobliFi client NAT"]] = 0) do={ :error "NobliFi client NAT is missing" }`,
