@@ -118,7 +118,7 @@ func RenderRouterOS(assignments []Assignment) (string, error) {
 		CCTVSubnet:          "10.40.40.0/24",
 		CCTVGateway:         "10.40.40.1/24",
 		CCTVPool:            "10.40.40.10-10.40.40.254",
-		HotspotDNSName:      "noblifi",
+		HotspotDNSName:      "login.noblifi.local",
 		HotspotPortalName:   "NobliFi WiFi",
 		DisableWWWService:   true,
 		EnableAPIService:    true,
@@ -154,7 +154,7 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString("# Import this file with: /import file-name=noblifi-config.rsc\n\n")
 	builder.WriteString(":local hotspotHtmlDir \"noblifi\"\n")
 	builder.WriteString(":local hotspotHtmlPath \"noblifi\"\n")
-	builder.WriteString(":if ([:len [/file find name=\"flash\" type=\"directory\"]] > 0) do={ :set hotspotHtmlPath \"flash/noblifi\" }\n\n")
+	builder.WriteString(":if ([:len [/file find name=\"flash\" type=\"directory\"]] > 0) do={ :set hotspotHtmlDir \"flash/noblifi\"; :set hotspotHtmlPath \"flash/noblifi\" }\n\n")
 	builder.WriteString("# Clean previous NobliFi-owned service setup\n")
 	writeSafe(&builder, "/ip hotspot remove [find name=\"noblifi-hotspot\"]", "cleanup hotspot server")
 	writeSafe(&builder, "/ip hotspot profile remove [find name=\"noblifi-hotspot-profile\"]", "cleanup hotspot profile")
@@ -192,30 +192,14 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	writeSafe(&builder, fmt.Sprintf("/interface list member remove [find list=WAN interface=%s]", wan), "cleanup WAN list member")
 	writeSafe(&builder, fmt.Sprintf("/interface list member add list=WAN interface=%s comment=\"NobliFi WAN member\"", wan), "add WAN list member")
 	writeSafe(&builder, fmt.Sprintf("/ip dhcp-client add interface=%s disabled=no comment=\"NobliFi WAN DHCP client\"", wan), "add WAN dhcp client")
-	// IMPORTANT: /ip dhcp-client add does not block until a lease is obtained.
-	// The cleanup step above tore down whatever DHCP client (often the
-	// factory-default one) was already bound and giving this router internet
-	// access; the line above re-creates the client but returns immediately,
-	// before DISCOVER/OFFER/REQUEST/ACK has completed. Everything from here
-	// down (bridges, hotspot DHCP, and especially the /tool fetch of the
-	// hotspot login page in writeHotspotServices) runs within milliseconds of
-	// that line executing. Without waiting, the WAN interface frequently has
-	// no IP yet by the time the login-page fetch runs, so that fetch fails
-	// with "status: failed" even though the backend route is completely
-	// healthy - confirmed by curl returning 200 for the exact same URL while
-	// the router-side fetch failed in the same install run. This wait gives
-	// the DHCP client up to 20 seconds to reach status=bound before the rest
-	// of the script continues, and only warns (does not abort) on timeout,
-	// since later verify steps already :error out if the hotspot server
-	// itself never comes up.
-	writeWANDHCPWait(&builder, wan)
 	builder.WriteString("\n")
 
 	writeHotspotNetwork(&builder, options, summary.HotspotLAN, hotspotGateway)
+	writeHotspotServices(&builder, options, hotspotGateway)
+
 	writeBridge(&builder, options.StaffBridge, summary.StaffLAN, options.StaffGateway, "pool-staff", options.StaffPool, options.StaffSubnet)
 	writeBridge(&builder, options.POSBridge, summary.POSLAN, options.POSGateway, "pool-pos", options.POSPool, options.POSSubnet)
 	writeBridge(&builder, options.CCTVBridge, summary.CCTVLAN, options.CCTVGateway, "pool-cctv", options.CCTVPool, options.CCTVSubnet)
-	writeHotspotServices(&builder, options, hotspotGateway)
 	return builder.String(), nil
 }
 func withDefaults(options RenderOptions) RenderOptions {
@@ -239,7 +223,7 @@ func withDefaults(options RenderOptions) RenderOptions {
 		CCTVSubnet:          "10.40.40.0/24",
 		CCTVGateway:         "10.40.40.1/24",
 		CCTVPool:            "10.40.40.10-10.40.40.254",
-		HotspotDNSName:      "noblifi",
+		HotspotDNSName:      "login.noblifi.local",
 		HotspotPortalName:   "NobliFi WiFi",
 		DisableWWWService:   true,
 		EnableAPIService:    true,
@@ -366,25 +350,6 @@ func writeCritical(builder *strings.Builder, command string, label string) {
 	builder.WriteString(fmt.Sprintf(":do { %s } on-error={ :error \"NobliFi failed %s\" }\n", command, escape(label)))
 }
 
-// writeWANDHCPWait polls the WAN DHCP client for up to 20 seconds, waiting
-// for status=bound before the rest of the script proceeds. See the comment
-// at its call site in RenderRouterOSWithOptions for why this is necessary:
-// the WAN dhcp-client is torn down and re-created earlier in this same
-// script, and /ip dhcp-client add does not block until a lease is acquired.
-// This deliberately warns rather than :error's out on timeout, because a
-// genuinely dead WAN link is already caught by the later "verify hotspot
-// server" critical checks, and aborting here would duplicate that failure
-// mode with a less specific message.
-func writeWANDHCPWait(builder *strings.Builder, wan string) {
-	builder.WriteString(":local wanBound false\n")
-	builder.WriteString(":for i from=1 to=20 do={\n")
-	builder.WriteString(fmt.Sprintf("  :if ([:len [/ip dhcp-client find where interface=%s status=bound]] > 0) do={ :set wanBound true }\n", wan))
-	builder.WriteString("  :if ($wanBound) do={ :set i 20 } else={ :delay 1s }\n")
-	builder.WriteString("}\n")
-	builder.WriteString(fmt.Sprintf(":if (!$wanBound) do={ :put \"NobliFi WARNING: WAN DHCP client on %s did not bind within 20s, continuing anyway\" } else={ :put \"NobliFi WAN DHCP client on %s is bound\" }\n", wan, wan))
-	builder.WriteString("\n")
-}
-
 func writeCleanup(builder *strings.Builder, bridge string, dhcpServer string, pool string, subnet string) {
 	if bridge == "" {
 		return
@@ -424,8 +389,8 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	writeSafe(builder, ":if ([:len [/file find name=$hotspotHtmlPath]] = 0) do={ /file make-directory $hotspotHtmlPath }", "ensure hotspot html directory")
 	writeCritical(builder, ":if ([:len [/ip hotspot user profile find name=noblifi-voucher-profile]] = 0) do={ /ip hotspot user profile add name=noblifi-voucher-profile }", "ensure hotspot user profile")
 	writeCritical(builder, "/ip hotspot user profile set [find name=noblifi-voucher-profile] shared-users=1 keepalive-timeout=2m status-autorefresh=1m", "configure hotspot user profile")
-	writeCritical(builder, fmt.Sprintf(":if ([:len [/ip hotspot profile find name=noblifi-hotspot-profile]] = 0) do={ /ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=%s }", hotspotGateway), "ensure hotspot server profile")
-	writeCritical(builder, fmt.Sprintf("/ip hotspot profile set [find name=noblifi-hotspot-profile] hotspot-address=%s dns-name=\"%s\" use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap,http-pap", hotspotGateway, escape(options.HotspotDNSName)), "configure hotspot server profile")
+	writeCritical(builder, fmt.Sprintf(":if ([:len [/ip hotspot profile find name=noblifi-hotspot-profile]] = 0) do={ /ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=%s dns-name=%s use-radius=yes login-by=http-chap,http-pap }", hotspotGateway, options.HotspotDNSName), "ensure hotspot server profile")
+	writeCritical(builder, fmt.Sprintf("/ip hotspot profile set [find name=noblifi-hotspot-profile] hotspot-address=%s dns-name=%s use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap,http-pap", hotspotGateway, options.HotspotDNSName), "configure hotspot server profile")
 	for _, host := range options.WalledGardenHosts {
 		writeSafe(builder, fmt.Sprintf("/ip hotspot walled-garden add dst-host=%s comment=\"NobliFi captive portal\"", host), "add captive portal walled garden")
 	}
@@ -446,9 +411,9 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		builder.WriteString(":local hotspotIndexFile ($hotspotHtmlPath . \"/index.html\")\n")
 		writeCritical(builder, fmt.Sprintf("/tool fetch url=\"%s\" mode=%s dst-path=$hotspotLoginFile", escape(options.LoginPageURL), mode), "fetch hotspot login")
 		writeCritical(builder, fmt.Sprintf("/tool fetch url=\"%s\" mode=%s dst-path=$hotspotIndexFile", escape(options.LoginPageURL), mode), "fetch hotspot index")
-		writeCritical(builder, ":if (([:len [/file find name=$hotspotLoginFile]] > 0) && ([:len [/file find name=$hotspotIndexFile]] > 0)) do={ /ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=$hotspotHtmlDir; :put \"NobliFi HotSpot login and index pages installed\" } else={ :error \"NobliFi HotSpot login fetch did not create login.html and index.html\" }", "set html directory")
+		writeCritical(builder, ":if ([:len [/file find name=$hotspotLoginFile]] > 0) do={ /ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=$hotspotHtmlDir; :put \"NobliFi HotSpot login and index pages installed\" } else={ :error \"NobliFi HotSpot login fetch did not create login.html\" }", "set html directory")
 		writeSafe(builder, "/system scheduler remove [find name=noblifi-hotspot-login-refresh]", "cleanup hotspot login refresh")
-		writeSafe(builder, fmt.Sprintf("/system scheduler add name=noblifi-hotspot-login-refresh interval=10m on-event=(\":local hotspotHtmlPath \\\"noblifi\\\"; :if ([:len [/file find name=\\\"flash\\\" type=\\\"directory\\\"]] > 0) do={ :set hotspotHtmlPath \\\"flash/noblifi\\\" }; :local hotspotLoginFile (\\$hotspotHtmlPath . \\\"/login.html\\\"); :local hotspotIndexFile (\\$hotspotHtmlPath . \\\"/index.html\\\"); /tool fetch url=\\\"%s\\\" mode=%s dst-path=\\$hotspotLoginFile; /tool fetch url=\\\"%s\\\" mode=%s dst-path=\\$hotspotIndexFile; /ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=\\\"noblifi\\\"\") comment=\"NobliFi HotSpot login refresh\"", escape(options.LoginPageURL), mode, escape(options.LoginPageURL), mode), "schedule hotspot login refresh")
+		writeSafe(builder, fmt.Sprintf("/system scheduler add name=noblifi-hotspot-login-refresh interval=10m on-event=(\":local hotspotHtmlPath \\\"noblifi\\\"; :if ([:len [/file find name=\\\"flash\\\" type=\\\"directory\\\"]] > 0) do={ :set hotspotHtmlPath \\\"flash/noblifi\\\" }; :local hotspotLoginFile (\\$hotspotHtmlPath . \\\"/login.html\\\"); :local hotspotIndexFile (\\$hotspotHtmlPath . \\\"/index.html\\\"); /tool fetch url=\\\"%s\\\" mode=%s dst-path=\\$hotspotLoginFile; /tool fetch url=\\\"%s\\\" mode=%s dst-path=\\$hotspotIndexFile\") comment=\"NobliFi HotSpot login refresh\"", escape(options.LoginPageURL), mode, escape(options.LoginPageURL), mode), "schedule hotspot login refresh")
 	} else {
 		writeCritical(builder, "/ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=hotspot", "set default html directory")
 	}
