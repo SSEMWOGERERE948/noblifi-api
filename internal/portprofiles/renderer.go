@@ -2,6 +2,7 @@ package portprofiles
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -139,6 +140,9 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	}
 	if isPlaceholderAPIPassword(options.APIPassword) {
 		return "", fmt.Errorf("NOBLIFI_ROUTER_API_PASSWORD must be set to a real router API password before provisioning")
+	}
+	if err := validateLoginPageURL(options.LoginPageURL); err != nil {
+		return "", err
 	}
 
 	summary := BuildSummary(assignments)
@@ -308,6 +312,25 @@ func isPlaceholderRadiusServer(value string) bool {
 func isPlaceholderAPIPassword(value string) bool {
 	return placeholders.Is(value)
 }
+
+func validateLoginPageURL(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("NOBLIFI_PROVISIONING_BASE_URL produced invalid HotSpot login URL %q", value)
+	}
+	if parsed.Host == "noblifi-frontend.vercel.app" {
+		return fmt.Errorf("NOBLIFI_PROVISIONING_BASE_URL points at the frontend host %q. Set it to the backend API base ending in /api/v1/provisioning, for example https://noblifi.ew.r.appspot.com/api/v1/provisioning", parsed.Host)
+	}
+	if !strings.Contains(parsed.Path, "/api/v1/provisioning/hotspot-login/") {
+		return fmt.Errorf("NOBLIFI_PROVISIONING_BASE_URL produced HotSpot login URL %q, but MikroTik must fetch the backend /api/v1/provisioning/hotspot-login/:token route directly with no redirects", value)
+	}
+	return nil
+}
+
 func routerOSDisabled(disabled bool) string {
 	if disabled {
 		return "yes"
