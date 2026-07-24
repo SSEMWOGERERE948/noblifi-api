@@ -154,7 +154,7 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString("# Import this file with: /import file-name=noblifi-config.rsc\n\n")
 	builder.WriteString(":local hotspotHtmlDir \"noblifi\"\n")
 	builder.WriteString(":local hotspotHtmlPath \"noblifi\"\n")
-	builder.WriteString(":if ([:len [/file find name=\"flash\"]] > 0) do={ :set hotspotHtmlDir \"flash/noblifi\"; :set hotspotHtmlPath \"flash/noblifi\" }\n\n")
+	builder.WriteString(":if ([:len [/file find name=\"flash\" type=\"directory\"]] > 0) do={ :set hotspotHtmlDir \"flash/noblifi\"; :set hotspotHtmlPath \"flash/noblifi\" }\n\n")
 	builder.WriteString("# Clean previous NobliFi-owned service setup\n")
 	writeSafe(&builder, "/ip hotspot remove [find name=\"noblifi-hotspot\"]", "cleanup hotspot server")
 	writeSafe(&builder, "/ip hotspot user profile remove [find name=\"noblifi-voucher-profile\"]", "cleanup hotspot user profile")
@@ -518,6 +518,12 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		"configure hotspot login methods",
 	)
 
+	writeCritical(
+		builder,
+		`/ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=hotspot`,
+		"set default hotspot html directory",
+	)
+
 	// Verify immediately.
 	writeCritical(
 		builder,
@@ -654,37 +660,17 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	// ------------------------------------------------------------
 	if strings.TrimSpace(options.LoginPageURL) != "" {
 		mode := "http"
+
 		if strings.HasPrefix(strings.ToLower(options.LoginPageURL), "https://") {
 			mode = "https"
 		}
 
-		// Determine the final HotSpot HTML directory BEFORE downloading files.
-		// On MikroTik devices with flash storage, NobliFi must use flash/noblifi.
-		// This keeps login.html, index.html, and the profile html-directory aligned.
-		builder.WriteString(`:set hotspotHtmlDir "noblifi"` + "\n")
-		builder.WriteString(`:set hotspotHtmlPath "noblifi"` + "\n")
-		builder.WriteString(`:if ([:len [/file find where name="flash"]] > 0) do={ :set hotspotHtmlDir "flash/noblifi"; :set hotspotHtmlPath "flash/noblifi" }` + "\n")
-
-		// Ensure the selected custom portal directory exists.
-		writeSafe(
-			builder,
-			`:if ([:len [/file find where name=$hotspotHtmlPath]] = 0) do={ /file make-directory $hotspotHtmlPath }`,
-			"ensure selected hotspot html directory",
+		builder.WriteString(
+			`:local hotspotLoginFile ($hotspotHtmlPath . "/login.html")` + "\n",
 		)
 
-		builder.WriteString(`:local hotspotLoginFile ($hotspotHtmlPath . "/login.html")` + "\n")
-		builder.WriteString(`:local hotspotIndexFile ($hotspotHtmlPath . "/index.html")` + "\n")
-
-		// Remove stale portal files before fetching the current version.
-		writeSafe(
-			builder,
-			`/file remove [find where name=$hotspotLoginFile]`,
-			"remove old NobliFi login page",
-		)
-		writeSafe(
-			builder,
-			`/file remove [find where name=$hotspotIndexFile]`,
-			"remove old NobliFi index page",
+		builder.WriteString(
+			`:local hotspotIndexFile ($hotspotHtmlPath . "/index.html")` + "\n",
 		)
 
 		writeCritical(
@@ -707,40 +693,41 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 			"fetch hotspot index",
 		)
 
-		// The custom portal is only activated after login.html is confirmed present.
-		writeCritical(
+		writeSafe(
 			builder,
-			`:if ([:len [/file find where name=$hotspotLoginFile]] = 0) do={ :error "NobliFi HotSpot login fetch did not create login.html" }`,
-			"verify hotspot login file",
+			`:if ([:len [/file find name="flash" type="directory"]] > 0) do={
+				:set hotspotHtmlDir "flash/noblifi"
+			}`,
+			"re-check flash directory before setting html-directory",
 		)
 
 		writeCritical(
 			builder,
-			`/ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=$hotspotHtmlDir`,
-			"activate NobliFi hotspot html directory",
+			`:if ([:len [/file find name=$hotspotLoginFile]] > 0) do={
+				/ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=$hotspotHtmlDir
+				:put ("NobliFi HotSpot login and index pages installed at " . $hotspotHtmlDir)
+			} else={
+				:error "NobliFi HotSpot login fetch did not create login.html"
+			}`,
+			"set html directory",
 		)
-
-		// Read the value back from RouterOS. If flash exists, this must be flash/noblifi.
-		writeCritical(
-			builder,
-			`:local configuredHtmlDir [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] html-directory]; :if ($configuredHtmlDir != $hotspotHtmlDir) do={ :error ("NobliFi HotSpot HTML directory mismatch. RouterOS returned " . $configuredHtmlDir) }`,
-			"verify NobliFi hotspot html directory",
-		)
-
-		builder.WriteString(`:put ("NobliFi HotSpot portal active from " . $hotspotHtmlDir)` + "\n")
 
 		// RouterOS 6 compatibility: keep refresh logic in a named /system script.
+		// Do not embed an inline parenthesized expression in scheduler on-event;
+		// RouterOS 6 can reject that form with "expected name value".
 		writeSafe(
 			builder,
 			`/system scheduler remove [find where name="noblifi-hotspot-login-refresh"]`,
 			"cleanup hotspot login refresh scheduler",
 		)
+
 		writeSafe(
 			builder,
 			`/system script remove [find where name="noblifi-hotspot-login-refresh-script"]`,
 			"cleanup hotspot login refresh script",
 		)
 
+		// The generated RouterOS source contains normal $variables, not escaped \$variables.
 		builder.WriteString(`/system script add name="noblifi-hotspot-login-refresh-script" policy=ftp,read,write,test source={` + "\n")
 		builder.WriteString(`:local hotspotHtmlPath "noblifi"` + "\n")
 		builder.WriteString(`:if ([:len [/file find where name="flash"]] > 0) do={ :set hotspotHtmlPath "flash/noblifi" }` + "\n")
@@ -754,13 +741,6 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 			builder,
 			`/system scheduler add name="noblifi-hotspot-login-refresh" interval=10m on-event="noblifi-hotspot-login-refresh-script" policy=ftp,read,write,test comment="NobliFi HotSpot login refresh"`,
 			"schedule hotspot login refresh",
-		)
-	} else {
-		// No custom portal URL was supplied. Only then use the built-in MikroTik pages.
-		writeCritical(
-			builder,
-			`/ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=hotspot`,
-			"set default hotspot html directory",
 		)
 	}
 
