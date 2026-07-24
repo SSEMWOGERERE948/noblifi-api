@@ -145,7 +145,8 @@ func TestRenderRouterOSInstallsHotspotLoginTemplate(t *testing.T) {
 
 	required := []string{
 		"/radius add service=hotspot address=203.0.113.10",
-		`:if ([:len [/file find name="flash" type="directory"]] > 0) do={ :set hotspotHtmlPath "flash/noblifi" }`,
+		`:if ([:len [/file find name="flash" type="directory"]] > 0) do={ :set hotspotHtmlDir "flash/noblifi"; :set hotspotHtmlPath "flash/noblifi" }`,
+		`:if ([:len [/file find name="flash" type="directory"]] > 0) do={ :set hotspotHtmlDir "flash/noblifi" }`,
 		"html-directory=$hotspotHtmlDir",
 		":if ([:len [/file find name=$hotspotHtmlPath]] = 0) do={ /file make-directory $hotspotHtmlPath }",
 		`:local hotspotLoginFile ($hotspotHtmlPath . "/login.html")`,
@@ -154,9 +155,10 @@ func TestRenderRouterOSInstallsHotspotLoginTemplate(t *testing.T) {
 		"/tool fetch url=\"https://api.example.com/api/v1/provisioning/hotspot-login/NOB-1234-5678\" mode=https dst-path=$hotspotIndexFile",
 		`:if ([:len [/ip hotspot user profile find name=noblifi-voucher-profile]] = 0) do={ /ip hotspot user profile add name=noblifi-voucher-profile }`,
 		"/ip hotspot user profile set [find name=noblifi-voucher-profile] shared-users=1 keepalive-timeout=2m status-autorefresh=1m",
-		`:if ([:len [/ip hotspot profile find name=noblifi-hotspot-profile]] = 0) do={ /ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=10.10.10.1 }`,
-		`/ip hotspot profile set [find name=noblifi-hotspot-profile] hotspot-address=10.10.10.1 dns-name="noblifi" use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap,http-pap`,
-		`:if (([:len [/file find name=$hotspotLoginFile]] > 0) && ([:len [/file find name=$hotspotIndexFile]] > 0)) do={ /ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=$hotspotHtmlDir; :put "NobliFi HotSpot login and index pages installed" } else={ :error "NobliFi HotSpot login fetch did not create login.html and index.html" }`,
+		`:if ([:len [/ip hotspot profile find name=noblifi-hotspot-profile]] = 0) do={ /ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=10.10.10.1 dns-name=noblifi.login use-radius=yes login-by=http-chap,http-pap }`,
+		`/ip hotspot profile set [find name=noblifi-hotspot-profile] hotspot-address=10.10.10.1 dns-name=noblifi.login use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap,http-pap`,
+		`/ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=hotspot`,
+		`:if ([:len [/file find name=$hotspotLoginFile]] > 0) do={ /ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=$hotspotHtmlDir; :put ("NobliFi HotSpot login and index pages installed at " . $hotspotHtmlDir) } else={ :error "NobliFi HotSpot login fetch did not create login.html" }`,
 		`:if ([:len [/ip hotspot find name=noblifi-hotspot]] = 0) do={ /ip hotspot add name=noblifi-hotspot interface=br-hotspot address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no }`,
 		"/ip hotspot set [find name=noblifi-hotspot] interface=br-hotspot address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no",
 		`:if ([:len [/interface bridge port find bridge=br-hotspot]] = 0) do={ :error "No HotSpot LAN ports were added to br-hotspot" }`,
@@ -188,5 +190,11 @@ func TestRenderRouterOSInstallsHotspotLoginTemplate(t *testing.T) {
 	radiusIndex := strings.Index(script, "/radius add service=hotspot address=203.0.113.10")
 	if staffIndex == -1 || radiusIndex == -1 || staffIndex > radiusIndex {
 		t.Fatalf("expected selected staff port setup before critical HotSpot services, got:\n%s", script)
+	}
+
+	serverIndex := strings.Index(script, `/ip hotspot add name=noblifi-hotspot`)
+	fetchIndex := strings.Index(script, `/tool fetch url="https://api.example.com/api/v1/provisioning/hotspot-login/NOB-1234-5678" mode=https dst-path=$hotspotLoginFile`)
+	if serverIndex == -1 || fetchIndex == -1 || serverIndex > fetchIndex {
+		t.Fatalf("expected HotSpot server to be installed before custom login fetch can fail, got:\n%s", script)
 	}
 }
