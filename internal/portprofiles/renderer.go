@@ -157,8 +157,9 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString(":if ([:len [/file find name=\"flash\" type=\"directory\"]] > 0) do={ :set hotspotHtmlDir \"flash/noblifi\"; :set hotspotHtmlPath \"flash/noblifi\" }\n\n")
 	builder.WriteString("# Clean previous NobliFi-owned service setup\n")
 	writeSafe(&builder, "/ip hotspot remove [find name=\"noblifi-hotspot\"]", "cleanup hotspot server")
-	writeSafe(&builder, "/ip hotspot profile remove [find name=\"noblifi-hotspot-profile\"]", "cleanup hotspot profile")
-	writeSafe(&builder, "/ip hotspot user profile remove [find name=\"noblifi-voucher-profile\"]", "cleanup hotspot user profile")
+	// Keep the NobliFi HotSpot server profile and user profile across reruns.
+	// They are updated idempotently later. This avoids leaving the router with
+	// only the RouterOS "default" profile if provisioning stops halfway through.
 	writeSafe(&builder, "/ip hotspot walled-garden remove [find comment=\"NobliFi captive portal\"]", "cleanup captive portal walled garden")
 	writeSafe(&builder, "/file remove [find name=\"noblifi/login.html\"]", "cleanup hotspot login file")
 	writeSafe(&builder, "/file remove [find name=\"noblifi/index.html\"]", "cleanup hotspot index file")
@@ -304,9 +305,7 @@ func withDefaults(options RenderOptions) RenderOptions {
 	if options.CCTVPool == "" {
 		options.CCTVPool = defaults.CCTVPool
 	}
-	if options.HotspotDNSName == "" {
-		options.HotspotDNSName = defaults.HotspotDNSName
-	}
+	options.HotspotDNSName = normalizeHotspotDNSName(options.HotspotDNSName)
 	if options.HotspotPortalName == "" {
 		options.HotspotPortalName = defaults.HotspotPortalName
 	}
@@ -315,6 +314,24 @@ func withDefaults(options RenderOptions) RenderOptions {
 	}
 	options.WalledGardenHosts = cleanHosts(options.WalledGardenHosts)
 	return options
+}
+
+func normalizeHotspotDNSName(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	value = strings.TrimPrefix(value, "https://")
+	value = strings.TrimPrefix(value, "http://")
+
+	if slash := strings.Index(value, "/"); slash >= 0 {
+		value = value[:slash]
+	}
+
+	value = strings.TrimSuffix(value, ".")
+
+	if value == "" {
+		return "noblifi.login"
+	}
+
+	return value
 }
 
 func isPlaceholderRadiusSecret(value string) bool {
@@ -428,12 +445,19 @@ func writeHotspotNetwork(builder *strings.Builder, options RenderOptions, interf
 func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotspotGateway string) {
 	builder.WriteString("# DNS, NAT, RADIUS, and HotSpot service setup\n")
 
+	hotspotDNSName := normalizeHotspotDNSName(options.HotspotDNSName)
+
+	builder.WriteString(fmt.Sprintf(
+		":put \"NobliFi: configuring HotSpot server profile with DNS name %s\"\n",
+		escape(hotspotDNSName),
+	))
+
 	// ------------------------------------------------------------
-	// 1. CREATE HOTSPOT SERVER PROFILE FIRST
+	// 1. CREATE / PRESERVE HOTSPOT SERVER PROFILE
 	// ------------------------------------------------------------
-	// Create the profile with only the name first.
-	// This prevents one bad property from causing the entire creation
-	// operation to fail and leaving us with no profile at all.
+	// Create the profile with only the name if it does not already exist.
+	// Keeping the profile across provisioning reruns prevents a failed rerun
+	// from leaving the router with only RouterOS's built-in "default" profile.
 	writeCritical(
 		builder,
 		`:if ([:len [/ip hotspot profile find where name="noblifi-hotspot-profile"]] = 0) do={
@@ -442,12 +466,16 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		"create hotspot server profile",
 	)
 
-	builder.WriteString(
-		`:put "NobliFi HotSpot server profile created"` + "\n",
+	writeCritical(
+		builder,
+		`:if ([:len [/ip hotspot profile find where name="noblifi-hotspot-profile"]] = 0) do={
+			:error "noblifi-hotspot-profile was not created"
+		}`,
+		"verify hotspot server profile creation",
 	)
 
 	// ------------------------------------------------------------
-	// 2. CONFIGURE PROFILE SEPARATELY
+	// 2. CONFIGURE HOTSPOT SERVER PROFILE
 	// ------------------------------------------------------------
 	writeCritical(
 		builder,
@@ -458,13 +486,28 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		"set hotspot profile address",
 	)
 
+	// dns-name is the RouterOS HotSpot server-profile DNS name. RouterOS uses
+	// this hostname as the captive-portal location and automatically exposes
+	// the HotSpot DNS entry for the profile.
 	writeCritical(
 		builder,
 		fmt.Sprintf(
 			`/ip hotspot profile set [find where name="noblifi-hotspot-profile"] dns-name="%s"`,
-			escape(options.HotspotDNSName),
+			escape(hotspotDNSName),
 		),
 		"set hotspot profile dns name",
+	)
+
+	// Do not merely assume the previous command succeeded. Read the property
+	// back from RouterOS and abort provisioning if the configured value is not
+	// exactly the DNS name that NobliFi requested.
+	writeCritical(
+		builder,
+		fmt.Sprintf(
+			`:local configuredDNS [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] dns-name]; :if ($configuredDNS != "%s") do={ :error ("HotSpot DNS name mismatch. RouterOS returned " . $configuredDNS) }`,
+			escape(hotspotDNSName),
+		),
+		"verify hotspot profile dns name",
 	)
 
 	writeCritical(
@@ -497,21 +540,12 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		"set default hotspot html directory",
 	)
 
-	// Verify immediately.
-	writeCritical(
-		builder,
-		`:if ([:len [/ip hotspot profile find where name="noblifi-hotspot-profile"]] = 0) do={
-			:error "noblifi-hotspot-profile was not created"
-		}`,
-		"verify hotspot server profile creation",
-	)
-
-	builder.WriteString(
-		`:put "NobliFi HotSpot server profile verified"` + "\n",
-	)
+	builder.WriteString(fmt.Sprintf(
+		":put (\"NobliFi: HotSpot server profile configured; DNS name=\" . [/ip hotspot profile get [find where name=\\\"noblifi-hotspot-profile\\\"] dns-name])\n",
+	))
 
 	// ------------------------------------------------------------
-	// 3. DNS
+	// 3. DNS FORWARDING
 	// ------------------------------------------------------------
 	writeCritical(
 		builder,
@@ -559,9 +593,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		"enable radius incoming",
 	)
 
-	builder.WriteString(
-		`:put "NobliFi RADIUS client configured"` + "\n",
-	)
+	builder.WriteString(`:put "NobliFi RADIUS client configured"` + "\n")
 
 	// ------------------------------------------------------------
 	// 6. HOTSPOT HTML DIRECTORY
@@ -614,6 +646,13 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		"enable hotspot server",
 	)
 
+	// Verify that the HotSpot server is actually using our profile.
+	writeCritical(
+		builder,
+		`:local configuredProfile [/ip hotspot get [find where name="noblifi-hotspot"] profile]; :if ($configuredProfile != "noblifi-hotspot-profile") do={ :error ("HotSpot server is using unexpected profile " . $configuredProfile) }`,
+		"verify hotspot server profile assignment",
+	)
+
 	// ------------------------------------------------------------
 	// 9. WALLED GARDEN
 	// ------------------------------------------------------------
@@ -633,18 +672,12 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	// ------------------------------------------------------------
 	if strings.TrimSpace(options.LoginPageURL) != "" {
 		mode := "http"
-
 		if strings.HasPrefix(strings.ToLower(options.LoginPageURL), "https://") {
 			mode = "https"
 		}
 
-		builder.WriteString(
-			`:local hotspotLoginFile ($hotspotHtmlPath . "/login.html")` + "\n",
-		)
-
-		builder.WriteString(
-			`:local hotspotIndexFile ($hotspotHtmlPath . "/index.html")` + "\n",
-		)
+		builder.WriteString(`:local hotspotLoginFile ($hotspotHtmlPath . "/login.html")` + "\n")
+		builder.WriteString(`:local hotspotIndexFile ($hotspotHtmlPath . "/index.html")` + "\n")
 
 		writeCritical(
 			builder,
@@ -743,6 +776,17 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		"verify hotspot server profile",
 	)
 
+	// Final hard check for the DNS name. Provisioning must fail loudly instead
+	// of silently leaving the Server Profiles DNS Name column blank.
+	writeCritical(
+		builder,
+		fmt.Sprintf(
+			`:local finalDNS [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] dns-name]; :if ($finalDNS != "%s") do={ :error ("Final HotSpot DNS verification failed. RouterOS returned " . $finalDNS) }`,
+			escape(hotspotDNSName),
+		),
+		"final hotspot dns verification",
+	)
+
 	writeCritical(
 		builder,
 		fmt.Sprintf(
@@ -755,7 +799,9 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		"verify hotspot server",
 	)
 
-	builder.WriteString("\n")
+	builder.WriteString(fmt.Sprintf(
+		":put (\"NobliFi: HotSpot provisioning verified. DNS name=\" . [/ip hotspot profile get [find where name=\\\"noblifi-hotspot-profile\\\"] dns-name])\n\n",
+	))
 }
 
 func writeBridge(builder *strings.Builder, bridge string, interfaces []string, address string, pool string, ranges string, subnet string) {
