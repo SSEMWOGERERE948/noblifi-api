@@ -154,7 +154,7 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString("# Import this file with: /import file-name=noblifi-config.rsc\n\n")
 	builder.WriteString(":local hotspotHtmlDir \"noblifi\"\n")
 	builder.WriteString(":local hotspotHtmlPath \"noblifi\"\n")
-	builder.WriteString(":if ([:len [/file find name=\"flash\" type=\"directory\"]] > 0) do={ :set hotspotHtmlDir \"flash/noblifi\"; :set hotspotHtmlPath \"flash/noblifi\" }\n\n")
+	builder.WriteString(":if ([:len [/file find name=\"flash\"]] > 0) do={ :set hotspotHtmlDir \"flash/noblifi\"; :set hotspotHtmlPath \"flash/noblifi\" }\n\n")
 	builder.WriteString("# Clean previous NobliFi-owned service setup\n")
 	writeSafe(&builder, "/ip hotspot remove [find name=\"noblifi-hotspot\"]", "cleanup hotspot server")
 	writeSafe(&builder, "/ip hotspot user profile remove [find name=\"noblifi-voucher-profile\"]", "cleanup hotspot user profile")
@@ -663,7 +663,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		// This keeps login.html, index.html, and the profile html-directory aligned.
 		builder.WriteString(`:set hotspotHtmlDir "noblifi"` + "\n")
 		builder.WriteString(`:set hotspotHtmlPath "noblifi"` + "\n")
-		builder.WriteString(`:if ([:len [/file find where name="flash" type="directory"]] > 0) do={ :set hotspotHtmlDir "flash/noblifi"; :set hotspotHtmlPath "flash/noblifi" }` + "\n")
+		builder.WriteString(`:if ([:len [/file find where name="flash"]] > 0) do={ :set hotspotHtmlDir "flash/noblifi"; :set hotspotHtmlPath "flash/noblifi" }` + "\n")
 
 		// Ensure the selected custom portal directory exists.
 		writeSafe(
@@ -743,7 +743,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 
 		builder.WriteString(`/system script add name="noblifi-hotspot-login-refresh-script" policy=ftp,read,write,test source={` + "\n")
 		builder.WriteString(`:local hotspotHtmlPath "noblifi"` + "\n")
-		builder.WriteString(`:if ([:len [/file find where name="flash" type="directory"]] > 0) do={ :set hotspotHtmlPath "flash/noblifi" }` + "\n")
+		builder.WriteString(`:if ([:len [/file find where name="flash"]] > 0) do={ :set hotspotHtmlPath "flash/noblifi" }` + "\n")
 		builder.WriteString(`:local hotspotLoginFile ($hotspotHtmlPath . "/login.html")` + "\n")
 		builder.WriteString(`:local hotspotIndexFile ($hotspotHtmlPath . "/index.html")` + "\n")
 		builder.WriteString(fmt.Sprintf(`/tool fetch url="%s" mode=%s dst-path=$hotspotLoginFile`, escape(options.LoginPageURL), mode) + "\n")
