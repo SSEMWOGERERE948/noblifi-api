@@ -118,7 +118,7 @@ func RenderRouterOS(assignments []Assignment) (string, error) {
 		CCTVSubnet:          "10.40.40.0/24",
 		CCTVGateway:         "10.40.40.1/24",
 		CCTVPool:            "10.40.40.10-10.40.40.254",
-		HotspotDNSName:      "noblifi.local",
+		HotspotDNSName:      "noblifi.login",
 		HotspotPortalName:   "NobliFi WiFi",
 		DisableWWWService:   true,
 		EnableAPIService:    true,
@@ -212,6 +212,7 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString("\n")
 
 	writeHotspotNetwork(&builder, options, summary.HotspotLAN, hotspotGateway)
+
 	writeBridge(&builder, options.StaffBridge, summary.StaffLAN, options.StaffGateway, "pool-staff", options.StaffPool, options.StaffSubnet)
 	writeBridge(&builder, options.POSBridge, summary.POSLAN, options.POSGateway, "pool-pos", options.POSPool, options.POSSubnet)
 	writeBridge(&builder, options.CCTVBridge, summary.CCTVLAN, options.CCTVGateway, "pool-cctv", options.CCTVPool, options.CCTVSubnet)
@@ -239,7 +240,7 @@ func withDefaults(options RenderOptions) RenderOptions {
 		CCTVSubnet:          "10.40.40.0/24",
 		CCTVGateway:         "10.40.40.1/24",
 		CCTVPool:            "10.40.40.10-10.40.40.254",
-		HotspotDNSName:      "noblifi.local",
+		HotspotDNSName:      "noblifi.login",
 		HotspotPortalName:   "NobliFi WiFi",
 		DisableWWWService:   true,
 		EnableAPIService:    true,
@@ -407,6 +408,16 @@ func writeHotspotNetwork(builder *strings.Builder, options RenderOptions, interf
 		writeSafe(builder, fmt.Sprintf("/interface list member add list=LAN interface=%s comment=\"NobliFi LAN member\"", iface), "add LAN list member")
 	}
 	writeCritical(builder, fmt.Sprintf(":if ([:len [/interface bridge port find bridge=%s]] = 0) do={ :error \"No HotSpot LAN ports were added to %s\" }", options.HotspotBridge, options.HotspotBridge), "verify hotspot bridge ports")
+	// Bounce each hotspot LAN port after adding it to the bridge. Ports have
+	// been observed sitting in the INACTIVE (I) state right after being added
+	// in the same script run that creates the bridge, requiring a second,
+	// separate script run before they settle into active/forwarding state.
+	// A quick disable/enable forces RouterOS to re-negotiate the port's
+	// bridge membership immediately instead of waiting on it.
+	for _, iface := range interfaces {
+		writeSafe(builder, fmt.Sprintf("/interface set %s disabled=yes", iface), "bounce hotspot port disable")
+		writeSafe(builder, fmt.Sprintf("/interface set %s disabled=no", iface), "bounce hotspot port enable")
+	}
 	writeCritical(builder, fmt.Sprintf(":if ([:len [/ip address find where interface=%s address=%s]] = 0) do={ /ip address add address=%s interface=%s comment=\"NobliFi HotSpot gateway\" } else={ /ip address set [find where interface=%s address=%s] comment=\"NobliFi HotSpot gateway\" }", options.HotspotBridge, options.HotspotGateway, options.HotspotGateway, options.HotspotBridge, options.HotspotBridge, options.HotspotGateway), "ensure hotspot gateway")
 	writeCritical(builder, fmt.Sprintf(":if ([:len [/ip pool find name=pool-hotspot]] = 0) do={ /ip pool add name=pool-hotspot ranges=%s comment=\"NobliFi HotSpot pool\" } else={ /ip pool set [find name=pool-hotspot] ranges=%s comment=\"NobliFi HotSpot pool\" }", options.HotspotPool, options.HotspotPool), "ensure hotspot pool")
 	writeCritical(builder, fmt.Sprintf(":if ([:len [/ip dhcp-server find name=dhcp-hotspot]] = 0) do={ /ip dhcp-server add name=dhcp-hotspot interface=%s address-pool=pool-hotspot lease-time=1h disabled=no } else={ /ip dhcp-server set [find name=dhcp-hotspot] interface=%s address-pool=pool-hotspot lease-time=1h disabled=no }", options.HotspotBridge, options.HotspotBridge), "ensure hotspot dhcp")
@@ -446,7 +457,15 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		builder.WriteString(":local hotspotIndexFile ($hotspotHtmlPath . \"/index.html\")\n")
 		writeCritical(builder, fmt.Sprintf("/tool fetch url=\"%s\" mode=%s dst-path=$hotspotLoginFile", escape(options.LoginPageURL), mode), "fetch hotspot login")
 		writeCritical(builder, fmt.Sprintf("/tool fetch url=\"%s\" mode=%s dst-path=$hotspotIndexFile", escape(options.LoginPageURL), mode), "fetch hotspot index")
-		writeCritical(builder, ":if ([:len [/file find name=$hotspotLoginFile]] > 0) do={ /ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=$hotspotHtmlDir; :put \"NobliFi HotSpot login and index pages installed\" } else={ :error \"NobliFi HotSpot login fetch did not create login.html\" }", "set html directory")
+		// Re-check for flash right here rather than trusting only the single
+		// check done at the very top of the script. On boards where flash
+		// becomes available slightly later, or where $hotspotHtmlDir was
+		// computed before flash settled, this re-check forces html-directory
+		// onto flash/noblifi explicitly - matching the manual sequence that
+		// was confirmed working on-router (fetch into flash/noblifi/index.html,
+		// then html-directory=flash/noblifi).
+		writeSafe(builder, ":if ([:len [/file find name=\"flash\" type=\"directory\"]] > 0) do={ :set hotspotHtmlDir \"flash/noblifi\" }", "re-check flash directory before setting html-directory")
+		writeCritical(builder, ":if ([:len [/file find name=$hotspotLoginFile]] > 0) do={ /ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=$hotspotHtmlDir; :put (\"NobliFi HotSpot login and index pages installed at \" . $hotspotHtmlDir) } else={ :error \"NobliFi HotSpot login fetch did not create login.html\" }", "set html directory")
 		writeSafe(builder, "/system scheduler remove [find name=noblifi-hotspot-login-refresh]", "cleanup hotspot login refresh")
 		writeSafe(builder, fmt.Sprintf("/system scheduler add name=noblifi-hotspot-login-refresh interval=10m on-event=(\":local hotspotHtmlPath \\\"noblifi\\\"; :if ([:len [/file find name=\\\"flash\\\" type=\\\"directory\\\"]] > 0) do={ :set hotspotHtmlPath \\\"flash/noblifi\\\" }; :local hotspotLoginFile (\\$hotspotHtmlPath . \\\"/login.html\\\"); :local hotspotIndexFile (\\$hotspotHtmlPath . \\\"/index.html\\\"); /tool fetch url=\\\"%s\\\" mode=%s dst-path=\\$hotspotLoginFile; /tool fetch url=\\\"%s\\\" mode=%s dst-path=\\$hotspotIndexFile\") comment=\"NobliFi HotSpot login refresh\"", escape(options.LoginPageURL), mode, escape(options.LoginPageURL), mode), "schedule hotspot login refresh")
 	} else {
