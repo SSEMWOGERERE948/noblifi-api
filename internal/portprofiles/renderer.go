@@ -154,7 +154,7 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString("# Import this file with: /import file-name=noblifi-config.rsc\n\n")
 	builder.WriteString(":local hotspotHtmlDir \"noblifi\"\n")
 	builder.WriteString(":local hotspotHtmlPath \"noblifi\"\n")
-	builder.WriteString(":if ([:len [/file find name=\"flash\" type=\"directory\"]] > 0) do={ :set hotspotHtmlDir \"flash/noblifi\"; :set hotspotHtmlPath \"flash/noblifi\" }\n\n")
+	builder.WriteString(":if ([:len [/file find where name=\"flash\"]] > 0) do={ :set hotspotHtmlDir \"flash/noblifi\"; :set hotspotHtmlPath \"flash/noblifi\" }\n\n")
 	builder.WriteString("# Clean previous NobliFi-owned service setup\n")
 	writeSafe(&builder, "/ip hotspot remove [find name=\"noblifi-hotspot\"]", "cleanup hotspot server")
 	writeSafe(&builder, "/ip hotspot user profile remove [find name=\"noblifi-voucher-profile\"]", "cleanup hotspot user profile")
@@ -695,7 +695,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 
 		writeSafe(
 			builder,
-			`:if ([:len [/file find name="flash" type="directory"]] > 0) do={
+			`:if ([:len [/file find where name="flash"]] > 0) do={
 				:set hotspotHtmlDir "flash/noblifi"
 			}`,
 			"re-check flash directory before setting html-directory",
@@ -705,6 +705,10 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 			builder,
 			`:if ([:len [/file find name=$hotspotLoginFile]] > 0) do={
 				/ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=$hotspotHtmlDir
+				:local configuredHtmlDir [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] html-directory]
+				:if ($configuredHtmlDir != $hotspotHtmlDir) do={
+					:error ("HotSpot HTML directory mismatch. RouterOS returned " . $configuredHtmlDir)
+				}
 				:put ("NobliFi HotSpot login and index pages installed at " . $hotspotHtmlDir)
 			} else={
 				:error "NobliFi HotSpot login fetch did not create login.html"
