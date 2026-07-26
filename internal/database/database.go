@@ -10,7 +10,20 @@ import (
 )
 
 func Connect(databaseURL string) (*gorm.DB, error) {
-	return gorm.Open(postgres.Open(databaseURL), &gorm.Config{})
+	// PreferSimpleProtocol disables GORM/pgx's prepared statement caching.
+	//
+	// Neon's pooled connection strings route through PgBouncer in
+	// transaction-pooling mode, which can hand the same underlying Postgres
+	// connection to different logical sessions. GORM's default prepared
+	// statement cache is keyed per-connection, so a statement name cached
+	// client-side can collide with one already prepared under a different
+	// session on that same underlying connection - causing intermittent
+	// "prepared statement already in use" (SQLSTATE 08P01) errors under
+	// concurrent load, e.g. when generating a batch of vouchers.
+	return gorm.Open(postgres.New(postgres.Config{
+		DSN:                  databaseURL,
+		PreferSimpleProtocol: true,
+	}), &gorm.Config{})
 }
 
 func AutoMigrate(db *gorm.DB) error {
@@ -25,6 +38,9 @@ func AutoMigrate(db *gorm.DB) error {
 		&routers.RouterConfigLog{},
 		&radius.RadCheck{},
 		&radius.RadReply{},
+		&radius.RadGroupCheck{},
+		&radius.RadGroupReply{},
+		&radius.RadUserGroup{},
 		&radius.RadAcct{},
 		&radius.NAS{},
 		&plans.Plan{},
