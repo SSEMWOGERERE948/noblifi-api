@@ -32,6 +32,7 @@ func (s *Service) Create(plan Plan) (Plan, error) {
 		return plan, err
 	}
 
+	preparePlanForCreate(&plan)
 	plan.IsActive = true
 
 	if err := s.repo.Create(&plan); err != nil {
@@ -111,6 +112,12 @@ func (s *Service) Patch(id uuid.UUID, input Plan) (Plan, error) {
 	}
 
 	return plan, nil
+}
+
+func preparePlanForCreate(plan *Plan) {
+	if plan.ID == uuid.Nil {
+		plan.ID = uuid.New()
+	}
 }
 
 func validate(plan Plan) error {
