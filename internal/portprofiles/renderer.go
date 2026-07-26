@@ -442,6 +442,30 @@ func writeHotspotNetwork(builder *strings.Builder, options RenderOptions, interf
 	builder.WriteString("\n")
 }
 
+// writeHotspotSupportFiles clones the default RouterOS HotSpot support files
+// into the NobliFi custom HTML directory without relying on "/file copy".
+// Some RouterOS builds do not expose that command. These support files are
+// small text assets, so their contents can be cloned with /file get + /file add.
+// login.html and index.html are deliberately excluded because NobliFi owns and
+// fetches those two custom pages separately.
+func writeHotspotSupportFiles(builder *strings.Builder) {
+	builder.WriteString("# Clone default HotSpot support files for mobile captive portal detection\n")
+	builder.WriteString(`:local noblifiSupportFiles {"rlogin.html";"redirect.html";"alogin.html";"error.html";"errors.txt";"logout.html";"status.html";"radvert.html";"md5.js";"api.json"}` + "\n")
+	builder.WriteString(`:foreach f in=$noblifiSupportFiles do={` + "\n")
+	builder.WriteString(`  :local src ("hotspot/" . $f)` + "\n")
+	builder.WriteString(`  :local dst ($hotspotHtmlPath . "/" . $f)` + "\n")
+	builder.WriteString(`  :if ([:len [/file find where name=$src]] > 0) do={` + "\n")
+	builder.WriteString(`    :local data [/file get [find where name=$src] contents]` + "\n")
+	builder.WriteString(`    :if ([:len [/file find where name=$dst]] > 0) do={ /file remove [find where name=$dst] }` + "\n")
+	builder.WriteString(`    /file add name=$dst contents=$data` + "\n")
+	builder.WriteString(`    :put ("NobliFi copied HotSpot support file " . $f)` + "\n")
+	builder.WriteString(`  } else={` + "\n")
+	builder.WriteString(`    :put ("NobliFi WARNING: default HotSpot support file missing: " . $src)` + "\n")
+	builder.WriteString(`  }` + "\n")
+	builder.WriteString(`}` + "\n")
+	builder.WriteString("\n")
+}
+
 func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotspotGateway string) {
 	hotspotDNSName := normalizeHotspotDNSName(options.HotspotDNSName)
 	builder.WriteString("# DNS, NAT, RADIUS, and HotSpot service setup\n")
@@ -518,11 +542,13 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		"configure hotspot login methods",
 	)
 
-	writeCritical(
-		builder,
-		`/ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=hotspot`,
-		"set default hotspot html directory",
-	)
+	if strings.TrimSpace(options.LoginPageURL) == "" {
+		writeCritical(
+			builder,
+			`/ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=hotspot`,
+			"set default hotspot html directory",
+		)
+	}
 
 	// Verify immediately.
 	writeCritical(
@@ -600,6 +626,10 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		}`,
 		"ensure hotspot html directory",
 	)
+
+	if strings.TrimSpace(options.LoginPageURL) != "" {
+		writeHotspotSupportFiles(builder)
+	}
 
 	// ------------------------------------------------------------
 	// 7. HOTSPOT USER PROFILE
@@ -697,22 +727,30 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 			builder,
 			`:if ([:len [/file find where name="flash"]] > 0) do={
 				:set hotspotHtmlDir "flash/noblifi"
+				:set hotspotHtmlPath "flash/noblifi"
 			}`,
 			"re-check flash directory before setting html-directory",
 		)
 
 		writeCritical(
 			builder,
-			`:if ([:len [/file find name=$hotspotLoginFile]] > 0) do={
-				/ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=$hotspotHtmlDir
-				:local configuredHtmlDir [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] html-directory]
-				:if ($configuredHtmlDir != $hotspotHtmlDir) do={
-					:error ("HotSpot HTML directory mismatch. RouterOS returned " . $configuredHtmlDir)
-				}
-				:put ("NobliFi HotSpot login and index pages installed at " . $hotspotHtmlDir)
-			} else={
+			`:if ([:len [/file find name=$hotspotLoginFile]] = 0) do={
 				:error "NobliFi HotSpot login fetch did not create login.html"
-			}`,
+			}
+			:local hotspotRLoginFile ($hotspotHtmlPath . "/rlogin.html")
+			:local hotspotRedirectFile ($hotspotHtmlPath . "/redirect.html")
+			:if ([:len [/file find name=$hotspotRLoginFile]] = 0) do={
+				:error "NobliFi HotSpot support file rlogin.html is missing"
+			}
+			:if ([:len [/file find name=$hotspotRedirectFile]] = 0) do={
+				:error "NobliFi HotSpot support file redirect.html is missing"
+			}
+			/ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=$hotspotHtmlDir
+			:local configuredHtmlDir [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] html-directory]
+			:if ($configuredHtmlDir != $hotspotHtmlDir) do={
+				:error ("HotSpot HTML directory mismatch. RouterOS returned " . $configuredHtmlDir)
+			}
+			:put ("NobliFi HotSpot login, index, and support pages installed at " . $hotspotHtmlDir)`,
 			"set html directory",
 		)
 
