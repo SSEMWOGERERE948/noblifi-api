@@ -5,6 +5,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+
 	"github.com/noblifi/noblifi/backend/internal/auth"
 	"github.com/noblifi/noblifi/backend/internal/config"
 	"github.com/noblifi/noblifi/backend/internal/database"
@@ -15,17 +16,40 @@ import (
 	"github.com/noblifi/noblifi/backend/internal/vouchers"
 )
 
+type radiusSyncAdapter struct{ r *radius.Service }
+
+func (a radiusSyncAdapter) SyncVoucherForVoucher(v vouchers.Voucher) error {
+	return a.r.SyncVoucherForVoucher(v.Code)
+}
+
 func Run() {
+	// ---------------------------------------------------------
+	// CONFIGURATION
+	// ---------------------------------------------------------
+
 	cfg := config.Load()
+
+	// ---------------------------------------------------------
+	// DATABASE
+	// ---------------------------------------------------------
+
 	db, err := database.Connect(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("connect database: %v", err)
 	}
+
 	if err := database.AutoMigrate(db); err != nil {
 		log.Fatalf("migrate database: %v", err)
 	}
 
-	app := fiber.New(fiber.Config{AppName: "NobliFi API"})
+	// ---------------------------------------------------------
+	// FIBER
+	// ---------------------------------------------------------
+
+	app := fiber.New(fiber.Config{
+		AppName: "NobliFi API",
+	})
+
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
@@ -34,37 +58,191 @@ func Run() {
 
 	api := app.Group("/api/v1")
 
-	authService := auth.NewService(db, cfg.JWTSecret)
+	// ---------------------------------------------------------
+	// AUTH
+	// ---------------------------------------------------------
+
+	authService := auth.NewService(
+		db,
+		cfg.JWTSecret,
+	)
+
 	if err := authService.SeedAdmin(); err != nil {
 		log.Printf("seed admin failed: %v", err)
 	}
-	auth.NewHandler(authService).RegisterRoutes(api)
+
+	auth.NewHandler(
+		authService,
+	).RegisterRoutes(api)
+
+	// ---------------------------------------------------------
+	// RADIUS
+	// ---------------------------------------------------------
+	//
+	// IMPORTANT:
+	//
+	// NobliFi API is NOT the UDP RADIUS server anymore.
+	//
+	// FreeRADIUS running on the VPS owns:
+	//
+	// UDP 1812 -> authentication
+	// UDP 1813 -> accounting
+	//
+	// This service manages the RADIUS SQL tables used by
+	// FreeRADIUS:
+	//
+	// radcheck
+	// radreply
+	// radgroupcheck
+	// radgroupreply
+	// radusergroup
+	// radacct
+	// nas
+	//
+	// Therefore DO NOT call:
+	//
+	// radiusService.StartUDPServers(...)
+	//
+
+	radiusService := radius.NewService(db)
+
+	// ---------------------------------------------------------
+	// ROUTERS
+	// ---------------------------------------------------------
 
 	routerRepo := routers.NewRepository(db)
-	radiusService := radius.NewService(db)
-	radiusService.StartUDPServers(cfg.RadiusAuthPort, cfg.RadiusAcctPort, cfg.RadiusSecret)
-	routerService := routers.NewService(routerRepo, cfg)
+
+	routerService := routers.NewService(
+		routerRepo,
+		cfg,
+	)
+
+	routers.NewHandler(
+		routerService,
+	).RegisterRoutes(api)
+
+	// ---------------------------------------------------------
+	// PLANS / PACKAGES
+	// ---------------------------------------------------------
+	//
+	// Plans are stored in the normal NobliFi plans table,
+	// but the RadiusService creates and maintains their
+	// corresponding FreeRADIUS group policy.
+	//
+
 	planRepo := plans.NewRepository(db)
-	planService := plans.NewService(planRepo)
-	routers.NewHandler(routerService).RegisterRoutes(api)
-	provisioning.NewHandler(provisioning.NewService(routerRepo, cfg, radiusService, planService)).RegisterRoutes(api)
 
-	plans.NewHandler(planService).RegisterRoutes(api)
+	planService := plans.NewService(
+		planRepo,
+		radiusService,
+	)
 
-	radius.NewHandler(radiusService).RegisterRoutes(api)
+	plans.NewHandler(
+		planService,
+	).RegisterRoutes(api)
+
+	// ---------------------------------------------------------
+	// VOUCHERS
+	// ---------------------------------------------------------
+	//
+	// Every generated voucher is now automatically inserted
+	// into FreeRADIUS SQL through RadiusService.
+	//
+	// There is no SetRadiusSyncer() call anymore.
+	//
 
 	voucherRepo := vouchers.NewRepository(db)
-	voucherService := vouchers.NewService(voucherRepo)
-	voucherService.SetRadiusSyncer(radiusService)
-	vouchers.NewHandler(voucherService).RegisterRoutes(api)
+
+	voucherService := vouchers.NewService(
+		voucherRepo,
+		radiusSyncAdapter{r: radiusService},
+	)
+
+	vouchers.NewHandler(
+		voucherService,
+	).RegisterRoutes(api)
+
+	// ---------------------------------------------------------
+	// PROVISIONING
+	// ---------------------------------------------------------
+
+	provisioningService := provisioning.NewService(
+		routerRepo,
+		cfg,
+		radiusService,
+		planService,
+	)
+
+	provisioning.NewHandler(
+		provisioningService,
+	).RegisterRoutes(api)
+
+	// ---------------------------------------------------------
+	// RADIUS MANAGEMENT API
+	// ---------------------------------------------------------
+	//
+	// Provides endpoints such as:
+	//
+	// POST /api/v1/radius/plans/sync
+	// POST /api/v1/radius/vouchers/sync
+	// POST /api/v1/radius/vouchers/:code/sync
+	// GET  /api/v1/radius/accounting/summary
+	//
+
+	radius.NewHandler(
+		radiusService,
+	).RegisterRoutes(api)
+
+	// ---------------------------------------------------------
+	// EXISTING DATA RADIUS SYNC
+	// ---------------------------------------------------------
+	//
+	// This is useful while migrating the existing NobliFi
+	// database to the new FreeRADIUS SQL architecture.
+	//
+	// Failure does not stop the API because an old package may
+	// contain invalid data such as duration_minutes=0.
+	//
+
+	if count, err := radiusService.SyncAllPlans(); err != nil {
+		log.Printf(
+			"initial RADIUS plan sync failed: %v",
+			err,
+		)
+	} else {
+		log.Printf(
+			"initial RADIUS plan sync completed: %d plans",
+			count,
+		)
+	}
+
+	if count, err := radiusService.SyncAllVouchers(); err != nil {
+		log.Printf(
+			"initial RADIUS voucher sync failed: %v",
+			err,
+		)
+	} else {
+		log.Printf(
+			"initial RADIUS voucher sync completed: %d vouchers",
+			count,
+		)
+	}
+
+	// ---------------------------------------------------------
+	// ROOT
+	// ---------------------------------------------------------
 
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"service": "noblifi-api",
 			"status":  "running",
-			"version": "2026-07-04-router-provisioning",
+			"version": "2026-07-26-freeradius-sql",
 		})
 	})
+
+	// ---------------------------------------------------------
+	// HEALTH CHECK
+	// ---------------------------------------------------------
 
 	app.Get("/healthz", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
@@ -73,16 +251,35 @@ func Run() {
 		})
 	})
 
+	// ---------------------------------------------------------
+	// DEBUG ROUTES
+	// ---------------------------------------------------------
+
 	app.Get("/debug/routes", func(c *fiber.Ctx) error {
 		routes := app.GetRoutes()
+
 		out := make([]string, 0, len(routes))
 
 		for _, route := range routes {
-			out = append(out, route.Method+" "+route.Path)
+			out = append(
+				out,
+				route.Method+" "+route.Path,
+			)
 		}
 
 		return c.JSON(out)
 	})
 
-	log.Fatal(app.Listen(":" + cfg.Port))
+	// ---------------------------------------------------------
+	// START HTTP SERVER
+	// ---------------------------------------------------------
+
+	log.Printf(
+		"NobliFi API starting on port %s",
+		cfg.Port,
+	)
+
+	log.Fatal(
+		app.Listen(":" + cfg.Port),
+	)
 }

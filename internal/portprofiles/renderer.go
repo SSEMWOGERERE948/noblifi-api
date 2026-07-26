@@ -47,6 +47,16 @@ type RenderOptions struct {
 	EnableAPIService    bool
 	EnableAPISSLService bool
 	WalledGardenHosts   []string
+
+	// WireGuard management tunnel. WireGuardClientIP must be unique per router.
+	WireGuardEnabled   bool
+	WireGuardEndpoint  string
+	WireGuardPort      int
+	WireGuardPublicKey string
+	WireGuardInterface string
+	WireGuardServerIP  string
+	WireGuardClientIP  string
+	WireGuardKeepalive int
 }
 
 func DefaultAssignments() []Assignment {
@@ -124,6 +134,11 @@ func RenderRouterOS(assignments []Assignment) (string, error) {
 		EnableAPIService:    true,
 		EnableAPISSLService: true,
 		WalledGardenHosts:   defaultWalledGardenHosts(),
+		WireGuardEnabled:    false,
+		WireGuardPort:       51820,
+		WireGuardInterface:  "noblifi-wg",
+		WireGuardServerIP:   "10.77.0.1",
+		WireGuardKeepalive:  25,
 	})
 }
 
@@ -142,6 +157,9 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 		return "", fmt.Errorf("NOBLIFI_ROUTER_API_PASSWORD must be set to a real router API password before provisioning")
 	}
 	if err := validateLoginPageURL(options.LoginPageURL); err != nil {
+		return "", err
+	}
+	if err := validateWireGuardOptions(options); err != nil {
 		return "", err
 	}
 
@@ -215,6 +233,7 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	writeBridge(&builder, options.StaffBridge, summary.StaffLAN, options.StaffGateway, "pool-staff", options.StaffPool, options.StaffSubnet)
 	writeBridge(&builder, options.POSBridge, summary.POSLAN, options.POSGateway, "pool-pos", options.POSPool, options.POSSubnet)
 	writeBridge(&builder, options.CCTVBridge, summary.CCTVLAN, options.CCTVGateway, "pool-cctv", options.CCTVPool, options.CCTVSubnet)
+	writeWireGuardManagement(&builder, options)
 	writeHotspotServices(&builder, options, hotspotGateway)
 	return builder.String(), nil
 }
@@ -245,6 +264,10 @@ func withDefaults(options RenderOptions) RenderOptions {
 		EnableAPIService:    true,
 		EnableAPISSLService: true,
 		WalledGardenHosts:   defaultWalledGardenHosts(),
+		WireGuardPort:       51820,
+		WireGuardInterface:  "noblifi-wg",
+		WireGuardServerIP:   "10.77.0.1",
+		WireGuardKeepalive:  25,
 	}
 	if options.RouterIdentity == "" {
 		options.RouterIdentity = defaults.RouterIdentity
@@ -310,6 +333,18 @@ func withDefaults(options RenderOptions) RenderOptions {
 	if len(options.WalledGardenHosts) == 0 {
 		options.WalledGardenHosts = defaults.WalledGardenHosts
 	}
+	if options.WireGuardPort == 0 {
+		options.WireGuardPort = defaults.WireGuardPort
+	}
+	if options.WireGuardInterface == "" {
+		options.WireGuardInterface = defaults.WireGuardInterface
+	}
+	if options.WireGuardServerIP == "" {
+		options.WireGuardServerIP = defaults.WireGuardServerIP
+	}
+	if options.WireGuardKeepalive == 0 {
+		options.WireGuardKeepalive = defaults.WireGuardKeepalive
+	}
 	options.WalledGardenHosts = cleanHosts(options.WalledGardenHosts)
 	return options
 }
@@ -363,6 +398,38 @@ func validateLoginPageURL(value string) error {
 		return fmt.Errorf("NOBLIFI_PROVISIONING_BASE_URL produced HotSpot login URL %q, but MikroTik must fetch the backend /api/v1/provisioning/hotspot-login/:token route directly with no redirects", value)
 	}
 	return nil
+}
+
+func validateWireGuardOptions(options RenderOptions) error {
+	if !options.WireGuardEnabled {
+		return nil
+	}
+
+	if strings.TrimSpace(options.WireGuardEndpoint) == "" {
+		return fmt.Errorf("NOBLIFI_WIREGUARD_ENDPOINT must be set when WireGuard provisioning is enabled")
+	}
+	if strings.TrimSpace(options.WireGuardPublicKey) == "" {
+		return fmt.Errorf("NOBLIFI_WIREGUARD_PUBLIC_KEY must contain the VPS WireGuard public key")
+	}
+	if strings.TrimSpace(options.WireGuardClientIP) == "" {
+		return fmt.Errorf("WireGuardClientIP must be allocated uniquely for this router; do not reuse 10.77.0.2 on every MikroTik")
+	}
+	if options.WireGuardPort < 1 || options.WireGuardPort > 65535 {
+		return fmt.Errorf("invalid WireGuard port %d", options.WireGuardPort)
+	}
+	if options.WireGuardKeepalive < 1 || options.WireGuardKeepalive > 65535 {
+		return fmt.Errorf("invalid WireGuard keepalive %d", options.WireGuardKeepalive)
+	}
+
+	return nil
+}
+
+func routerOSHostRoute(ip string) string {
+	ip = strings.TrimSpace(ip)
+	if strings.Contains(ip, "/") {
+		return ip
+	}
+	return ip + "/32"
 }
 
 func routerOSDisabled(disabled bool) string {
@@ -439,6 +506,85 @@ func writeHotspotNetwork(builder *strings.Builder, options RenderOptions, interf
 	writeCritical(builder, fmt.Sprintf(":if ([:len [/ip pool find name=pool-hotspot]] = 0) do={ /ip pool add name=pool-hotspot ranges=%s comment=\"NobliFi HotSpot pool\" } else={ /ip pool set [find name=pool-hotspot] ranges=%s comment=\"NobliFi HotSpot pool\" }", options.HotspotPool, options.HotspotPool), "ensure hotspot pool")
 	writeCritical(builder, fmt.Sprintf(":if ([:len [/ip dhcp-server find name=dhcp-hotspot]] = 0) do={ /ip dhcp-server add name=dhcp-hotspot interface=%s address-pool=pool-hotspot lease-time=1h disabled=no } else={ /ip dhcp-server set [find name=dhcp-hotspot] interface=%s address-pool=pool-hotspot lease-time=1h disabled=no }", options.HotspotBridge, options.HotspotBridge), "ensure hotspot dhcp")
 	writeCritical(builder, fmt.Sprintf(":if ([:len [/ip dhcp-server network find address=\"%s\"]] = 0) do={ /ip dhcp-server network add address=\"%s\" gateway=\"%s\" dns-server=\"%s\" } else={ /ip dhcp-server network set [find address=\"%s\"] gateway=\"%s\" dns-server=\"%s\" }", escape(options.HotspotSubnet), escape(options.HotspotSubnet), escape(hotspotGateway), escape(hotspotGateway), escape(options.HotspotSubnet), escape(hotspotGateway), escape(hotspotGateway)), "ensure hotspot dhcp network")
+	builder.WriteString("\n")
+}
+
+// writeWireGuardManagement creates the MikroTik side of the NobliFi management
+// tunnel. It is intentionally idempotent: once RouterOS generates a WireGuard
+// keypair, rerunning provisioning preserves the interface and its private key.
+//
+// IMPORTANT: the VPS must also register this router's generated public key with
+// AllowedIPs=<WireGuardClientIP>/32. That server-side peer registration cannot be
+// completed by this renderer alone because the public key does not exist until
+// RouterOS creates the interface.
+func writeWireGuardManagement(builder *strings.Builder, options RenderOptions) {
+	if !options.WireGuardEnabled {
+		return
+	}
+
+	iface := options.WireGuardInterface
+	clientCIDR := routerOSHostRoute(options.WireGuardClientIP)
+	serverCIDR := routerOSHostRoute(options.WireGuardServerIP)
+
+	builder.WriteString("# NobliFi WireGuard management tunnel\n")
+
+	writeCritical(
+		builder,
+		fmt.Sprintf(
+			`:if ([:len [/interface wireguard find where name="%s"]] = 0) do={ /interface wireguard add name="%s" comment="NobliFi management tunnel" }`,
+			escape(iface), escape(iface),
+		),
+		"ensure WireGuard interface",
+	)
+
+	writeCritical(
+		builder,
+		fmt.Sprintf(
+			`:if ([:len [/ip address find where interface="%s" address="%s"]] = 0) do={ /ip address remove [find where interface="%s" comment="NobliFi WireGuard address"]; /ip address add address="%s" interface="%s" comment="NobliFi WireGuard address" }`,
+			escape(iface), escape(clientCIDR), escape(iface), escape(clientCIDR), escape(iface),
+		),
+		"ensure WireGuard client address",
+	)
+
+	// Recreate only the VPS peer, never the WireGuard interface itself. This
+	// updates endpoint/public-key settings without regenerating the router keypair.
+	writeSafe(
+		builder,
+		fmt.Sprintf(`/interface wireguard peers remove [find where interface="%s" comment="NobliFi VPS"]`, escape(iface)),
+		"cleanup WireGuard VPS peer",
+	)
+	writeCritical(
+		builder,
+		fmt.Sprintf(
+			`/interface wireguard peers add interface="%s" public-key="%s" endpoint-address="%s" endpoint-port=%d allowed-address="%s" persistent-keepalive=%ds comment="NobliFi VPS"`,
+			escape(iface), escape(options.WireGuardPublicKey), escape(options.WireGuardEndpoint), options.WireGuardPort, escape(serverCIDR), options.WireGuardKeepalive,
+		),
+		"add WireGuard VPS peer",
+	)
+
+	// allowed-address decides which decrypted addresses belong to the peer, but
+	// the router still needs an explicit IP route for the management server.
+	writeSafe(builder, `/ip route remove [find where comment="NobliFi VPS WireGuard"]`, "cleanup WireGuard VPS route")
+	writeCritical(
+		builder,
+		fmt.Sprintf(`/ip route add dst-address="%s" gateway="%s" distance=1 comment="NobliFi VPS WireGuard"`, escape(serverCIDR), escape(iface)),
+		"add WireGuard VPS route",
+	)
+
+	writeSafe(
+		builder,
+		fmt.Sprintf(`:if ([:len [/interface list member find where list=LAN interface="%s"]] = 0) do={ /interface list member add list=LAN interface="%s" comment="NobliFi WireGuard LAN" }`, escape(iface), escape(iface)),
+		"add WireGuard interface to LAN list",
+	)
+
+	writeCritical(
+		builder,
+		fmt.Sprintf(`:if ([:len [/ip route find where dst-address="%s" gateway="%s" active=yes]] = 0) do={ :error "NobliFi WireGuard route is not active" }`, escape(serverCIDR), escape(iface)),
+		"verify WireGuard VPS route",
+	)
+
+	builder.WriteString(fmt.Sprintf(`:local noblifiWGPublicKey [/interface wireguard get [find where name="%s"] public-key]`, escape(iface)) + "\n")
+	builder.WriteString(fmt.Sprintf(`:put ("NobliFi WireGuard ready: client=%s server=%s public-key=" . $noblifiWGPublicKey)`, escape(options.WireGuardClientIP), escape(options.WireGuardServerIP)) + "\n")
 	builder.WriteString("\n")
 }
 
@@ -596,15 +742,20 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		"cleanup radius client",
 	)
 
-	writeCritical(
-		builder,
-		fmt.Sprintf(
-			`/radius add service=hotspot address=%s secret="%s" authentication-port=1812 accounting-port=1813 timeout=3s comment="NobliFi RADIUS"`,
-			options.RadiusServer,
-			escape(options.RadiusSecret),
-		),
-		"add radius client",
+	radiusCommand := fmt.Sprintf(
+		`/radius add service=hotspot address=%s secret="%s" authentication-port=1812 accounting-port=1813 timeout=3s comment="NobliFi RADIUS"`,
+		options.RadiusServer,
+		escape(options.RadiusSecret),
 	)
+	if options.WireGuardEnabled {
+		radiusCommand = fmt.Sprintf(
+			`/radius add service=hotspot address=%s src-address=%s secret="%s" authentication-port=1812 accounting-port=1813 timeout=3s comment="NobliFi RADIUS"`,
+			options.RadiusServer,
+			options.WireGuardClientIP,
+			escape(options.RadiusSecret),
+		)
+	}
+	writeCritical(builder, radiusCommand, "add radius client")
 
 	writeCritical(
 		builder,
@@ -800,6 +951,15 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		),
 		"verify hotspot dhcp",
 	)
+
+	if options.WireGuardEnabled {
+		serverCIDR := routerOSHostRoute(options.WireGuardServerIP)
+		writeCritical(
+			builder,
+			fmt.Sprintf(`:if ([:len [/ip route find where dst-address="%s" gateway="%s" active=yes]] = 0) do={ :error "NobliFi WireGuard route is missing or inactive" }`, escape(serverCIDR), escape(options.WireGuardInterface)),
+			"final WireGuard route verification",
+		)
+	}
 
 	writeCritical(
 		builder,

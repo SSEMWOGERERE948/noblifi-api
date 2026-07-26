@@ -11,31 +11,62 @@ func NewHandler(service *Service) *Handler {
 }
 
 func (h *Handler) RegisterRoutes(router fiber.Router) {
+	router.Post("/radius/plans/sync", h.syncAllPlans)
+
 	router.Post("/radius/vouchers/:code/sync", h.syncVoucher)
 	router.Post("/radius/vouchers/sync", h.syncAllVouchers)
+
 	router.Get("/radius/accounting/summary", h.accountingSummary)
 }
 
 func (h *Handler) syncVoucher(c *fiber.Ctx) error {
 	state, err := h.service.SyncVoucher(c.Params("code"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		return fiber.NewError(
+			fiber.StatusBadRequest,
+			err.Error(),
+		)
 	}
+
 	return c.JSON(state)
+}
+
+func (h *Handler) syncAllPlans(c *fiber.Ctx) error {
+	count, err := h.service.SyncAllPlans()
+	if err != nil {
+		return fiber.NewError(
+			fiber.StatusBadRequest,
+			err.Error(),
+		)
+	}
+
+	return c.JSON(fiber.Map{
+		"synced": count,
+	})
 }
 
 func (h *Handler) syncAllVouchers(c *fiber.Ctx) error {
 	count, err := h.service.SyncAllVouchers()
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		return fiber.NewError(
+			fiber.StatusBadRequest,
+			err.Error(),
+		)
 	}
-	return c.JSON(fiber.Map{"synced": count})
+
+	return c.JSON(fiber.Map{
+		"synced": count,
+	})
 }
 
 func (h *Handler) accountingSummary(c *fiber.Ctx) error {
 	summary, err := h.service.AccountingSummary()
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		return fiber.NewError(
+			fiber.StatusBadRequest,
+			err.Error(),
+		)
 	}
+
 	return c.JSON(summary)
 }
