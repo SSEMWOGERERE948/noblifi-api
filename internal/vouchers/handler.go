@@ -30,10 +30,20 @@ func (h *Handler) generate(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid plan id")
 	}
+
 	generated, err := h.service.Generate(planID, input.Quantity)
+
 	if err != nil {
-		return err
+		// Some or all vouchers may have been created even though RADIUS
+		// sync failed for one or more of them. Return the vouchers alongside
+		// the error so the operator can see what exists and what needs
+		// re-syncing, instead of a bare 500 with no context.
+		return c.Status(fiber.StatusMultiStatus).JSON(fiber.Map{
+			"vouchers": generated,
+			"error":    err.Error(),
+		})
 	}
+
 	return c.Status(fiber.StatusCreated).JSON(generated)
 }
 

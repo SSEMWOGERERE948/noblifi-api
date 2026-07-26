@@ -3,6 +3,7 @@ package radius
 import (
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -314,7 +315,21 @@ func (s *Service) SyncVoucher(code string) (VoucherRadiusState, error) {
 		// Expired, used, cancelled, etc. vouchers are deliberately left
 		// without a radcheck password. FreeRADIUS therefore cannot
 		// authenticate them.
+		//
+		// This is a normal, expected outcome for unusable/inactive
+		// vouchers - but it used to be completely silent, which made it
+		// indistinguishable from a real bug when someone found a voucher
+		// missing from radcheck. Log it so that distinction is obvious
+		// immediately instead of requiring a manual DB investigation.
 		if !state.Authorized {
+			log.Printf(
+				"radius sync skipped for voucher %s: not authorized (voucher_status=%s, plan_active=%t, plan_id=%s)",
+				voucher.Code,
+				voucher.Status,
+				plan.IsActive,
+				plan.ID,
+			)
+
 			return nil
 		}
 
@@ -355,6 +370,14 @@ func (s *Service) SyncVoucher(code string) (VoucherRadiusState, error) {
 
 		return nil
 	})
+
+	if err != nil {
+		log.Printf(
+			"radius sync failed for voucher %s: %v",
+			voucher.Code,
+			err,
+		)
+	}
 
 	return state, err
 }
