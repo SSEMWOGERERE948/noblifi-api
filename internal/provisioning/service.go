@@ -38,9 +38,7 @@ func (s *Service) BootstrapScript(token string) (string, error) {
 	if err != nil {
 		return "", errors.New("invalid claim token")
 	}
-	if router.ClaimTokenExpiresAt != nil &&
-		router.ClaimTokenExpiresAt.Before(time.Now()) &&
-		!canFetchConfigAfterClaimExpiry(router) {
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) {
 		return "", errors.New("claim token expired")
 	}
 	return renderBootstrapScript(token, s.cfg.ProvisioningBaseURL), nil
@@ -244,11 +242,6 @@ func (s *Service) WireGuardStatus(input WireGuardStatusInput) error {
 	if err != nil {
 		return errors.New("invalid claim token")
 	}
-	if router.ClaimTokenExpiresAt != nil &&
-		router.ClaimTokenExpiresAt.Before(time.Now()) &&
-		!canFetchConfigAfterClaimExpiry(router) {
-		return errors.New("claim token expired")
-	}
 	if router.WireGuardTunnelIP == nil || router.WireGuardPublicKey == nil {
 		return errors.New("WireGuard setup is incomplete for this router")
 	}
@@ -381,11 +374,6 @@ func (s *Service) CheckIn(input CheckInInput) error {
 	if err != nil {
 		return errors.New("invalid claim token")
 	}
-	if router.ClaimTokenExpiresAt != nil &&
-		router.ClaimTokenExpiresAt.Before(time.Now()) &&
-		!canFetchConfigAfterClaimExpiry(router) {
-		return errors.New("claim token expired")
-	}
 	if serial != "" {
 		router.SerialNumber = &serial
 	}
@@ -431,12 +419,9 @@ func (s *Service) CheckIn(input CheckInInput) error {
 }
 
 func (s *Service) InterfaceCheckIn(input InterfaceCheckInInput) error {
-	token := strings.TrimSpace(input.ClaimToken)
+	token := input.ClaimToken
 	if token == "" {
-		token = strings.TrimSpace(input.Token)
-	}
-	if token == "" {
-		return errors.New("claim token is required")
+		token = input.Token
 	}
 	if strings.TrimSpace(input.Name) == "" {
 		return errors.New("interface name is required")
@@ -445,13 +430,7 @@ func (s *Service) InterfaceCheckIn(input InterfaceCheckInInput) error {
 	if err != nil {
 		return errors.New("invalid claim token")
 	}
-	// Interface discovery is part of the same provisioning transaction.
-	// Once the router has already checked in/been linked, allow the remaining
-	// provisioning calls to finish even if the original claim-token expiry
-	// has passed. This matches InstallScript/ClaimConfig behavior.
-	if router.ClaimTokenExpiresAt != nil &&
-		router.ClaimTokenExpiresAt.Before(time.Now()) &&
-		!canFetchConfigAfterClaimExpiry(router) {
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) {
 		return errors.New("claim token expired")
 	}
 	now := time.Now()
@@ -501,19 +480,9 @@ func parseRouterOSBool(value string) bool {
 	}
 }
 func (s *Service) Status(token, serial, status string) error {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return errors.New("claim token is required")
-	}
-
 	router, err := s.repo.FindByClaimToken(token)
 	if err != nil {
 		return errors.New("invalid claim token")
-	}
-	if router.ClaimTokenExpiresAt != nil &&
-		router.ClaimTokenExpiresAt.Before(time.Now()) &&
-		!canFetchConfigAfterClaimExpiry(router) {
-		return errors.New("claim token expired")
 	}
 	if serial != "" {
 		router.SerialNumber = &serial
@@ -579,18 +548,10 @@ func renderBootstrapScript(token, baseURL string) string {
   :local disabled [/interface get $iface disabled]
   :local ifaceUrl ($baseUrl . "/interface?token=" . $claimToken . "&name=" . $name . "&type=" . $type . "&mac_address=" . $mac . "&running=" . $running . "&disabled=" . $disabled)
   :put ("NobliFi interface URL: " . $ifaceUrl)
-  :do {
-    /tool fetch url=$ifaceUrl mode=%s keep-result=no
-  } on-error={
-    :put ("NobliFi WARNING: interface report failed for " . $name . "; continuing installation")
-  }
+  /tool fetch url=$ifaceUrl mode=%s keep-result=no
 }
 
-:do {
-  /tool fetch url=$statusUrl mode=%s keep-result=no
-} on-error={
-  :put "NobliFi WARNING: failed to report linked status; continuing installation"
-}
+/tool fetch url=$statusUrl mode=%s keep-result=no
 
 :put "NobliFi router linked. Return to the dashboard and choose automatic or manual setup."`, token, baseURL, fetchMode, fetchMode, fetchMode)
 }
@@ -606,12 +567,7 @@ func renderStatusCommand(token, status, baseURL string) string {
 	baseURL = normalizeProvisioningBaseURL(baseURL)
 	fetchMode := provisioningFetchMode(baseURL)
 	statusURL := baseURL + "/status?token=" + token + "&status=" + status
-	return fmt.Sprintf(
-		`:do { /tool fetch url="%s" mode=%s keep-result=no } on-error={ :put "NobliFi WARNING: failed to report status %s; configuration remains installed" }`,
-		statusURL,
-		fetchMode,
-		status,
-	)
+	return fmt.Sprintf(`/tool fetch url="%s" mode=%s keep-result=no`, statusURL, fetchMode)
 }
 
 func hotspotLoginURL(token, baseURL string) string {

@@ -37,28 +37,12 @@ type VoucherRadiusState struct {
 	RadiusGroup    string `json:"radius_group"`
 }
 
-// NAS maps to the standard FreeRADIUS "nas" table. That table's physical
-// column names (nasname, shortname) have no underscore, unlike GORM's
-// default naming convention for the equivalent Go field names (NASName ->
-// "nas_name", ShortName -> "short_name"). Without explicit `column` tags,
-// GORM silently writes to columns of its own invention instead of the real
-// ones, and reads back empty values for the same reason. The explicit tags
-// below make the struct match the actual schema.
-//
-// ID is required so GORM has a primary key to build UPDATE ... WHERE id = ?
-// from. Without it, GORM refuses to run any Save()/Updates() call at all
-// ("WHERE conditions required"), because it has nothing safe to key off of.
 type NAS struct {
-	ID          uint   `gorm:"column:id;primaryKey"`
-	NASName     string `gorm:"column:nasname"`
-	ShortName   string `gorm:"column:shortname"`
-	Type        string `gorm:"column:type"`
-	Secret      string `gorm:"column:secret"`
-	Description string `gorm:"column:description"`
-}
-
-func (NAS) TableName() string {
-	return "nas"
+	NASName     string
+	ShortName   string
+	Type        string
+	Secret      string
+	Description string
 }
 
 func NewService(db *gorm.DB) *Service {
@@ -110,18 +94,12 @@ func (s *Service) RegisterNAS(
 		return err
 	}
 
-	// Update by explicit WHERE on nasname rather than relying only on
-	// nas.ID being populated from the prior lookup. This is the same fix
-	// twice over: it no longer matters whether the primary key round-tripped
-	// correctly, because the WHERE clause is spelled out here regardless.
-	return s.db.Model(&NAS{}).
-		Where("nasname = ?", nasName).
-		Updates(map[string]any{
-			"shortname":   shortName,
-			"type":        "mikrotik",
-			"secret":      secret,
-			"description": description,
-		}).Error
+	nas.ShortName = shortName
+	nas.Type = "mikrotik"
+	nas.Secret = secret
+	nas.Description = description
+
+	return s.db.Save(&nas).Error
 }
 
 // ---------------------------------------------------------
