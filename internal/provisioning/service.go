@@ -38,7 +38,9 @@ func (s *Service) BootstrapScript(token string) (string, error) {
 	if err != nil {
 		return "", errors.New("invalid claim token")
 	}
-	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) {
+	if router.ClaimTokenExpiresAt != nil &&
+		router.ClaimTokenExpiresAt.Before(time.Now()) &&
+		!canFetchConfigAfterClaimExpiry(router) {
 		return "", errors.New("claim token expired")
 	}
 	return renderBootstrapScript(token, s.cfg.ProvisioningBaseURL), nil
@@ -242,6 +244,11 @@ func (s *Service) WireGuardStatus(input WireGuardStatusInput) error {
 	if err != nil {
 		return errors.New("invalid claim token")
 	}
+	if router.ClaimTokenExpiresAt != nil &&
+		router.ClaimTokenExpiresAt.Before(time.Now()) &&
+		!canFetchConfigAfterClaimExpiry(router) {
+		return errors.New("claim token expired")
+	}
 	if router.WireGuardTunnelIP == nil || router.WireGuardPublicKey == nil {
 		return errors.New("WireGuard setup is incomplete for this router")
 	}
@@ -374,19 +381,9 @@ func (s *Service) CheckIn(input CheckInInput) error {
 	if err != nil {
 		return errors.New("invalid claim token")
 	}
-	// NOTE: previously CheckIn performed no expiry check at all, while every
-	// other provisioning endpoint (bootstrap, install, wireguard,
-	// hotspot-login, config, interface) did. That asymmetry is what caused
-	// this exact failure mode: InstallScript already flips the router's
-	// Status to "provisioning" before the embedded script even runs, so by
-	// the time the router calls check-in the claim token may already be past
-	// its original expiry. check-in silently accepted that (no check), but
-	// interfaceCheckIn (below) rejected it with a raw expiry check that had
-	// no allowance for a router that's already mid-install. Using the same
-	// canFetchConfigAfterClaimExpiry() helper everywhere keeps all
-	// provisioning endpoints consistent: expired is fine once the router has
-	// actually been seen or has moved past "pending".
-	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
+	if router.ClaimTokenExpiresAt != nil &&
+		router.ClaimTokenExpiresAt.Before(time.Now()) &&
+		!canFetchConfigAfterClaimExpiry(router) {
 		return errors.New("claim token expired")
 	}
 	if serial != "" {
@@ -434,9 +431,12 @@ func (s *Service) CheckIn(input CheckInInput) error {
 }
 
 func (s *Service) InterfaceCheckIn(input InterfaceCheckInInput) error {
-	token := input.ClaimToken
+	token := strings.TrimSpace(input.ClaimToken)
 	if token == "" {
-		token = input.Token
+		token = strings.TrimSpace(input.Token)
+	}
+	if token == "" {
+		return errors.New("claim token is required")
 	}
 	if strings.TrimSpace(input.Name) == "" {
 		return errors.New("interface name is required")
@@ -445,11 +445,13 @@ func (s *Service) InterfaceCheckIn(input InterfaceCheckInInput) error {
 	if err != nil {
 		return errors.New("invalid claim token")
 	}
-	// Fixed: this used to be a bare expiry check with no allowance for a
-	// router that's already provisioning/online, unlike every other
-	// provisioning endpoint. That mismatch is what let check-in succeed
-	// immediately before this call failed with 401 on the same token.
-	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
+	// Interface discovery is part of the same provisioning transaction.
+	// Once the router has already checked in/been linked, allow the remaining
+	// provisioning calls to finish even if the original claim-token expiry
+	// has passed. This matches InstallScript/ClaimConfig behavior.
+	if router.ClaimTokenExpiresAt != nil &&
+		router.ClaimTokenExpiresAt.Before(time.Now()) &&
+		!canFetchConfigAfterClaimExpiry(router) {
 		return errors.New("claim token expired")
 	}
 	now := time.Now()
@@ -499,9 +501,19 @@ func parseRouterOSBool(value string) bool {
 	}
 }
 func (s *Service) Status(token, serial, status string) error {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return errors.New("claim token is required")
+	}
+
 	router, err := s.repo.FindByClaimToken(token)
 	if err != nil {
 		return errors.New("invalid claim token")
+	}
+	if router.ClaimTokenExpiresAt != nil &&
+		router.ClaimTokenExpiresAt.Before(time.Now()) &&
+		!canFetchConfigAfterClaimExpiry(router) {
+		return errors.New("claim token expired")
 	}
 	if serial != "" {
 		router.SerialNumber = &serial
@@ -567,10 +579,18 @@ func renderBootstrapScript(token, baseURL string) string {
   :local disabled [/interface get $iface disabled]
   :local ifaceUrl ($baseUrl . "/interface?token=" . $claimToken . "&name=" . $name . "&type=" . $type . "&mac_address=" . $mac . "&running=" . $running . "&disabled=" . $disabled)
   :put ("NobliFi interface URL: " . $ifaceUrl)
-  /tool fetch url=$ifaceUrl mode=%s keep-result=no
+  :do {
+    /tool fetch url=$ifaceUrl mode=%s keep-result=no
+  } on-error={
+    :put ("NobliFi WARNING: interface report failed for " . $name . "; continuing installation")
+  }
 }
 
-/tool fetch url=$statusUrl mode=%s keep-result=no
+:do {
+  /tool fetch url=$statusUrl mode=%s keep-result=no
+} on-error={
+  :put "NobliFi WARNING: failed to report linked status; continuing installation"
+}
 
 :put "NobliFi router linked. Return to the dashboard and choose automatic or manual setup."`, token, baseURL, fetchMode, fetchMode, fetchMode)
 }
@@ -586,7 +606,12 @@ func renderStatusCommand(token, status, baseURL string) string {
 	baseURL = normalizeProvisioningBaseURL(baseURL)
 	fetchMode := provisioningFetchMode(baseURL)
 	statusURL := baseURL + "/status?token=" + token + "&status=" + status
-	return fmt.Sprintf(`/tool fetch url="%s" mode=%s keep-result=no`, statusURL, fetchMode)
+	return fmt.Sprintf(
+		`:do { /tool fetch url="%s" mode=%s keep-result=no } on-error={ :put "NobliFi WARNING: failed to report status %s; configuration remains installed" }`,
+		statusURL,
+		fetchMode,
+		status,
+	)
 }
 
 func hotspotLoginURL(token, baseURL string) string {
