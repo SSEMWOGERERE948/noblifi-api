@@ -374,6 +374,21 @@ func (s *Service) CheckIn(input CheckInInput) error {
 	if err != nil {
 		return errors.New("invalid claim token")
 	}
+	// NOTE: previously CheckIn performed no expiry check at all, while every
+	// other provisioning endpoint (bootstrap, install, wireguard,
+	// hotspot-login, config, interface) did. That asymmetry is what caused
+	// this exact failure mode: InstallScript already flips the router's
+	// Status to "provisioning" before the embedded script even runs, so by
+	// the time the router calls check-in the claim token may already be past
+	// its original expiry. check-in silently accepted that (no check), but
+	// interfaceCheckIn (below) rejected it with a raw expiry check that had
+	// no allowance for a router that's already mid-install. Using the same
+	// canFetchConfigAfterClaimExpiry() helper everywhere keeps all
+	// provisioning endpoints consistent: expired is fine once the router has
+	// actually been seen or has moved past "pending".
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
+		return errors.New("claim token expired")
+	}
 	if serial != "" {
 		router.SerialNumber = &serial
 	}
@@ -430,7 +445,11 @@ func (s *Service) InterfaceCheckIn(input InterfaceCheckInInput) error {
 	if err != nil {
 		return errors.New("invalid claim token")
 	}
-	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) {
+	// Fixed: this used to be a bare expiry check with no allowance for a
+	// router that's already provisioning/online, unlike every other
+	// provisioning endpoint. That mismatch is what let check-in succeed
+	// immediately before this call failed with 401 on the same token.
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
 		return errors.New("claim token expired")
 	}
 	now := time.Now()

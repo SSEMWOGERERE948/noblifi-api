@@ -2,6 +2,8 @@ package provisioning
 
 import "github.com/gofiber/fiber/v2"
 
+const provisioningAuthRealm = `Bearer realm="noblifi-provisioning"`
+
 type Handler struct {
 	service *Service
 }
@@ -27,13 +29,26 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Get("/provisioning/status", h.status)
 }
 
+// unauthorized sets a WWW-Authenticate header before returning a 401.
+//
+// This matters specifically for MikroTik's /tool fetch: RouterOS refuses to
+// treat a bare 401 (no WWW-Authenticate header) as a normal HTTP failure and
+// instead throws an opaque script error ("failure: 401 should contain
+// www-authenticate header"). Setting this header ensures router-side logs
+// show the real reason (e.g. "invalid claim token", "claim token expired")
+// instead of that generic RouterOS complaint.
+func unauthorized(c *fiber.Ctx, err error) error {
+	c.Set(fiber.HeaderWWWAuthenticate, provisioningAuthRealm)
+	return fiber.NewError(fiber.StatusUnauthorized, err.Error())
+}
+
 func (h *Handler) wireGuardKey(c *fiber.Ctx) error {
 	var input WireGuardKeyInput
 	if err := c.BodyParser(&input); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
 	}
 	if err := h.service.WireGuardKey(input); err != nil {
-		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
+		return unauthorized(c, err)
 	}
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -44,7 +59,7 @@ func (h *Handler) wireGuardStatus(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
 	}
 	if err := h.service.WireGuardStatus(input); err != nil {
-		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
+		return unauthorized(c, err)
 	}
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -101,7 +116,7 @@ func (h *Handler) checkIn(c *fiber.Ctx) error {
 		}
 	}
 	if err := h.service.CheckIn(input); err != nil {
-		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
+		return unauthorized(c, err)
 	}
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -121,7 +136,7 @@ func (h *Handler) interfaceCheckIn(c *fiber.Ctx) error {
 		}
 	}
 	if err := h.service.InterfaceCheckIn(input); err != nil {
-		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
+		return unauthorized(c, err)
 	}
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -129,7 +144,7 @@ func (h *Handler) interfaceCheckIn(c *fiber.Ctx) error {
 func (h *Handler) config(c *fiber.Ctx) error {
 	script, err := h.service.ClaimConfig(c.Query("token"), c.Query("serial"), clientIP(c))
 	if err != nil {
-		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
+		return unauthorized(c, err)
 	}
 	c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
 	c.Set(fiber.HeaderContentDisposition, `attachment; filename="noblifi-config.rsc"`)
@@ -139,7 +154,7 @@ func (h *Handler) config(c *fiber.Ctx) error {
 func (h *Handler) configByToken(c *fiber.Ctx) error {
 	script, err := h.service.ClaimConfig(c.Params("token"), "", clientIP(c))
 	if err != nil {
-		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
+		return unauthorized(c, err)
 	}
 	c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
 	c.Set(fiber.HeaderContentDisposition, `attachment; filename="noblifi-config.rsc"`)
@@ -172,7 +187,7 @@ func (h *Handler) status(c *fiber.Ctx) error {
 		status = input.Status
 	}
 	if err := h.service.Status(token, serial, status); err != nil {
-		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
+		return unauthorized(c, err)
 	}
 	return c.JSON(fiber.Map{"status": "ok"})
 }
