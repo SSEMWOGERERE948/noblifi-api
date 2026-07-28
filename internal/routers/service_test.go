@@ -63,6 +63,8 @@ func TestRenderWireGuardRouterOSIsManagementOnly(t *testing.T) {
 		"allowed-address=10.77.0.1/32",
 		"persistent-keepalive=25s",
 		"/provisioning/wireguard-key",
+		"waiting for xneelo agent",
+		"/provisioning/wireguard-status",
 		"dst-port=8291,8728,8729",
 	}
 	for _, value := range required {
@@ -76,6 +78,7 @@ func TestRenderWireGuardRouterOSIsManagementOnly(t *testing.T) {
 		"/ip route add",
 		"/interface bridge",
 		"/ip dhcp-client",
+		"install the generated VPS peer command",
 	}
 	for _, value := range forbidden {
 		if strings.Contains(script, value) {
