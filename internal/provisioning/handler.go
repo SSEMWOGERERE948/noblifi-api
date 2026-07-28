@@ -1,6 +1,11 @@
 package provisioning
 
-import "github.com/gofiber/fiber/v2"
+import (
+	"errors"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/noblifi/noblifi/backend/internal/routers"
+)
 
 type Handler struct {
 	service *Service
@@ -64,6 +69,9 @@ func (h *Handler) bootstrap(c *fiber.Ctx) error {
 func (h *Handler) install(c *fiber.Ctx) error {
 	script, err := h.service.InstallScript(c.Params("token"), clientIP(c))
 	if err != nil {
+		if errors.Is(err, routers.ErrClaimTokenUsed) {
+			return fiber.NewError(fiber.StatusGone, "claim token already used")
+		}
 		return fiber.NewError(fiber.StatusNotFound, err.Error())
 	}
 	c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
