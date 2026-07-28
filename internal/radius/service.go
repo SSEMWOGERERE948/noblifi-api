@@ -496,6 +496,40 @@ func voucherUsable(voucher vouchers.Voucher) bool {
 	return true
 }
 
+func (s *Service) markVoucherUsed(code string, status string, usedAt *time.Time) error {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	newStatus, newUsedAt := voucherUsageState(status, usedAt, now)
+	if strings.EqualFold(newStatus, status) && usedAt != nil && newUsedAt != nil && newUsedAt.Equal(*usedAt) {
+		return nil
+	}
+
+	return s.db.Model(&vouchers.Voucher{}).
+		Where("code = ?", code).
+		Updates(map[string]any{
+			"status":  newStatus,
+			"used_at": newUsedAt,
+		}).Error
+}
+
+func voucherUsageState(status string, usedAt *time.Time, now time.Time) (string, *time.Time) {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "used":
+		return "used", usedAt
+	case "", "unused", "active":
+		if usedAt != nil {
+			return "used", usedAt
+		}
+		return "used", &now
+	default:
+		return status, usedAt
+	}
+}
+
 func radiusGroupName(planID uuid.UUID) string {
 	return "plan-" + planID.String()
 }

@@ -12,6 +12,22 @@ func validRenderOptions() RenderOptions {
 	}
 }
 
+func TestDefaultWalledGardenHostsIncludeMobileCaptivePortalChecks(t *testing.T) {
+	hosts := defaultWalledGardenHosts()
+	for _, required := range []string{"captive.apple.com", "connectivitycheck.gstatic.com", "connectivitycheck.android.com", "www.msftconnecttest.com"} {
+		found := false
+		for _, host := range hosts {
+			if host == required {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected default walled garden hosts to include %q, got %v", required, hosts)
+		}
+	}
+}
+
 func TestRenderRouterOSUsesIdempotentBridgePortAdds(t *testing.T) {
 	assignments := []Assignment{
 		{InterfaceName: "ether1", Role: "WAN"},

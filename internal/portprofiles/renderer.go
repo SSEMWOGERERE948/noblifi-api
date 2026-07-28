@@ -146,7 +146,9 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	if err := Validate(assignments); err != nil {
 		return "", err
 	}
+
 	options = withDefaults(options)
+
 	if isPlaceholderRadiusServer(options.RadiusServer) {
 		return "", fmt.Errorf("NOBLIFI_RADIUS_SERVER is %q, but MikroTik routers cannot use localhost, empty values, or setup placeholders for RADIUS. Set it to the public IP or DNS name of the VM/server running NobliFi RADIUS, for example 154.65.105.14, and make sure UDP ports 1812 and 1813 are reachable from the router", options.RadiusServer)
 	}
@@ -170,19 +172,27 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	var builder strings.Builder
 	builder.WriteString("# NobliFi generated RouterOS configuration\n")
 	builder.WriteString("# Import this file with: /import file-name=noblifi-config.rsc\n\n")
-	builder.WriteString(":local hotspotHtmlDir \"noblifi\"\n")
-	builder.WriteString(":local hotspotHtmlPath \"noblifi\"\n")
-	builder.WriteString(":if ([:len [/file find where name=\"flash\"]] > 0) do={ :set hotspotHtmlDir \"flash/noblifi\"; :set hotspotHtmlPath \"flash/noblifi\" }\n\n")
+
+	// Resolve the custom HotSpot directory once and keep both values together.
+	// Devices with a persistent flash filesystem use flash/noblifi; devices
+	// without a visible flash directory use noblifi at the root filesystem.
+	builder.WriteString(`:local hotspotHtmlDir "noblifi"` + "\n")
+	builder.WriteString(`:local hotspotHtmlPath "noblifi"` + "\n")
+	builder.WriteString(`:if ([:len [/file find where name="flash"]] > 0) do={ :set hotspotHtmlDir "flash/noblifi"; :set hotspotHtmlPath "flash/noblifi" }` + "\n\n")
+
 	builder.WriteString("# Clean previous NobliFi-owned service setup\n")
-	writeSafe(&builder, "/ip hotspot remove [find name=\"noblifi-hotspot\"]", "cleanup hotspot server")
-	writeSafe(&builder, "/ip hotspot user profile remove [find name=\"noblifi-voucher-profile\"]", "cleanup hotspot user profile")
-	writeSafe(&builder, "/ip hotspot walled-garden remove [find comment=\"NobliFi captive portal\"]", "cleanup captive portal walled garden")
-	writeSafe(&builder, "/file remove [find name=\"noblifi/login.html\"]", "cleanup hotspot login file")
-	writeSafe(&builder, "/file remove [find name=\"noblifi/index.html\"]", "cleanup hotspot index file")
-	writeSafe(&builder, "/file remove [find name=\"flash/noblifi/login.html\"]", "cleanup flash hotspot login file")
-	writeSafe(&builder, "/file remove [find name=\"flash/noblifi/index.html\"]", "cleanup flash hotspot index file")
-	writeSafe(&builder, "/radius remove [find comment=\"NobliFi RADIUS\"]", "cleanup radius client")
-	writeSafe(&builder, "/ip firewall nat remove [find comment=\"NobliFi client NAT\"]", "cleanup nat")
+	writeSafe(&builder, `/ip hotspot remove [find where name="noblifi-hotspot"]`, "cleanup hotspot server")
+	writeSafe(&builder, `/ip hotspot user profile remove [find where name="noblifi-voucher-profile"]`, "cleanup hotspot user profile")
+	writeSafe(&builder, `/ip hotspot walled-garden remove [find where comment="NobliFi captive portal"]`, "cleanup captive portal walled garden")
+
+	// IMPORTANT: never delete the currently working NobliFi login/index files
+	// during cleanup. Portal replacement is transactional later: a fresh page
+	// is fetched into memory first and the live files are updated only after
+	// the fetch succeeds. This prevents a transient WAN/App Engine timeout from
+	// turning the captive portal into Error 404.
+	writeSafe(&builder, `/radius remove [find where comment="NobliFi RADIUS"]`, "cleanup radius client")
+	writeSafe(&builder, `/ip firewall nat remove [find where comment="NobliFi client NAT"]`, "cleanup nat")
+
 	writeCleanup(&builder, options.HotspotBridge, "dhcp-hotspot", "pool-hotspot", options.HotspotSubnet)
 	writeCleanup(&builder, options.StaffBridge, "dhcp-staff", "pool-staff", options.StaffSubnet)
 	writeCleanup(&builder, options.POSBridge, "dhcp-pos", "pool-pos", options.POSSubnet)
@@ -190,34 +200,34 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString("\n")
 
 	builder.WriteString("# Management and router services\n")
-	writeSafe(&builder, fmt.Sprintf("/system identity set name=\"%s\"", escape(options.RouterIdentity)), "set identity")
-	writeSafe(&builder, fmt.Sprintf("/user remove [find name=%s comment=\"NobliFi API management user\"]", options.APIUsername), "cleanup api user")
-	writeSafe(&builder, fmt.Sprintf("/user add name=%s group=full password=\"%s\" comment=\"NobliFi API management user\"", options.APIUsername, escape(options.APIPassword)), "add api user")
-	writeSafe(&builder, "/ip service set telnet disabled=yes", "disable telnet")
-	writeSafe(&builder, "/ip service set ftp disabled=yes", "disable ftp")
+	writeSafe(&builder, fmt.Sprintf(`/system identity set name="%s"`, escape(options.RouterIdentity)), "set identity")
+	writeSafe(&builder, fmt.Sprintf(`/user remove [find where name="%s" comment="NobliFi API management user"]`, escape(options.APIUsername)), "cleanup api user")
+	writeSafe(&builder, fmt.Sprintf(`/user add name="%s" group=full password="%s" comment="NobliFi API management user"`, escape(options.APIUsername), escape(options.APIPassword)), "add api user")
+	writeSafe(&builder, `/ip service set telnet disabled=yes`, "disable telnet")
+	writeSafe(&builder, `/ip service set ftp disabled=yes`, "disable ftp")
 	if options.DisableWWWService {
-		writeSafe(&builder, "/ip service set www disabled=yes", "disable www")
+		writeSafe(&builder, `/ip service set www disabled=yes`, "disable www")
 	}
-	writeSafe(&builder, fmt.Sprintf("/ip service set api disabled=%s", routerOSDisabled(!options.EnableAPIService)), "set api service")
-	writeSafe(&builder, fmt.Sprintf("/ip service set api-ssl disabled=%s", routerOSDisabled(!options.EnableAPISSLService)), "set api-ssl service")
+	writeSafe(&builder, fmt.Sprintf(`/ip service set api disabled=%s`, routerOSDisabled(!options.EnableAPIService)), "set api service")
+	writeSafe(&builder, fmt.Sprintf(`/ip service set api-ssl disabled=%s`, routerOSDisabled(!options.EnableAPISSLService)), "set api-ssl service")
 	builder.WriteString("\n")
 
-	// Resolve the Layer-3 WAN interface before configuring DHCP/NAT.
-	// On many factory-default MikroTik configurations ether1 is a slave port
-	// of a bridge (for example bridgeLocal). In that case RouterOS rejects a
-	// DHCP client directly on ether1; the DHCP client and WAN interface-list
-	// membership must be attached to the bridge itself.
+	// Resolve the real L3 WAN. On the current MikroTik family ether1 may be a
+	// slave of bridgeLocal, so DHCP, the default route and WAN list membership
+	// must be attached to bridgeLocal rather than directly to ether1.
 	writeWANInternet(&builder, wan)
 
 	writeHotspotNetwork(&builder, options, summary.HotspotLAN, hotspotGateway)
-
 	writeBridge(&builder, options.StaffBridge, summary.StaffLAN, options.StaffGateway, "pool-staff", options.StaffPool, options.StaffSubnet)
 	writeBridge(&builder, options.POSBridge, summary.POSLAN, options.POSGateway, "pool-pos", options.POSPool, options.POSSubnet)
 	writeBridge(&builder, options.CCTVBridge, summary.CCTVLAN, options.CCTVGateway, "pool-cctv", options.CCTVPool, options.CCTVSubnet)
+
 	writeWireGuardManagement(&builder, options)
 	writeHotspotServices(&builder, options, hotspotGateway)
+
 	return builder.String(), nil
 }
+
 func withDefaults(options RenderOptions) RenderOptions {
 	defaults := RenderOptions{
 		RouterIdentity:      "NobliFi-Router",
@@ -432,45 +442,50 @@ func writeCritical(builder *strings.Builder, command string, label string) {
 	builder.WriteString(fmt.Sprintf(":do { %s } on-error={ :error \"NobliFi failed %s\" }\n", command, escape(label)))
 }
 
-// writeWANInternet resolves the real Layer-3 WAN interface and configures
-// DHCP/interface-list membership without destroying a working factory-default
-// DHCP client. For example, when ether1 is a port of bridgeLocal, wanL3 becomes
-// bridgeLocal and all Layer-3 WAN operations use that bridge.
+// writeWANDHCPWait polls the WAN DHCP client for up to 20 seconds, waiting
+// for status=bound before the rest of the script proceeds. See the comment
+// at its call site in RenderRouterOSWithOptions for why this is necessary:
+// the WAN dhcp-client is torn down and re-created earlier in this same
+// script, and /ip dhcp-client add does not block until a lease is acquired.
+// This deliberately warns rather than :error's out on timeout, because a
+// genuinely dead WAN link is already caught by the later "verify hotspot
+// server" critical checks, and aborting here would duplicate that failure
+// mode with a less specific message.
+// writeWANInternet resolves the actual Layer-3 WAN interface and configures
+// DHCP/interface-list membership without deleting a working factory DHCP
+// client. Example: when ether1 belongs to bridgeLocal, wanL3 becomes
+// bridgeLocal and all L3 WAN operations use that bridge.
 func writeWANInternet(builder *strings.Builder, wanPhysical string) {
 	builder.WriteString("# Interface lists and WAN internet\n")
-	writeCritical(builder, ":if ([:len [/interface list find name=WAN]] = 0) do={ /interface list add name=WAN comment=\"NobliFi WAN list\" }", "ensure WAN list")
-	writeCritical(builder, ":if ([:len [/interface list find name=LAN]] = 0) do={ /interface list add name=LAN comment=\"NobliFi LAN list\" }", "ensure LAN list")
+
+	writeCritical(builder, `:if ([:len [/interface list find where name="WAN"]] = 0) do={ /interface list add name=WAN comment="NobliFi WAN list" }`, "ensure WAN list")
+	writeCritical(builder, `:if ([:len [/interface list find where name="LAN"]] = 0) do={ /interface list add name=LAN comment="NobliFi LAN list" }`, "ensure LAN list")
 
 	builder.WriteString(fmt.Sprintf(`:local wanPhysical "%s"`, escape(wanPhysical)) + "\n")
 	builder.WriteString(`:local wanL3 $wanPhysical` + "\n")
 	builder.WriteString(`:local wanBridgePort [/interface bridge port find where interface=$wanPhysical]` + "\n")
 	builder.WriteString(`:if ([:len $wanBridgePort] > 0) do={` + "\n")
-	builder.WriteString(`  :set wanL3 [/interface bridge port get $wanBridgePort bridge]` + "\n")
+	builder.WriteString(`  :set wanL3 [/interface bridge port get [:pick $wanBridgePort 0] bridge]` + "\n")
 	builder.WriteString(`  :put ("NobliFi WAN: physical=" . $wanPhysical . " layer3=" . $wanL3 . " (bridge)")` + "\n")
 	builder.WriteString(`} else={` + "\n")
 	builder.WriteString(`  :put ("NobliFi WAN: physical=" . $wanPhysical . " layer3=" . $wanL3)` + "\n")
 	builder.WriteString(`}` + "\n")
 
-	// Remove stale NobliFi-created WAN list members, but leave unrelated
-	// administrator/default list entries alone.
-	writeSafe(builder, `/interface list member remove [find where list=WAN comment="NobliFi WAN member"]`, "cleanup legacy WAN member")
-	writeSafe(builder, `/interface list member remove [find where list=WAN comment="NobliFi WAN L3 member"]`, "cleanup WAN L3 member")
+	writeSafe(builder, `/interface list member remove [find where list="WAN" comment="NobliFi WAN member"]`, "cleanup legacy WAN member")
+	writeSafe(builder, `/interface list member remove [find where list="WAN" comment="NobliFi WAN L3 member"]`, "cleanup WAN L3 member")
 
-	// The WAN Layer-3 interface must not simultaneously be classified as LAN.
-	// This is especially important when a factory bridge is repurposed as the
-	// upstream L3 interface after its client-facing ports are moved elsewhere.
-	writeSafe(builder, `/interface list member remove [find where list=LAN interface=$wanL3]`, "remove WAN L3 interface from LAN list")
-	writeSafe(builder, `/interface list member remove [find where list=LAN interface=$wanPhysical]`, "remove WAN physical interface from LAN list")
+	// Layer-3 WAN cannot also be treated as LAN by firewall/interface-list rules.
+	writeSafe(builder, `/interface list member remove [find where list="LAN" interface=$wanL3]`, "remove WAN L3 interface from LAN list")
+	writeSafe(builder, `/interface list member remove [find where list="LAN" interface=$wanPhysical]`, "remove WAN physical interface from LAN list")
 
 	writeCritical(
 		builder,
-		`:if ([:len [/interface list member find where list=WAN interface=$wanL3]] = 0) do={ /interface list member add list=WAN interface=$wanL3 comment="NobliFi WAN L3 member" }`,
+		`:if ([:len [/interface list member find where list="WAN" interface=$wanL3]] = 0) do={ /interface list member add list=WAN interface=$wanL3 comment="NobliFi WAN L3 member" }`,
 		"add WAN L3 member",
 	)
 
-	// Remove only stale NobliFi DHCP clients that are attached to the wrong
-	// interface. Never delete an already-bound factory/default DHCP client on
-	// the correct L3 interface.
+	// Remove only NobliFi DHCP clients attached to the wrong interface.
+	// A factory/default DHCP client already bound to wanL3 is reused.
 	builder.WriteString(`:foreach id in=[/ip dhcp-client find where comment="NobliFi WAN DHCP client"] do={` + "\n")
 	builder.WriteString(`  :local existingIface [/ip dhcp-client get $id interface]` + "\n")
 	builder.WriteString(`  :if ($existingIface != $wanL3) do={ /ip dhcp-client remove $id }` + "\n")
@@ -478,26 +493,22 @@ func writeWANInternet(builder *strings.Builder, wanPhysical string) {
 
 	builder.WriteString(`:local wanDhcp [/ip dhcp-client find where interface=$wanL3]` + "\n")
 	builder.WriteString(`:if ([:len $wanDhcp] = 0) do={` + "\n")
-	builder.WriteString(`  /ip dhcp-client add interface=$wanL3 disabled=no add-default-route=yes use-peer-dns=yes comment="NobliFi WAN DHCP client"` + "\n")
+	builder.WriteString(`  /ip dhcp-client add interface=$wanL3 disabled=no add-default-route=yes use-peer-dns=yes use-peer-ntp=yes comment="NobliFi WAN DHCP client"` + "\n")
 	builder.WriteString(`} else={` + "\n")
-	builder.WriteString(`  /ip dhcp-client set $wanDhcp disabled=no add-default-route=yes use-peer-dns=yes` + "\n")
+	builder.WriteString(`  :foreach id in=$wanDhcp do={ /ip dhcp-client set $id disabled=no add-default-route=yes use-peer-dns=yes use-peer-ntp=yes }` + "\n")
 	builder.WriteString(`  :put ("NobliFi WAN: reusing existing DHCP client on " . $wanL3)` + "\n")
 	builder.WriteString(`}` + "\n")
 
 	writeWANDHCPWait(builder)
-	builder.WriteString("\n")
 }
 
-// writeWANDHCPWait waits for the DHCP client on the runtime-resolved $wanL3
-// interface. It warns rather than aborting so temporary upstream DHCP delays
-// do not leave the rest of the configuration half-installed.
 func writeWANDHCPWait(builder *strings.Builder) {
-	builder.WriteString(":local wanBound false\n")
-	builder.WriteString(":for i from=1 to=20 do={\n")
-	builder.WriteString("  :if ([:len [/ip dhcp-client find where interface=$wanL3 status=bound]] > 0) do={ :set wanBound true }\n")
-	builder.WriteString("  :if ($wanBound) do={ :set i 20 } else={ :delay 1s }\n")
-	builder.WriteString("}\n")
-	builder.WriteString(`:if (!$wanBound) do={ :put ("NobliFi WARNING: WAN DHCP client on " . $wanL3 . " did not bind within 20s, continuing anyway") } else={ :put ("NobliFi WAN DHCP client on " . $wanL3 . " is bound") }` + "\n")
+	builder.WriteString(`:local wanBound false` + "\n")
+	builder.WriteString(`:for i from=1 to=30 do={` + "\n")
+	builder.WriteString(`  :if ([:len [/ip dhcp-client find where interface=$wanL3 status=bound]] > 0) do={ :set wanBound true }` + "\n")
+	builder.WriteString(`  :if ($wanBound) do={ :set i 30 } else={ :delay 1s }` + "\n")
+	builder.WriteString(`}` + "\n")
+	builder.WriteString(`:if (!$wanBound) do={ :put ("NobliFi WARNING: WAN DHCP client on " . $wanL3 . " did not bind within 30s, continuing with existing portal if available") } else={ :put ("NobliFi WAN DHCP client on " . $wanL3 . " is bound") }` + "\n")
 	builder.WriteString(`:if ([:len [/ip route find where dst-address="0.0.0.0/0" active=yes]] = 0) do={ :put "NobliFi WARNING: no active default route after WAN setup" } else={ :put "NobliFi WAN default route is active" }` + "\n")
 	builder.WriteString("\n")
 }
@@ -516,30 +527,69 @@ func writeCleanup(builder *strings.Builder, bridge string, dhcpServer string, po
 
 func writeHotspotNetwork(builder *strings.Builder, options RenderOptions, interfaces []string, hotspotGateway string) {
 	builder.WriteString("# HotSpot bridge, DHCP, and client addressing\n")
-	writeCritical(builder, fmt.Sprintf(":if ([:len [/interface bridge find name=%s]] = 0) do={ /interface bridge add name=%s protocol-mode=rstp comment=\"NobliFi HotSpot bridge\" }", options.HotspotBridge, options.HotspotBridge), "ensure hotspot bridge")
-	writeSafe(builder, fmt.Sprintf("/interface list member remove [find where list=WAN interface=%s]", options.HotspotBridge), "remove hotspot bridge from WAN list")
-	writeCritical(builder, fmt.Sprintf(":if ([:len [/interface list member find where list=LAN interface=%s]] = 0) do={ /interface list member add list=LAN interface=%s comment=\"NobliFi HotSpot L3 LAN\" }", options.HotspotBridge, options.HotspotBridge), "add hotspot bridge to LAN list")
+
+	writeCritical(
+		builder,
+		fmt.Sprintf(`:if ([:len [/interface bridge find where name="%s"]] = 0) do={ /interface bridge add name="%s" protocol-mode=rstp comment="NobliFi HotSpot bridge" }`, escape(options.HotspotBridge), escape(options.HotspotBridge)),
+		"ensure hotspot bridge",
+	)
+
+	// Firewall/NAT classification must include the L3 bridge itself, not only
+	// its physical member ports.
+	writeSafe(builder, fmt.Sprintf(`/interface list member remove [find where list="WAN" interface="%s"]`, escape(options.HotspotBridge)), "remove hotspot bridge from WAN list")
+	writeCritical(
+		builder,
+		fmt.Sprintf(`:if ([:len [/interface list member find where list="LAN" interface="%s"]] = 0) do={ /interface list member add list=LAN interface="%s" comment="NobliFi HotSpot L3 LAN" }`, escape(options.HotspotBridge), escape(options.HotspotBridge)),
+		"add hotspot bridge to LAN list",
+	)
+
 	for _, iface := range interfaces {
-		writeSafe(builder, fmt.Sprintf("/interface bridge port remove [find interface=%s]", iface), "cleanup hotspot bridge port")
-		writeCritical(builder, fmt.Sprintf(":if ([:len [/interface bridge port find bridge=%s interface=%s]] = 0) do={/interface bridge port add bridge=%s interface=%s comment=\"NobliFi HotSpot port\"}", options.HotspotBridge, iface, options.HotspotBridge, iface), "add hotspot bridge port")
-		writeSafe(builder, fmt.Sprintf("/interface list member remove [find list=LAN interface=%s]", iface), "cleanup LAN list member")
-		writeSafe(builder, fmt.Sprintf("/interface list member add list=LAN interface=%s comment=\"NobliFi LAN member\"", iface), "add LAN list member")
+		writeSafe(builder, fmt.Sprintf(`/interface bridge port remove [find where interface="%s"]`, escape(iface)), "cleanup hotspot bridge port")
+		writeCritical(
+			builder,
+			fmt.Sprintf(`:if ([:len [/interface bridge port find where bridge="%s" interface="%s"]] = 0) do={ /interface bridge port add bridge="%s" interface="%s" comment="NobliFi HotSpot port" }`, escape(options.HotspotBridge), escape(iface), escape(options.HotspotBridge), escape(iface)),
+			"add hotspot bridge port",
+		)
+
+		writeSafe(builder, fmt.Sprintf(`/interface list member remove [find where list="LAN" interface="%s"]`, escape(iface)), "cleanup LAN list member")
+		writeSafe(builder, fmt.Sprintf(`/interface list member add list=LAN interface="%s" comment="NobliFi LAN member"`, escape(iface)), "add LAN list member")
 	}
-	writeCritical(builder, fmt.Sprintf(":if ([:len [/interface bridge port find bridge=%s]] = 0) do={ :error \"No HotSpot LAN ports were added to %s\" }", options.HotspotBridge, options.HotspotBridge), "verify hotspot bridge ports")
-	// Bounce each hotspot LAN port after adding it to the bridge. Ports have
-	// been observed sitting in the INACTIVE (I) state right after being added
-	// in the same script run that creates the bridge, requiring a second,
-	// separate script run before they settle into active/forwarding state.
-	// A quick disable/enable forces RouterOS to re-negotiate the port's
-	// bridge membership immediately instead of waiting on it.
+
+	writeCritical(
+		builder,
+		fmt.Sprintf(`:if ([:len [/interface bridge port find where bridge="%s"]] = 0) do={ :error "No HotSpot LAN ports were added to %s" }`, escape(options.HotspotBridge), escape(options.HotspotBridge)),
+		"verify hotspot bridge ports",
+	)
+
 	for _, iface := range interfaces {
-		writeSafe(builder, fmt.Sprintf("/interface set %s disabled=yes", iface), "bounce hotspot port disable")
-		writeSafe(builder, fmt.Sprintf("/interface set %s disabled=no", iface), "bounce hotspot port enable")
+		writeSafe(builder, fmt.Sprintf(`/interface set [find where name="%s"] disabled=yes`, escape(iface)), "bounce hotspot port disable")
+		writeSafe(builder, fmt.Sprintf(`/interface set [find where name="%s"] disabled=no`, escape(iface)), "bounce hotspot port enable")
 	}
-	writeCritical(builder, fmt.Sprintf(":if ([:len [/ip address find where interface=%s address=%s]] = 0) do={ /ip address add address=%s interface=%s comment=\"NobliFi HotSpot gateway\" } else={ /ip address set [find where interface=%s address=%s] comment=\"NobliFi HotSpot gateway\" }", options.HotspotBridge, options.HotspotGateway, options.HotspotGateway, options.HotspotBridge, options.HotspotBridge, options.HotspotGateway), "ensure hotspot gateway")
-	writeCritical(builder, fmt.Sprintf(":if ([:len [/ip pool find name=pool-hotspot]] = 0) do={ /ip pool add name=pool-hotspot ranges=%s comment=\"NobliFi HotSpot pool\" } else={ /ip pool set [find name=pool-hotspot] ranges=%s comment=\"NobliFi HotSpot pool\" }", options.HotspotPool, options.HotspotPool), "ensure hotspot pool")
-	writeCritical(builder, fmt.Sprintf(":if ([:len [/ip dhcp-server find name=dhcp-hotspot]] = 0) do={ /ip dhcp-server add name=dhcp-hotspot interface=%s address-pool=pool-hotspot lease-time=1h disabled=no } else={ /ip dhcp-server set [find name=dhcp-hotspot] interface=%s address-pool=pool-hotspot lease-time=1h disabled=no }", options.HotspotBridge, options.HotspotBridge), "ensure hotspot dhcp")
-	writeCritical(builder, fmt.Sprintf(":if ([:len [/ip dhcp-server network find address=\"%s\"]] = 0) do={ /ip dhcp-server network add address=\"%s\" gateway=\"%s\" dns-server=\"%s\" } else={ /ip dhcp-server network set [find address=\"%s\"] gateway=\"%s\" dns-server=\"%s\" }", escape(options.HotspotSubnet), escape(options.HotspotSubnet), escape(hotspotGateway), escape(hotspotGateway), escape(options.HotspotSubnet), escape(hotspotGateway), escape(hotspotGateway)), "ensure hotspot dhcp network")
+
+	writeCritical(
+		builder,
+		fmt.Sprintf(`:if ([:len [/ip address find where interface="%s" address="%s"]] = 0) do={ /ip address add address="%s" interface="%s" comment="NobliFi HotSpot gateway" } else={ /ip address set [find where interface="%s" address="%s"] comment="NobliFi HotSpot gateway" }`, escape(options.HotspotBridge), escape(options.HotspotGateway), escape(options.HotspotGateway), escape(options.HotspotBridge), escape(options.HotspotBridge), escape(options.HotspotGateway)),
+		"ensure hotspot gateway",
+	)
+
+	writeCritical(
+		builder,
+		fmt.Sprintf(`:if ([:len [/ip pool find where name="pool-hotspot"]] = 0) do={ /ip pool add name=pool-hotspot ranges=%s comment="NobliFi HotSpot pool" } else={ /ip pool set [find where name="pool-hotspot"] ranges=%s comment="NobliFi HotSpot pool" }`, options.HotspotPool, options.HotspotPool),
+		"ensure hotspot pool",
+	)
+
+	writeCritical(
+		builder,
+		fmt.Sprintf(`:if ([:len [/ip dhcp-server find where name="dhcp-hotspot"]] = 0) do={ /ip dhcp-server add name=dhcp-hotspot interface="%s" address-pool=pool-hotspot lease-time=1h disabled=no } else={ /ip dhcp-server set [find where name="dhcp-hotspot"] interface="%s" address-pool=pool-hotspot lease-time=1h disabled=no }`, escape(options.HotspotBridge), escape(options.HotspotBridge)),
+		"ensure hotspot dhcp",
+	)
+
+	writeCritical(
+		builder,
+		fmt.Sprintf(`:if ([:len [/ip dhcp-server network find where address="%s"]] = 0) do={ /ip dhcp-server network add address="%s" gateway="%s" dns-server="%s" } else={ /ip dhcp-server network set [find where address="%s"] gateway="%s" dns-server="%s" }`, escape(options.HotspotSubnet), escape(options.HotspotSubnet), escape(hotspotGateway), escape(hotspotGateway), escape(options.HotspotSubnet), escape(hotspotGateway), escape(hotspotGateway)),
+		"ensure hotspot dhcp network",
+	)
+
 	builder.WriteString("\n")
 }
 
@@ -628,17 +678,29 @@ func writeWireGuardManagement(builder *strings.Builder, options RenderOptions) {
 // small text assets, so their contents can be cloned with /file get + /file add.
 // login.html and index.html are deliberately excluded because NobliFi owns and
 // fetches those two custom pages separately.
+// writeHotspotSupportFiles copies the RouterOS default HotSpot support files
+// into the resolved NobliFi directory. Existing destination files are never
+// deleted before their replacement contents have been read successfully.
 func writeHotspotSupportFiles(builder *strings.Builder) {
-	builder.WriteString("# Clone default HotSpot support files for mobile captive portal detection\n")
-	builder.WriteString(`:local noblifiSupportFiles {"rlogin.html";"redirect.html";"alogin.html";"error.html";"errors.txt";"logout.html";"status.html";"radvert.html";"md5.js";"api.json"}` + "\n")
+	builder.WriteString("# Prepare HotSpot support files for captive-portal redirects\n")
+	builder.WriteString(`:local noblifiSupportFiles {"rlogin.html";"redirect.html";"alogin.html";"flogin.html";"error.html";"errors.txt";"logout.html";"flogout.html";"status.html";"fstatus.html";"rstatus.html";"radvert.html";"md5.js";"api.json"}` + "\n")
 	builder.WriteString(`:foreach f in=$noblifiSupportFiles do={` + "\n")
 	builder.WriteString(`  :local src ("hotspot/" . $f)` + "\n")
 	builder.WriteString(`  :local dst ($hotspotHtmlPath . "/" . $f)` + "\n")
 	builder.WriteString(`  :if ([:len [/file find where name=$src]] > 0) do={` + "\n")
-	builder.WriteString(`    :local data [/file get [find where name=$src] contents]` + "\n")
-	builder.WriteString(`    :if ([:len [/file find where name=$dst]] > 0) do={ /file remove [find where name=$dst] }` + "\n")
-	builder.WriteString(`    /file add name=$dst contents=$data` + "\n")
-	builder.WriteString(`    :put ("NobliFi copied HotSpot support file " . $f)` + "\n")
+	builder.WriteString(`    :do {` + "\n")
+	builder.WriteString(`      :local data [/file get [find where name=$src] contents]` + "\n")
+	builder.WriteString(`      :if ([:len $data] > 0) do={` + "\n")
+	builder.WriteString(`        :if ([:len [/file find where name=$dst]] > 0) do={` + "\n")
+	builder.WriteString(`          /file set [find where name=$dst] contents=$data` + "\n")
+	builder.WriteString(`        } else={` + "\n")
+	builder.WriteString(`          /file add name=$dst contents=$data` + "\n")
+	builder.WriteString(`        }` + "\n")
+	builder.WriteString(`        :put ("NobliFi support file ready: " . $f)` + "\n")
+	builder.WriteString(`      } else={` + "\n")
+	builder.WriteString(`        :put ("NobliFi WARNING: support file is empty: " . $src)` + "\n")
+	builder.WriteString(`      }` + "\n")
+	builder.WriteString(`    } on-error={ :put ("NobliFi WARNING: could not clone support file " . $src) }` + "\n")
 	builder.WriteString(`  } else={` + "\n")
 	builder.WriteString(`    :put ("NobliFi WARNING: default HotSpot support file missing: " . $src)` + "\n")
 	builder.WriteString(`  }` + "\n")
@@ -646,147 +708,123 @@ func writeHotspotSupportFiles(builder *strings.Builder) {
 	builder.WriteString("\n")
 }
 
-func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotspotGateway string) {
-	hotspotDNSName := normalizeHotspotDNSName(options.HotspotDNSName)
-	builder.WriteString("# DNS, NAT, RADIUS, and HotSpot service setup\n")
+func writeHotspotPortalRefreshScript(builder *strings.Builder, options RenderOptions) {
+	loginURL := escape(options.LoginPageURL)
 
-	// ------------------------------------------------------------
-	// 1. CREATE HOTSPOT SERVER PROFILE FIRST
-	// ------------------------------------------------------------
-	// Create the profile with only the name first.
-	// This prevents one bad property from causing the entire creation
-	// operation to fail and leaving us with no profile at all.
+	writeSafe(builder, `/system scheduler remove [find where name="noblifi-hotspot-login-refresh"]`, "cleanup hotspot login refresh scheduler")
+	writeSafe(builder, `/system script remove [find where name="noblifi-hotspot-login-refresh-script"]`, "cleanup hotspot login refresh script")
+
+	builder.WriteString(`/system script add name="noblifi-hotspot-login-refresh-script" policy=ftp,read,write,test source={` + "\n")
+	builder.WriteString(`:local hotspotHtmlDir "noblifi"` + "\n")
+	builder.WriteString(`:local hotspotHtmlPath "noblifi"` + "\n")
+	builder.WriteString(`:if ([:len [/file find where name="flash"]] > 0) do={ :set hotspotHtmlDir "flash/noblifi"; :set hotspotHtmlPath "flash/noblifi" }` + "\n")
+	builder.WriteString(`:if ([:len [/file find where name=$hotspotHtmlPath]] = 0) do={ /file make-directory $hotspotHtmlPath }` + "\n")
+	builder.WriteString(`:local portalData ""` + "\n")
+	builder.WriteString(`:local portalFetched false` + "\n")
+	builder.WriteString(`:for i from=1 to=3 do={` + "\n")
+	builder.WriteString(`  :if (!$portalFetched) do={` + "\n")
+	builder.WriteString(`    :do {` + "\n")
+	builder.WriteString(fmt.Sprintf(`      :local r [/tool fetch url="%s" output=user as-value idle-timeout=30s duration=1m]`, loginURL) + "\n")
+	builder.WriteString(`      :if (($r->"status") = "finished") do={` + "\n")
+	builder.WriteString(`        :local d ($r->"data")` + "\n")
+	builder.WriteString(`        :if ([:len $d] > 0) do={ :set portalData $d; :set portalFetched true }` + "\n")
+	builder.WriteString(`      }` + "\n")
+	builder.WriteString(`    } on-error={ :log warning ("NobliFi portal refresh fetch attempt " . $i . " failed") }` + "\n")
+	builder.WriteString(`    :if (!$portalFetched) do={ :delay 3s }` + "\n")
+	builder.WriteString(`  }` + "\n")
+	builder.WriteString(`}` + "\n")
+	builder.WriteString(`:if ($portalFetched) do={` + "\n")
+	builder.WriteString(`  :local loginFile ($hotspotHtmlPath . "/login.html")` + "\n")
+	builder.WriteString(`  :local indexFile ($hotspotHtmlPath . "/index.html")` + "\n")
+	builder.WriteString(`  :if ([:len [/file find where name=$loginFile]] > 0) do={ /file set [find where name=$loginFile] contents=$portalData } else={ /file add name=$loginFile contents=$portalData }` + "\n")
+	builder.WriteString(`  :if ([:len [/file find where name=$indexFile]] > 0) do={ /file set [find where name=$indexFile] contents=$portalData } else={ /file add name=$indexFile contents=$portalData }` + "\n")
+	builder.WriteString(`  :local rloginFile ($hotspotHtmlPath . "/rlogin.html")` + "\n")
+	builder.WriteString(`  :local redirectFile ($hotspotHtmlPath . "/redirect.html")` + "\n")
+	builder.WriteString(`  :if (([:len [/file find where name=$rloginFile]] > 0) || ([:len [/file find where name=$redirectFile]] > 0)) do={` + "\n")
+	builder.WriteString(`    /ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=$hotspotHtmlDir html-directory-override=""` + "\n")
+	builder.WriteString(`  }` + "\n")
+	builder.WriteString(`  :log info ("NobliFi portal refresh succeeded: " . $hotspotHtmlDir)` + "\n")
+	builder.WriteString(`} else={` + "\n")
+	builder.WriteString(`  :log warning "NobliFi portal refresh failed; existing live portal preserved"` + "\n")
+	builder.WriteString(`}` + "\n")
+	builder.WriteString("}\n")
+
 	writeCritical(
 		builder,
-		`:if ([:len [/ip hotspot profile find where name="noblifi-hotspot-profile"]] = 0) do={
-			/ip hotspot profile add name="noblifi-hotspot-profile"
-		}`,
+		`/system scheduler add name="noblifi-hotspot-login-refresh" interval=10m on-event="noblifi-hotspot-login-refresh-script" policy=ftp,read,write,test comment="NobliFi HotSpot login refresh"`,
+		"schedule hotspot login refresh",
+	)
+}
+
+func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotspotGateway string) {
+	hotspotDNSName := normalizeHotspotDNSName(options.HotspotDNSName)
+	loginPageURL := strings.TrimSpace(options.LoginPageURL)
+
+	builder.WriteString("# DNS, NAT, RADIUS, and HotSpot service setup\n")
+
+	// 1. Server profile.
+	writeCritical(
+		builder,
+		`:if ([:len [/ip hotspot profile find where name="noblifi-hotspot-profile"]] = 0) do={ /ip hotspot profile add name="noblifi-hotspot-profile" }`,
 		"create hotspot server profile",
 	)
 
-	builder.WriteString(
-		`:put "NobliFi HotSpot server profile created"` + "\n",
-	)
-
-	// ------------------------------------------------------------
-	// 2. CONFIGURE PROFILE SEPARATELY
-	// ------------------------------------------------------------
 	writeCritical(
 		builder,
-		fmt.Sprintf(
-			`/ip hotspot profile set [find where name="noblifi-hotspot-profile"] hotspot-address=%s`,
-			hotspotGateway,
-		),
+		fmt.Sprintf(`/ip hotspot profile set [find where name="noblifi-hotspot-profile"] hotspot-address=%s`, hotspotGateway),
 		"set hotspot profile address",
 	)
 
 	writeCritical(
 		builder,
-		fmt.Sprintf(
-			`/ip hotspot profile set [find where name="noblifi-hotspot-profile"] dns-name="%s"`,
-			escape(hotspotDNSName),
-		),
+		fmt.Sprintf(`/ip hotspot profile set [find where name="noblifi-hotspot-profile"] dns-name="%s"`, escape(hotspotDNSName)),
 		"set hotspot profile dns name",
 	)
 
 	writeCritical(
 		builder,
-		fmt.Sprintf(
-			`:local configuredDNS [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] dns-name]; :if ($configuredDNS != "%s") do={ :error ("HotSpot DNS name mismatch. RouterOS returned " . $configuredDNS) }`,
-			escape(hotspotDNSName),
-		),
+		fmt.Sprintf(`:local configuredDNS [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] dns-name]; :if ($configuredDNS != "%s") do={ :error ("HotSpot DNS name mismatch. RouterOS returned " . $configuredDNS) }`, escape(hotspotDNSName)),
 		"verify hotspot profile dns name",
 	)
 
-	writeCritical(
-		builder,
-		`/ip hotspot profile set [find where name="noblifi-hotspot-profile"] use-radius=yes`,
-		"enable radius on hotspot profile",
-	)
+	writeCritical(builder, `/ip hotspot profile set [find where name="noblifi-hotspot-profile"] use-radius=yes`, "enable radius on hotspot profile")
+	writeCritical(builder, `/ip hotspot profile set [find where name="noblifi-hotspot-profile"] radius-accounting=yes`, "enable hotspot radius accounting")
+	writeCritical(builder, `/ip hotspot profile set [find where name="noblifi-hotspot-profile"] radius-interim-update=5m`, "set hotspot radius interim update")
+	writeCritical(builder, `/ip hotspot profile set [find where name="noblifi-hotspot-profile"] login-by=http-chap,http-pap`, "configure hotspot login methods")
 
-	writeCritical(
-		builder,
-		`/ip hotspot profile set [find where name="noblifi-hotspot-profile"] radius-accounting=yes`,
-		"enable hotspot radius accounting",
-	)
-
-	writeCritical(
-		builder,
-		`/ip hotspot profile set [find where name="noblifi-hotspot-profile"] radius-interim-update=5m`,
-		"set hotspot radius interim update",
-	)
-
-	writeCritical(
-		builder,
-		`/ip hotspot profile set [find where name="noblifi-hotspot-profile"] login-by=http-chap,http-pap`,
-		"configure hotspot login methods",
-	)
-
-	if strings.TrimSpace(options.LoginPageURL) == "" {
-		writeCritical(
-			builder,
-			`/ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=hotspot`,
-			"set default hotspot html directory",
-		)
+	// Do not reset html-directory to "hotspot" merely because LoginPageURL is
+	// temporarily empty. If a working custom portal already exists, preserve it.
+	if loginPageURL == "" {
+		builder.WriteString(`:local existingCustomLogin ($hotspotHtmlPath . "/login.html")` + "\n")
+		builder.WriteString(`:local existingCustomRLogin ($hotspotHtmlPath . "/rlogin.html")` + "\n")
+		builder.WriteString(`:local existingCustomRedirect ($hotspotHtmlPath . "/redirect.html")` + "\n")
+		builder.WriteString(`:if (([:len [/file find where name=$existingCustomLogin]] > 0) && (([:len [/file find where name=$existingCustomRLogin]] > 0) || ([:len [/file find where name=$existingCustomRedirect]] > 0))) do={` + "\n")
+		builder.WriteString(`  /ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=$hotspotHtmlDir html-directory-override=""` + "\n")
+		builder.WriteString(`  :put ("NobliFi: preserved existing custom HotSpot portal at " . $hotspotHtmlDir)` + "\n")
+		builder.WriteString(`} else={` + "\n")
+		builder.WriteString(`  /ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=hotspot html-directory-override=""` + "\n")
+		builder.WriteString(`  :put "NobliFi: custom portal URL unavailable; using RouterOS default HotSpot portal"` + "\n")
+		builder.WriteString(`}` + "\n")
 	}
 
-	// Verify immediately.
 	writeCritical(
 		builder,
-		`:if ([:len [/ip hotspot profile find where name="noblifi-hotspot-profile"]] = 0) do={
-			:error "noblifi-hotspot-profile was not created"
-		}`,
+		`:if ([:len [/ip hotspot profile find where name="noblifi-hotspot-profile"]] = 0) do={ :error "noblifi-hotspot-profile was not created" }`,
 		"verify hotspot server profile creation",
 	)
 
-	builder.WriteString(
-		`:put "NobliFi HotSpot server profile verified"` + "\n",
-	)
+	// 2. DNS.
+	writeCritical(builder, `/ip dns set allow-remote-requests=yes`, "enable dns forwarding")
 
-	// ------------------------------------------------------------
-	// 3. DNS
-	// ------------------------------------------------------------
-	writeCritical(
-		builder,
-		"/ip dns set allow-remote-requests=yes",
-		"enable dns forwarding",
-	)
+	// 3. FastTrack must not bypass HotSpot/simple-queue processing.
+	writeSafe(builder, `/ip firewall filter disable [find where action=fasttrack-connection]`, "disable FastTrack for HotSpot shaping")
 
-	// ------------------------------------------------------------
-	// 4. HOTSPOT SHAPING / FASTTRACK
-	// ------------------------------------------------------------
-	// MikroTik FastTrack bypasses simple queues and HotSpot universal-client
-	// processing. RADIUS Mikrotik-Rate-Limit creates dynamic simple queues, so
-	// FastTrack must be disabled for reliable voucher speed enforcement.
-	writeSafe(
-		builder,
-		`/ip firewall filter disable [find where action=fasttrack-connection]`,
-		"disable FastTrack for HotSpot shaping",
-	)
+	// 4. NAT.
+	writeCritical(builder, `/ip firewall nat remove [find where comment="NobliFi client NAT"]`, "cleanup nat")
+	writeCritical(builder, `/ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="NobliFi client NAT"`, "add nat")
 
-	// ------------------------------------------------------------
-	// 5. NAT
-	// ------------------------------------------------------------
-	writeCritical(
-		builder,
-		`/ip firewall nat remove [find comment="NobliFi client NAT"]`,
-		"cleanup nat",
-	)
-
-	writeCritical(
-		builder,
-		`/ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="NobliFi client NAT"`,
-		"add nat",
-	)
-
-	// ------------------------------------------------------------
-	// 6. RADIUS CLIENT
-	// ------------------------------------------------------------
-	writeCritical(
-		builder,
-		`/radius remove [find comment="NobliFi RADIUS"]`,
-		"cleanup radius client",
-	)
+	// 5. RADIUS.
+	writeCritical(builder, `/radius remove [find where comment="NobliFi RADIUS"]`, "cleanup radius client")
 
 	radiusCommand := fmt.Sprintf(
 		`/radius add service=hotspot address=%s secret="%s" authentication-port=1812 accounting-port=1813 timeout=3s comment="NobliFi RADIUS"`,
@@ -802,199 +840,113 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		)
 	}
 	writeCritical(builder, radiusCommand, "add radius client")
+	writeCritical(builder, `/radius incoming set accept=yes`, "enable radius incoming")
 
-	writeCritical(
-		builder,
-		"/radius incoming set accept=yes",
-		"enable radius incoming",
-	)
-
-	builder.WriteString(
-		`:put "NobliFi RADIUS client configured"` + "\n",
-	)
-
-	// ------------------------------------------------------------
-	// 7. HOTSPOT HTML DIRECTORY
-	// ------------------------------------------------------------
+	// 6. Ensure custom directory. This resolves to "noblifi" on routers without
+	// a visible flash filesystem and "flash/noblifi" on routers that have one.
 	writeSafe(
 		builder,
-		`:if ([:len [/file find name=$hotspotHtmlPath]] = 0) do={
-			/file make-directory $hotspotHtmlPath
-		}`,
+		`:if ([:len [/file find where name=$hotspotHtmlPath]] = 0) do={ /file make-directory $hotspotHtmlPath }`,
 		"ensure hotspot html directory",
 	)
 
-	if strings.TrimSpace(options.LoginPageURL) != "" {
+	if loginPageURL != "" {
 		writeHotspotSupportFiles(builder)
 	}
 
-	// ------------------------------------------------------------
-	// 8. HOTSPOT USER PROFILE
-	// ------------------------------------------------------------
+	// 7. Voucher user profile.
 	writeCritical(
 		builder,
-		`:if ([:len [/ip hotspot user profile find where name="noblifi-voucher-profile"]] = 0) do={
-			/ip hotspot user profile add name="noblifi-voucher-profile"
-		}`,
+		`:if ([:len [/ip hotspot user profile find where name="noblifi-voucher-profile"]] = 0) do={ /ip hotspot user profile add name="noblifi-voucher-profile" }`,
 		"ensure hotspot user profile",
 	)
-
 	writeCritical(
 		builder,
 		`/ip hotspot user profile set [find where name="noblifi-voucher-profile"] shared-users=1 keepalive-timeout=2m status-autorefresh=1m`,
 		"configure hotspot user profile",
 	)
 
-	// ------------------------------------------------------------
-	// 9. HOTSPOT SERVER
-	// ------------------------------------------------------------
+	// 8. HotSpot server.
 	writeCritical(
 		builder,
-		fmt.Sprintf(
-			`:if ([:len [/ip hotspot find where name="noblifi-hotspot"]] = 0) do={
-				/ip hotspot add name="noblifi-hotspot" interface=%s address-pool=pool-hotspot profile="noblifi-hotspot-profile" disabled=no
-			}`,
-			options.HotspotBridge,
-		),
+		fmt.Sprintf(`:if ([:len [/ip hotspot find where name="noblifi-hotspot"]] = 0) do={ /ip hotspot add name="noblifi-hotspot" interface="%s" address-pool=pool-hotspot profile="noblifi-hotspot-profile" disabled=no }`, escape(options.HotspotBridge)),
 		"ensure hotspot server",
 	)
-
 	writeCritical(
 		builder,
-		fmt.Sprintf(
-			`/ip hotspot set [find where name="noblifi-hotspot"] interface=%s address-pool=pool-hotspot profile="noblifi-hotspot-profile" disabled=no`,
-			options.HotspotBridge,
-		),
+		fmt.Sprintf(`/ip hotspot set [find where name="noblifi-hotspot"] interface="%s" address-pool=pool-hotspot profile="noblifi-hotspot-profile" disabled=no`, escape(options.HotspotBridge)),
 		"enable hotspot server",
 	)
 
-	// ------------------------------------------------------------
-	// 10. WALLED GARDEN
-	// ------------------------------------------------------------
+	// 9. Walled garden.
 	for _, host := range options.WalledGardenHosts {
 		writeSafe(
 			builder,
-			fmt.Sprintf(
-				`/ip hotspot walled-garden add dst-host=%s comment="NobliFi captive portal"`,
-				host,
-			),
+			fmt.Sprintf(`/ip hotspot walled-garden add dst-host=%s comment="NobliFi captive portal"`, host),
 			"add captive portal walled garden",
 		)
 	}
 
-	// ------------------------------------------------------------
-	// 11. CUSTOM LOGIN PAGE
-	// ------------------------------------------------------------
-	if strings.TrimSpace(options.LoginPageURL) != "" {
-		mode := "http"
+	// 10. Install/refresh the custom portal transactionally.
+	if loginPageURL != "" {
+		builder.WriteString("# Transactional NobliFi portal download\n")
+		builder.WriteString(`:local noblifiPortalData ""` + "\n")
+		builder.WriteString(`:local noblifiPortalFetched false` + "\n")
+		builder.WriteString(`:for i from=1 to=3 do={` + "\n")
+		builder.WriteString(`  :if (!$noblifiPortalFetched) do={` + "\n")
+		builder.WriteString(`    :put ("NobliFi portal download attempt " . $i . " of 3")` + "\n")
+		builder.WriteString(`    :do {` + "\n")
+		builder.WriteString(fmt.Sprintf(`      :local fetchResult [/tool fetch url="%s" output=user as-value idle-timeout=30s duration=1m]`, escape(loginPageURL)) + "\n")
+		builder.WriteString(`      :if (($fetchResult->"status") = "finished") do={` + "\n")
+		builder.WriteString(`        :local fetchedData ($fetchResult->"data")` + "\n")
+		builder.WriteString(`        :if ([:len $fetchedData] > 0) do={ :set noblifiPortalData $fetchedData; :set noblifiPortalFetched true }` + "\n")
+		builder.WriteString(`      }` + "\n")
+		builder.WriteString(`    } on-error={ :put ("NobliFi WARNING: portal download attempt " . $i . " failed") }` + "\n")
+		builder.WriteString(`    :if (!$noblifiPortalFetched) do={ :delay 3s }` + "\n")
+		builder.WriteString(`  }` + "\n")
+		builder.WriteString(`}` + "\n")
 
-		if strings.HasPrefix(strings.ToLower(options.LoginPageURL), "https://") {
-			mode = "https"
-		}
-
-		builder.WriteString(
-			`:local hotspotLoginFile ($hotspotHtmlPath . "/login.html")` + "\n",
-		)
-
-		builder.WriteString(
-			`:local hotspotIndexFile ($hotspotHtmlPath . "/index.html")` + "\n",
-		)
-
-		writeCritical(
-			builder,
-			fmt.Sprintf(
-				`/tool fetch url="%s" mode=%s dst-path=$hotspotLoginFile`,
-				escape(options.LoginPageURL),
-				mode,
-			),
-			"fetch hotspot login",
-		)
-
-		writeCritical(
-			builder,
-			fmt.Sprintf(
-				`/tool fetch url="%s" mode=%s dst-path=$hotspotIndexFile`,
-				escape(options.LoginPageURL),
-				mode,
-			),
-			"fetch hotspot index",
-		)
-
-		writeSafe(
-			builder,
-			`:if ([:len [/file find where name="flash"]] > 0) do={
-				:set hotspotHtmlDir "flash/noblifi"
-				:set hotspotHtmlPath "flash/noblifi"
-			}`,
-			"re-check flash directory before setting html-directory",
-		)
-
-		writeCritical(
-			builder,
-			`:if ([:len [/file find name=$hotspotLoginFile]] = 0) do={
-				:error "NobliFi HotSpot login fetch did not create login.html"
-			}
-			:local hotspotRLoginFile ($hotspotHtmlPath . "/rlogin.html")
-			:local hotspotRedirectFile ($hotspotHtmlPath . "/redirect.html")
-			:if ([:len [/file find name=$hotspotRLoginFile]] = 0) do={
-				:error "NobliFi HotSpot support file rlogin.html is missing"
-			}
-			:if ([:len [/file find name=$hotspotRedirectFile]] = 0) do={
-				:error "NobliFi HotSpot support file redirect.html is missing"
-			}
-			/ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=$hotspotHtmlDir
-			:local configuredHtmlDir [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] html-directory]
-			:if ($configuredHtmlDir != $hotspotHtmlDir) do={
-				:error ("HotSpot HTML directory mismatch. RouterOS returned " . $configuredHtmlDir)
-			}
-			:put ("NobliFi HotSpot login, index, and support pages installed at " . $hotspotHtmlDir)`,
-			"set html directory",
-		)
-
-		// RouterOS 6 compatibility: keep refresh logic in a named /system script.
-		// Do not embed an inline parenthesized expression in scheduler on-event;
-		// RouterOS 6 can reject that form with "expected name value".
-		writeSafe(
-			builder,
-			`/system scheduler remove [find where name="noblifi-hotspot-login-refresh"]`,
-			"cleanup hotspot login refresh scheduler",
-		)
-
-		writeSafe(
-			builder,
-			`/system script remove [find where name="noblifi-hotspot-login-refresh-script"]`,
-			"cleanup hotspot login refresh script",
-		)
-
-		// The generated RouterOS source contains normal $variables, not escaped \$variables.
-		builder.WriteString(`/system script add name="noblifi-hotspot-login-refresh-script" policy=ftp,read,write,test source={` + "\n")
-		builder.WriteString(`:local hotspotHtmlPath "noblifi"` + "\n")
-		builder.WriteString(`:if ([:len [/file find where name="flash"]] > 0) do={ :set hotspotHtmlPath "flash/noblifi" }` + "\n")
 		builder.WriteString(`:local hotspotLoginFile ($hotspotHtmlPath . "/login.html")` + "\n")
 		builder.WriteString(`:local hotspotIndexFile ($hotspotHtmlPath . "/index.html")` + "\n")
-		builder.WriteString(fmt.Sprintf(`/tool fetch url="%s" mode=%s dst-path=$hotspotLoginFile`, escape(options.LoginPageURL), mode) + "\n")
-		builder.WriteString(fmt.Sprintf(`/tool fetch url="%s" mode=%s dst-path=$hotspotIndexFile`, escape(options.LoginPageURL), mode) + "\n")
-		builder.WriteString("}\n")
 
-		writeCritical(
-			builder,
-			`/system scheduler add name="noblifi-hotspot-login-refresh" interval=10m on-event="noblifi-hotspot-login-refresh-script" policy=ftp,read,write,test comment="NobliFi HotSpot login refresh"`,
-			"schedule hotspot login refresh",
-		)
+		// Never touch the live files until the fetch has completed successfully.
+		builder.WriteString(`:if ($noblifiPortalFetched) do={` + "\n")
+		builder.WriteString(`  :if ([:len [/file find where name=$hotspotLoginFile]] > 0) do={ /file set [find where name=$hotspotLoginFile] contents=$noblifiPortalData } else={ /file add name=$hotspotLoginFile contents=$noblifiPortalData }` + "\n")
+		builder.WriteString(`  :if ([:len [/file find where name=$hotspotIndexFile]] > 0) do={ /file set [find where name=$hotspotIndexFile] contents=$noblifiPortalData } else={ /file add name=$hotspotIndexFile contents=$noblifiPortalData }` + "\n")
+		builder.WriteString(`  :put ("NobliFi portal files updated at " . $hotspotHtmlDir)` + "\n")
+		builder.WriteString(`} else={` + "\n")
+		builder.WriteString(`  :put "NobliFi WARNING: new portal download failed; existing live portal was not deleted"` + "\n")
+		builder.WriteString(`}` + "\n")
+
+		// Select custom pages only if the files required to service /login and
+		// initial captive-portal redirect requests actually exist.
+		builder.WriteString(`:local hotspotRLoginFile ($hotspotHtmlPath . "/rlogin.html")` + "\n")
+		builder.WriteString(`:local hotspotRedirectFile ($hotspotHtmlPath . "/redirect.html")` + "\n")
+		builder.WriteString(`:local customPortalReady false` + "\n")
+		builder.WriteString(`:if ([:len [/file find where name=$hotspotLoginFile]] > 0) do={` + "\n")
+		builder.WriteString(`  :if (([:len [/file find where name=$hotspotRLoginFile]] > 0) || ([:len [/file find where name=$hotspotRedirectFile]] > 0)) do={ :set customPortalReady true }` + "\n")
+		builder.WriteString(`}` + "\n")
+		builder.WriteString(`:if ($customPortalReady) do={` + "\n")
+		builder.WriteString(`  /ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=$hotspotHtmlDir html-directory-override=""` + "\n")
+		builder.WriteString(`  :put ("NobliFi custom HotSpot portal active at " . $hotspotHtmlDir)` + "\n")
+		builder.WriteString(`} else={` + "\n")
+		builder.WriteString(`  :if ([:len [/file find where name="hotspot/login.html"]] > 0) do={` + "\n")
+		builder.WriteString(`    /ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=hotspot html-directory-override=""` + "\n")
+		builder.WriteString(`    :put "NobliFi WARNING: custom portal incomplete; safely falling back to RouterOS default portal"` + "\n")
+		builder.WriteString(`  } else={` + "\n")
+		builder.WriteString(`    :error "Neither NobliFi custom portal nor RouterOS default HotSpot login.html is available"` + "\n")
+		builder.WriteString(`  }` + "\n")
+		builder.WriteString(`}` + "\n")
+
+		// Refresh is also transactional: a timeout leaves the current live page
+		// untouched instead of truncating/removing it.
+		writeHotspotPortalRefreshScript(builder, options)
 	}
 
-	// ------------------------------------------------------------
-	// 12. FINAL VERIFICATION
-	// ------------------------------------------------------------
+	// 11. Final verification.
 	writeCritical(
 		builder,
-		fmt.Sprintf(
-			`:if ([:len [/ip dhcp-server find where name="dhcp-hotspot" interface=%s disabled=no]] = 0) do={
-				:error "NobliFi HotSpot DHCP is not enabled on %s"
-			}`,
-			options.HotspotBridge,
-			options.HotspotBridge,
-		),
+		fmt.Sprintf(`:if ([:len [/ip dhcp-server find where name="dhcp-hotspot" interface="%s" disabled=no]] = 0) do={ :error "NobliFi HotSpot DHCP is not enabled on %s" }`, escape(options.HotspotBridge), escape(options.HotspotBridge)),
 		"verify hotspot dhcp",
 	)
 
@@ -1009,72 +961,49 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 
 	writeCritical(
 		builder,
-		`:if ([:len [/interface list member find where list=WAN interface=$wanL3]] = 0) do={
-			:error ("Resolved WAN L3 interface is not in WAN list: " . $wanL3)
-		}`,
+		`:if ([:len [/interface list member find where list="WAN" interface=$wanL3]] = 0) do={ :error ("Resolved WAN L3 interface is not in WAN list: " . $wanL3) }`,
 		"verify WAN L3 interface list membership",
 	)
 
 	writeCritical(
 		builder,
-		fmt.Sprintf(
-			`:if ([:len [/interface list member find where list=LAN interface=%s]] = 0) do={
-				:error "NobliFi HotSpot bridge is not in LAN interface list"
-			}`,
-			options.HotspotBridge,
-		),
+		fmt.Sprintf(`:if ([:len [/interface list member find where list="LAN" interface="%s"]] = 0) do={ :error "NobliFi HotSpot bridge is not in LAN interface list" }`, escape(options.HotspotBridge)),
 		"verify hotspot bridge LAN membership",
 	)
 
-	writeCritical(
-		builder,
-		`:if ([:len [/radius find comment="NobliFi RADIUS"]] = 0) do={
-			:error "NobliFi RADIUS client is missing"
-		}`,
-		"verify radius client",
-	)
+	writeCritical(builder, `:if ([:len [/radius find where comment="NobliFi RADIUS"]] = 0) do={ :error "NobliFi RADIUS client is missing" }`, "verify radius client")
+	writeCritical(builder, `:if ([:len [/ip firewall nat find where comment="NobliFi client NAT"]] = 0) do={ :error "NobliFi client NAT is missing" }`, "verify nat")
+	writeCritical(builder, `:if ([:len [/ip hotspot profile find where name="noblifi-hotspot-profile"]] = 0) do={ :error "NobliFi HotSpot server profile is missing" }`, "verify hotspot server profile")
 
 	writeCritical(
 		builder,
-		`:if ([:len [/ip firewall nat find comment="NobliFi client NAT"]] = 0) do={
-			:error "NobliFi client NAT is missing"
-		}`,
-		"verify nat",
-	)
-
-	writeCritical(
-		builder,
-		`:if ([:len [/ip hotspot profile find where name="noblifi-hotspot-profile"]] = 0) do={
-			:error "NobliFi HotSpot server profile is missing"
-		}`,
-		"verify hotspot server profile",
-	)
-
-	writeCritical(
-		builder,
-		fmt.Sprintf(
-			`:local finalDNS [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] dns-name]; :if ($finalDNS != "%s") do={ :error ("Final HotSpot DNS verification failed. RouterOS returned " . $finalDNS) }`,
-			escape(hotspotDNSName),
-		),
+		fmt.Sprintf(`:local finalDNS [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] dns-name]; :if ($finalDNS != "%s") do={ :error ("Final HotSpot DNS verification failed. RouterOS returned " . $finalDNS) }`, escape(hotspotDNSName)),
 		"final hotspot dns verification",
 	)
 
 	writeCritical(
 		builder,
-		fmt.Sprintf(
-			`:if ([:len [/ip hotspot find where name="noblifi-hotspot" interface=%s disabled=no]] = 0) do={
-				:error "NobliFi HotSpot server is not enabled on %s"
-			}`,
-			options.HotspotBridge,
-			options.HotspotBridge,
-		),
+		fmt.Sprintf(`:if ([:len [/ip hotspot find where name="noblifi-hotspot" interface="%s" disabled=no]] = 0) do={ :error "NobliFi HotSpot server is not enabled on %s" }`, escape(options.HotspotBridge), escape(options.HotspotBridge)),
 		"verify hotspot server",
 	)
 
-	// Keep the profile lookup separate from :put. This avoids escaped quotes
-	// inside a nested RouterOS expression, which caused "expected name value".
+	// Hard 404 prevention: validate the login page in the directory the profile
+	// will actually use, not merely the directory we intended to use.
+	writeCritical(
+		builder,
+		`:local finalHtmlDir [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] html-directory]; :local finalLoginFile ($finalHtmlDir . "/login.html"); :if ([:len [/file find where name=$finalLoginFile]] = 0) do={ :error ("HotSpot login.html missing from active HTML directory: " . $finalHtmlDir) }`,
+		"verify active hotspot login file",
+	)
+
+	writeCritical(
+		builder,
+		`:local finalHtmlDir [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] html-directory]; :local finalRLogin ($finalHtmlDir . "/rlogin.html"); :local finalRedirect ($finalHtmlDir . "/redirect.html"); :if (([:len [/file find where name=$finalRLogin]] = 0) && ([:len [/file find where name=$finalRedirect]] = 0)) do={ :error ("HotSpot redirect support files missing from active HTML directory: " . $finalHtmlDir) }`,
+		"verify active hotspot redirect files",
+	)
+
 	builder.WriteString(`:local finalHotspotDNS [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] dns-name]` + "\n")
-	builder.WriteString(`:put ("NobliFi: HotSpot provisioning verified. DNS name=" . $finalHotspotDNS)` + "\n")
+	builder.WriteString(`:local finalHotspotDir [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] html-directory]` + "\n")
+	builder.WriteString(`:put ("NobliFi: HotSpot provisioning verified. DNS=" . $finalHotspotDNS . " HTML=" . $finalHotspotDir)` + "\n")
 	builder.WriteString("\n")
 }
 
@@ -1082,27 +1011,55 @@ func writeBridge(builder *strings.Builder, bridge string, interfaces []string, a
 	if len(interfaces) == 0 {
 		return
 	}
+
 	role := strings.TrimPrefix(bridge, "br-")
 	gateway := strings.Split(address, "/")[0]
+
 	builder.WriteString(fmt.Sprintf("# %s bridge, DHCP, and client addressing\n", strings.ToUpper(role)))
-	writeSafe(builder, fmt.Sprintf(":if ([:len [/interface bridge find name=%s]] = 0) do={ /interface bridge add name=%s protocol-mode=rstp comment=\"NobliFi %s bridge\" }", bridge, bridge, role), "ensure bridge")
-	writeSafe(builder, fmt.Sprintf("/interface list member remove [find where list=WAN interface=%s]", bridge), "remove bridge from WAN list")
-	writeSafe(builder, fmt.Sprintf(":if ([:len [/interface list member find where list=LAN interface=%s]] = 0) do={ /interface list member add list=LAN interface=%s comment=\"NobliFi %s L3 LAN\" }", bridge, bridge, role), "add bridge to LAN list")
+
+	writeSafe(
+		builder,
+		fmt.Sprintf(`:if ([:len [/interface bridge find where name="%s"]] = 0) do={ /interface bridge add name="%s" protocol-mode=rstp comment="NobliFi %s bridge" }`, escape(bridge), escape(bridge), escape(role)),
+		"ensure bridge",
+	)
+
+	writeSafe(builder, fmt.Sprintf(`/interface list member remove [find where list="WAN" interface="%s"]`, escape(bridge)), "remove bridge from WAN list")
+	writeSafe(
+		builder,
+		fmt.Sprintf(`:if ([:len [/interface list member find where list="LAN" interface="%s"]] = 0) do={ /interface list member add list=LAN interface="%s" comment="NobliFi %s L3 LAN" }`, escape(bridge), escape(bridge), escape(role)),
+		"add bridge to LAN list",
+	)
+
 	for _, iface := range interfaces {
-		writeSafe(builder, fmt.Sprintf("/interface bridge port remove [find interface=%s]", iface), "cleanup bridge port")
-		writeSafe(builder, fmt.Sprintf(":if ([:len [/interface bridge port find bridge=%s interface=%s]] = 0) do={/interface bridge port add bridge=%s interface=%s comment=\"NobliFi %s port\"}", bridge, iface, bridge, iface, role), "add bridge port")
-		writeSafe(builder, fmt.Sprintf("/interface list member remove [find list=LAN interface=%s]", iface), "cleanup LAN list member")
-		writeSafe(builder, fmt.Sprintf("/interface list member add list=LAN interface=%s comment=\"NobliFi LAN member\"", iface), "add LAN list member")
+		writeSafe(builder, fmt.Sprintf(`/interface bridge port remove [find where interface="%s"]`, escape(iface)), "cleanup bridge port")
+		writeSafe(
+			builder,
+			fmt.Sprintf(`:if ([:len [/interface bridge port find where bridge="%s" interface="%s"]] = 0) do={ /interface bridge port add bridge="%s" interface="%s" comment="NobliFi %s port" }`, escape(bridge), escape(iface), escape(bridge), escape(iface), escape(role)),
+			"add bridge port",
+		)
+		writeSafe(builder, fmt.Sprintf(`/interface list member remove [find where list="LAN" interface="%s"]`, escape(iface)), "cleanup LAN list member")
+		writeSafe(builder, fmt.Sprintf(`/interface list member add list=LAN interface="%s" comment="NobliFi LAN member"`, escape(iface)), "add LAN list member")
 	}
-	writeSafe(builder, fmt.Sprintf("/ip address add address=%s interface=%s comment=\"NobliFi %s gateway\"", address, bridge, role), "add bridge gateway")
-	writeSafe(builder, fmt.Sprintf("/ip pool add name=%s ranges=%s comment=\"NobliFi %s pool\"", pool, ranges, role), "add address pool")
-	writeSafe(builder, fmt.Sprintf("/ip dhcp-server add name=dhcp-%s interface=%s address-pool=%s lease-time=1h disabled=no", role, bridge, pool), "add dhcp server")
-	writeSafe(builder, fmt.Sprintf("/ip dhcp-server network add address=\"%s\" gateway=\"%s\" dns-server=\"%s\"", escape(subnet), escape(gateway), escape(gateway)), "add dhcp network")
+
+	writeSafe(builder, fmt.Sprintf(`/ip address add address=%s interface="%s" comment="NobliFi %s gateway"`, address, escape(bridge), escape(role)), "add bridge gateway")
+	writeSafe(builder, fmt.Sprintf(`/ip pool add name=%s ranges=%s comment="NobliFi %s pool"`, pool, ranges, escape(role)), "add address pool")
+	writeSafe(builder, fmt.Sprintf(`/ip dhcp-server add name=dhcp-%s interface="%s" address-pool=%s lease-time=1h disabled=no`, role, escape(bridge), pool), "add dhcp server")
+	writeSafe(builder, fmt.Sprintf(`/ip dhcp-server network add address="%s" gateway="%s" dns-server="%s"`, escape(subnet), escape(gateway), escape(gateway)), "add dhcp network")
+
 	builder.WriteString("\n")
 }
 
 func defaultWalledGardenHosts() []string {
 	return []string{
+		"captive.apple.com",
+		"connectivitycheck.gstatic.com",
+		"connectivitycheck.android.com",
+		"clients3.google.com",
+		"dns.msftncsi.com",
+		"ipv6.msftncsi.com",
+		"www.msftconnecttest.com",
+		"msftconnecttest.com",
+		"www.gstatic.com",
 		"noblifi-frontend.vercel.app",
 		"noblifi.ew.r.appspot.com",
 		"noblifi.uc.r.appspot.com",
@@ -1113,7 +1070,7 @@ func cleanHosts(hosts []string) []string {
 	seen := map[string]bool{}
 	cleaned := make([]string, 0, len(hosts))
 	for _, host := range hosts {
-		host = strings.TrimSpace(host)
+		host = strings.ToLower(strings.TrimSpace(host))
 		host = strings.TrimPrefix(host, "https://")
 		host = strings.TrimPrefix(host, "http://")
 		if slash := strings.Index(host, "/"); slash >= 0 {

@@ -96,7 +96,19 @@ func (s *Service) Generate(planID uuid.UUID, quantity int) ([]Voucher, error) {
 }
 
 func (s *Service) List() ([]Voucher, error) {
-	return s.repo.List()
+	vouchers, err := s.repo.List()
+	if err != nil {
+		return nil, err
+	}
+	for i := range vouchers {
+		if strings.EqualFold(strings.TrimSpace(vouchers[i].Status), "used") {
+			continue
+		}
+		if vouchers[i].UsedAt != nil {
+			vouchers[i].Status = "used"
+		}
+	}
+	return vouchers, nil
 }
 
 func code() string {

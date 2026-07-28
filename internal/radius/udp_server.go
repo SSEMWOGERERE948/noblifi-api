@@ -94,6 +94,10 @@ func (s *Service) handleAccessPacket(packet radiusPacket, remote *net.UDPAddr, s
 		return encodeRadiusResponse(packet, radiusAccessReject, secret, replyMessage("Invalid or expired voucher code.")), nil
 	}
 
+	if err := s.markVoucherUsed(username, voucher.Status, voucher.UsedAt); err != nil {
+		log.Printf("radius: could not mark voucher %s as used: %v", username, err)
+	}
+
 	attrs := [][]byte{
 		uint32Attribute(attrSessionTimeout, uint32(max(plan.DurationMinutes, 1)*60)),
 		mikrotikRateLimitAttribute(mikrotikRateLimit(plan.UploadSpeed, plan.DownloadSpeed)),
