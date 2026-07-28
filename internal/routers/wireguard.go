@@ -250,7 +250,9 @@ func routerSupportsWireGuard(version *string) bool {
 
 func RenderWireGuardRouterOS(router Router, cfg config.Config) string {
 	routerIP := strings.TrimSpace(*router.WireGuardTunnelIP)
-	callbackURL := normalizeProvisioningBaseURL(cfg.ProvisioningBaseURL) + "/wireguard-key"
+	baseURL := normalizeProvisioningBaseURL(cfg.ProvisioningBaseURL)
+	callbackURL := baseURL + "/wireguard-key"
+	statusURL := baseURL + "/wireguard-status"
 	fetchMode := provisioningFetchMode(callbackURL)
 
 	return fmt.Sprintf(`# NobliFi management tunnel - RouterOS 7+
@@ -284,11 +286,43 @@ func RenderWireGuardRouterOS(router Router, cfg config.Config) string {
 }
 
 :local routerPublicKey [/interface wireguard get $wgInterface public-key]
-:local callbackPayload ("{\"token\":\"" . $claimToken . "\",\"public_key\":\"" . $routerPublicKey . "\"}")
-/tool fetch url="%s" mode=%s http-method=post http-header-field="Content-Type: application/json" http-data=$callbackPayload keep-result=no
-
 :put ("NobliFi WireGuard public key: " . $routerPublicKey)
-:put "Tunnel configured. Return to NobliFi and install the generated VPS peer command."`,
+:local callbackPayload ("{\"claim_token\":\"" . $claimToken . "\",\"public_key\":\"" . $routerPublicKey . "\"}")
+:local keyReported false
+:for attempt from=1 to=3 do={
+  :if (!$keyReported) do={
+    :do {
+      :local keyResult [/tool fetch url="%s" mode=%s http-method=post http-header-field="Content-Type: application/json" http-data=$callbackPayload output=user as-value idle-timeout=30s duration=1m]
+      :if (($keyResult->"status") = "finished") do={ :set keyReported true }
+    } on-error={ :log warning ("NobliFi WireGuard key report attempt " . $attempt . " failed") }
+    :if (!$keyReported) do={ :delay 3s }
+  }
+}
+:if (!$keyReported) do={ :error "NobliFi could not register this router WireGuard key with the control plane" }
+
+:put "NobliFi WireGuard key registered; waiting for xneelo agent"
+:local wgPeer [/interface wireguard peers find where interface=$wgName comment="NobliFi VPS"]
+:local connected false
+:local lastHandshake ""
+:for second from=1 to=120 do={
+  :do { /tool ping address="%s" src-address="%s" interface=$wgName count=1 interval=200ms } on-error={}
+  :if ([:len $wgPeer] > 0) do={
+    :local rx [/interface wireguard peers get [:pick $wgPeer 0] rx]
+    :set lastHandshake [/interface wireguard peers get [:pick $wgPeer 0] last-handshake]
+    :if ($rx > 0) do={ :set connected true }
+  }
+  :if ($connected) do={ :set second 120 } else={ :delay 1s }
+}
+
+:if ($connected) do={
+  :put ("NobliFi WireGuard connected; last-handshake=" . $lastHandshake)
+  :local connectedPayload ("{\"claim_token\":\"" . $claimToken . "\",\"status\":\"connected\"}")
+  :do { /tool fetch url="%s" mode=%s http-method=post http-header-field="Content-Type: application/json" http-data=$connectedPayload keep-result=no } on-error={ :log warning "NobliFi connected status report failed" }
+} else={
+  :local failedPayload ("{\"claim_token\":\"" . $claimToken . "\",\"status\":\"failed\"}")
+  :do { /tool fetch url="%s" mode=%s http-method=post http-header-field="Content-Type: application/json" http-data=$failedPayload keep-result=no } on-error={ :log warning "NobliFi failed status report failed" }
+  :error "NobliFi xneelo agent did not establish a WireGuard handshake within 120 seconds"
+}`,
 		routerWireGuardInterface,
 		router.ClaimToken,
 		routerIP,
@@ -302,6 +336,12 @@ func RenderWireGuardRouterOS(router Router, cfg config.Config) string {
 		cfg.WireGuardServerIP,
 		cfg.WireGuardServerIP,
 		callbackURL,
+		fetchMode,
+		cfg.WireGuardServerIP,
+		routerIP,
+		statusURL,
+		fetchMode,
+		statusURL,
 		fetchMode,
 	)
 }
