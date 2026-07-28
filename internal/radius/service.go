@@ -102,6 +102,14 @@ func (s *Service) RegisterNAS(
 	return s.db.Save(&nas).Error
 }
 
+func (s *Service) RemoveNAS(nasName string) error {
+	nasName = strings.TrimSpace(nasName)
+	if nasName == "" {
+		return nil
+	}
+	return s.db.Where("nasname = ?", nasName).Delete(&NAS{}).Error
+}
+
 // ---------------------------------------------------------
 // PLAN / PACKAGE RADIUS POLICY
 // ---------------------------------------------------------

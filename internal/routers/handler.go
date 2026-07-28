@@ -20,6 +20,7 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Post("/routers", h.create)
 	router.Get("/routers", h.list)
 	router.Get("/routers/:id", h.get)
+	router.Delete("/routers/:id", h.delete)
 	router.Post("/routers/:id/regenerate-claim-token", h.regenerateClaimToken)
 	router.Post("/routers/:id/setup/remote-access", h.remoteAccess)
 	router.Get("/routers/:id/wireguard", h.wireGuard)
@@ -62,6 +63,18 @@ func (h *Handler) list(c *fiber.Ctx) error {
 
 func (h *Handler) get(c *fiber.Ctx) error {
 	router, err := h.find(c)
+	if err != nil {
+		return routerError(err)
+	}
+	return c.JSON(router)
+}
+
+func (h *Handler) delete(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
+	}
+	router, err := h.service.RequestDelete(id)
 	if err != nil {
 		return routerError(err)
 	}

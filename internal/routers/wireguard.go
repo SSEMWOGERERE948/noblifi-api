@@ -140,7 +140,11 @@ func (s *Service) wireGuardSetupForRouter(router Router) WireGuardSetupResponse 
 }
 
 func (s *Service) allocateWireGuardIP() (string, error) {
-	baseIP, network, err := net.ParseCIDR(strings.TrimSpace(s.cfg.WireGuardSubnetCIDR))
+	return AllocateWireGuardIP(s.repo, s.cfg)
+}
+
+func AllocateWireGuardIP(repo *Repository, cfg config.Config) (string, error) {
+	baseIP, network, err := net.ParseCIDR(strings.TrimSpace(cfg.WireGuardSubnetCIDR))
 	if err != nil || baseIP.To4() == nil {
 		return "", errors.New("NOBLIFI_WIREGUARD_SUBNET must be a valid IPv4 CIDR")
 	}
@@ -149,11 +153,11 @@ func (s *Service) allocateWireGuardIP() (string, error) {
 		return "", errors.New("NOBLIFI_WIREGUARD_SUBNET must contain at least two usable router addresses")
 	}
 
-	routers, err := s.repo.List()
+	routers, err := repo.List()
 	if err != nil {
 		return "", err
 	}
-	used := map[string]bool{strings.TrimSpace(s.cfg.WireGuardServerIP): true}
+	used := map[string]bool{strings.TrimSpace(cfg.WireGuardServerIP): true}
 	for _, router := range routers {
 		if router.WireGuardTunnelIP != nil {
 			used[strings.TrimSpace(*router.WireGuardTunnelIP)] = true

@@ -5,6 +5,7 @@ import (
 	"github.com/noblifi/noblifi/backend/internal/radius"
 	"github.com/noblifi/noblifi/backend/internal/routers"
 	"github.com/noblifi/noblifi/backend/internal/vouchers"
+	"github.com/noblifi/noblifi/backend/internal/wireguard"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -29,6 +30,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&routers.RouterInterface{},
 		&routers.RouterPortAssignment{},
 		&routers.RouterConfigLog{},
+		&wireguard.WireGuardJob{},
+		&wireguard.AgentHeartbeat{},
 
 		// FreeRADIUS SQL models
 		&radius.RadCheck{},

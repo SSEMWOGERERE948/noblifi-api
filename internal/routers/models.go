@@ -8,34 +8,42 @@ import (
 )
 
 type Router struct {
-	ID                    uuid.UUID              `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	SiteID                *uuid.UUID             `gorm:"type:uuid" json:"site_id"`
-	Name                  string                 `json:"name"`
-	SiteName              *string                `json:"site_name"`
-	ExpectedModel         *string                `json:"expected_model"`
-	Model                 *string                `json:"model"`
-	SerialNumber          *string                `gorm:"uniqueIndex" json:"serial_number"`
-	MacAddress            *string                `json:"mac_address"`
-	RouterOSVersion       *string                `json:"routeros_version"`
-	ManagementIP          *string                `json:"management_ip"`
-	APIUsername           *string                `json:"api_username"`
-	APIPasswordEncrypted  *string                `json:"api_password_encrypted"`
-	RadiusSecretEncrypted *string                `json:"radius_secret_encrypted"`
-	WireGuardTunnelIP     *string                `gorm:"uniqueIndex" json:"wireguard_tunnel_ip"`
-	WireGuardPublicKey    *string                `gorm:"uniqueIndex" json:"wireguard_public_key"`
-	WireGuardStatus       string                 `gorm:"default:disabled" json:"wireguard_status"`
-	WireGuardLastSeenAt   *time.Time             `json:"wireguard_last_seen_at"`
-	Status                string                 `gorm:"default:pending" json:"status"`
-	ClaimToken            string                 `gorm:"uniqueIndex" json:"claim_token"`
-	ClaimTokenExpiresAt   *time.Time             `json:"claim_token_expires_at"`
-	LastSeenAt            *time.Time             `json:"last_seen_at"`
-	ProvisionedAt         *time.Time             `json:"provisioned_at"`
-	CreatedAt             time.Time              `json:"created_at"`
-	UpdatedAt             time.Time              `json:"updated_at"`
-	Interfaces            []RouterInterface      `gorm:"foreignKey:RouterID" json:"interfaces,omitempty"`
-	PortAssignments       []RouterPortAssignment `gorm:"foreignKey:RouterID" json:"port_assignments,omitempty"`
-	SetupSession          *RouterSetupSession    `gorm:"foreignKey:RouterID" json:"setup_session,omitempty"`
-	NetworkProfile        *RouterNetworkProfile  `gorm:"foreignKey:RouterID" json:"network_profile,omitempty"`
+	ID                       uuid.UUID              `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SiteID                   *uuid.UUID             `gorm:"type:uuid" json:"site_id"`
+	Name                     string                 `json:"name"`
+	SiteName                 *string                `json:"site_name"`
+	ExpectedModel            *string                `json:"expected_model"`
+	Model                    *string                `json:"model"`
+	SerialNumber             *string                `gorm:"uniqueIndex" json:"serial_number"`
+	MacAddress               *string                `json:"mac_address"`
+	RouterOSVersion          *string                `json:"routeros_version"`
+	ManagementIP             *string                `json:"management_ip"`
+	APIUsername              *string                `json:"api_username"`
+	APIPasswordEncrypted     *string                `json:"api_password_encrypted"`
+	RadiusSecretEncrypted    *string                `json:"radius_secret_encrypted"`
+	WireGuardTunnelIP        *string                `gorm:"uniqueIndex" json:"wireguard_tunnel_ip"`
+	WireGuardPublicKey       *string                `gorm:"uniqueIndex" json:"wireguard_public_key"`
+	WireGuardStatus          string                 `gorm:"default:disabled" json:"wireguard_status"`
+	WireGuardLastSeenAt      *time.Time             `json:"wireguard_last_seen_at"`
+	WireGuardPeerStatus      string                 `gorm:"default:waiting_for_router_key;index" json:"wireguard_peer_status"`
+	WireGuardPeerUpdatedAt   *time.Time             `json:"wireguard_peer_updated_at"`
+	WireGuardLastHandshakeAt *time.Time             `json:"wireguard_last_handshake_at"`
+	WireGuardLastError       *string                `json:"wireguard_last_error"`
+	ProvisioningStatus       string                 `gorm:"default:pending;index" json:"provisioning_status"`
+	ProvisioningError        *string                `json:"provisioning_error"`
+	DeleteRequestedAt        *time.Time             `json:"delete_requested_at"`
+	DeletedAt                *time.Time             `gorm:"index" json:"deleted_at"`
+	Status                   string                 `gorm:"default:pending" json:"status"`
+	ClaimToken               string                 `gorm:"uniqueIndex" json:"claim_token"`
+	ClaimTokenExpiresAt      *time.Time             `json:"claim_token_expires_at"`
+	LastSeenAt               *time.Time             `json:"last_seen_at"`
+	ProvisionedAt            *time.Time             `json:"provisioned_at"`
+	CreatedAt                time.Time              `json:"created_at"`
+	UpdatedAt                time.Time              `json:"updated_at"`
+	Interfaces               []RouterInterface      `gorm:"foreignKey:RouterID" json:"interfaces,omitempty"`
+	PortAssignments          []RouterPortAssignment `gorm:"foreignKey:RouterID" json:"port_assignments,omitempty"`
+	SetupSession             *RouterSetupSession    `gorm:"foreignKey:RouterID" json:"setup_session,omitempty"`
+	NetworkProfile           *RouterNetworkProfile  `gorm:"foreignKey:RouterID" json:"network_profile,omitempty"`
 }
 
 type RouterSetupSession struct {

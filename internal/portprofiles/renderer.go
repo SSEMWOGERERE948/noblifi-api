@@ -19,34 +19,35 @@ type Summary struct {
 }
 
 type RenderOptions struct {
-	RadiusServer        string
-	RadiusSecret        string
-	LoginPageURL        string
-	RouterIdentity      string
-	APIUsername         string
-	APIPassword         string
-	HotspotBridge       string
-	StaffBridge         string
-	POSBridge           string
-	CCTVBridge          string
-	HotspotSubnet       string
-	HotspotGateway      string
-	HotspotPool         string
-	StaffSubnet         string
-	StaffGateway        string
-	StaffPool           string
-	POSSubnet           string
-	POSGateway          string
-	POSPool             string
-	CCTVSubnet          string
-	CCTVGateway         string
-	CCTVPool            string
-	HotspotDNSName      string
-	HotspotPortalName   string
-	DisableWWWService   bool
-	EnableAPIService    bool
-	EnableAPISSLService bool
-	WalledGardenHosts   []string
+	RadiusServer          string
+	RadiusSecret          string
+	LoginPageURL          string
+	HotspotSupportBaseURL string
+	RouterIdentity        string
+	APIUsername           string
+	APIPassword           string
+	HotspotBridge         string
+	StaffBridge           string
+	POSBridge             string
+	CCTVBridge            string
+	HotspotSubnet         string
+	HotspotGateway        string
+	HotspotPool           string
+	StaffSubnet           string
+	StaffGateway          string
+	StaffPool             string
+	POSSubnet             string
+	POSGateway            string
+	POSPool               string
+	CCTVSubnet            string
+	CCTVGateway           string
+	CCTVPool              string
+	HotspotDNSName        string
+	HotspotPortalName     string
+	DisableWWWService     bool
+	EnableAPIService      bool
+	EnableAPISSLService   bool
+	WalledGardenHosts     []string
 
 	// WireGuard management tunnel. WireGuardClientIP must be unique per router.
 	WireGuardEnabled   bool
@@ -738,7 +739,9 @@ func writeWireGuardManagement(builder *strings.Builder, options RenderOptions) {
 // writeHotspotSupportFiles copies the RouterOS default HotSpot support files
 // into the resolved NobliFi directory. Existing destination files are never
 // deleted before their replacement contents have been read successfully.
-func writeHotspotSupportFiles(builder *strings.Builder) {
+func writeHotspotSupportFiles(builder *strings.Builder, supportBaseURL string) {
+	supportBaseURL = strings.TrimRight(strings.TrimSpace(supportBaseURL), "/")
+
 	builder.WriteString("# Prepare HotSpot support files for captive-portal redirects\n")
 	builder.WriteString(`:local noblifiSupportFiles {"rlogin.html";"redirect.html";"alogin.html";"flogin.html";"error.html";"errors.txt";"logout.html";"flogout.html";"status.html";"fstatus.html";"rstatus.html";"radvert.html";"md5.js";"api.json"}` + "\n")
 	builder.WriteString(`:foreach f in=$noblifiSupportFiles do={` + "\n")
@@ -759,10 +762,41 @@ func writeHotspotSupportFiles(builder *strings.Builder) {
 	builder.WriteString(`      }` + "\n")
 	builder.WriteString(`    } on-error={ :put ("NobliFi WARNING: could not clone support file " . $src) }` + "\n")
 	builder.WriteString(`  } else={` + "\n")
-	builder.WriteString(`    :put ("NobliFi WARNING: default HotSpot support file missing: " . $src)` + "\n")
+	if supportBaseURL != "" {
+		builder.WriteString(`    :local fallbackURL ""` + "\n")
+		writeHotspotSupportFetchFallback(builder, supportBaseURL, "flogout.html")
+		writeHotspotSupportFetchFallback(builder, supportBaseURL, "fstatus.html")
+		writeHotspotSupportFetchFallback(builder, supportBaseURL, "rstatus.html")
+		builder.WriteString(`    :if ([:len $fallbackURL] > 0) do={` + "\n")
+		builder.WriteString(`      :do {` + "\n")
+		builder.WriteString(`        :local fallbackResult [/tool fetch url=$fallbackURL output=user as-value idle-timeout=30s duration=1m]` + "\n")
+		builder.WriteString(`        :if (($fallbackResult->"status") = "finished") do={` + "\n")
+		builder.WriteString(`          :local fallbackData ($fallbackResult->"data")` + "\n")
+		builder.WriteString(`          :if ([:len $fallbackData] > 0) do={` + "\n")
+		builder.WriteString(`            :if ([:len [/file find where name=$dst]] > 0) do={` + "\n")
+		builder.WriteString(`              /file set [find where name=$dst] contents=$fallbackData` + "\n")
+		builder.WriteString(`            } else={` + "\n")
+		builder.WriteString(`              /file add name=$dst contents=$fallbackData` + "\n")
+		builder.WriteString(`            }` + "\n")
+		builder.WriteString(`            :put ("NobliFi support file ready: " . $f . " (NobliFi captive portal)")` + "\n")
+		builder.WriteString(`          } else={` + "\n")
+		builder.WriteString(`            :put ("NobliFi WARNING: NobliFi support file is empty: " . $fallbackURL)` + "\n")
+		builder.WriteString(`          }` + "\n")
+		builder.WriteString(`        }` + "\n")
+		builder.WriteString(`      } on-error={ :put ("NobliFi WARNING: could not fetch NobliFi support file " . $fallbackURL) }` + "\n")
+		builder.WriteString(`    } else={` + "\n")
+		builder.WriteString(`      :put ("NobliFi WARNING: default HotSpot support file missing: " . $src)` + "\n")
+		builder.WriteString(`    }` + "\n")
+	} else {
+		builder.WriteString(`    :put ("NobliFi WARNING: default HotSpot support file missing: " . $src)` + "\n")
+	}
 	builder.WriteString(`  }` + "\n")
 	builder.WriteString(`}` + "\n")
 	builder.WriteString("\n")
+}
+
+func writeHotspotSupportFetchFallback(builder *strings.Builder, baseURL, name string) {
+	builder.WriteString(fmt.Sprintf(`    :if ($f = "%s") do={ :set fallbackURL "%s/%s" }`, escape(name), escape(baseURL), escape(name)) + "\n")
 }
 
 func writeHotspotPortalRefreshScript(builder *strings.Builder, options RenderOptions) {
@@ -920,7 +954,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	)
 
 	if loginPageURL != "" {
-		writeHotspotSupportFiles(builder)
+		writeHotspotSupportFiles(builder, options.HotspotSupportBaseURL)
 	}
 
 	// 7. Voucher user profile.

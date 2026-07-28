@@ -1,6 +1,7 @@
 package provisioning
 
 import (
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,10 +14,18 @@ import (
 	"github.com/noblifi/noblifi/backend/internal/plans"
 	"github.com/noblifi/noblifi/backend/internal/portprofiles"
 	"github.com/noblifi/noblifi/backend/internal/routers"
+	"github.com/noblifi/noblifi/backend/internal/wireguard"
 )
+
+//go:embed hotspot/*.html
+var hotspotSupportFiles embed.FS
 
 type RadiusRegistrar interface {
 	RegisterNAS(nasName, shortName, secret, description string) error
+}
+
+type WireGuardPeerQueuer interface {
+	QueuePeerUpsert(router routers.Router) (wireguard.WireGuardJob, error)
 }
 
 type PlanLister interface {
@@ -28,10 +37,11 @@ type Service struct {
 	cfg    config.Config
 	radius RadiusRegistrar
 	plans  PlanLister
+	wg     WireGuardPeerQueuer
 }
 
-func NewService(repo *routers.Repository, cfg config.Config, radius RadiusRegistrar, plans PlanLister) *Service {
-	return &Service{repo: repo, cfg: cfg, radius: radius, plans: plans}
+func NewService(repo *routers.Repository, cfg config.Config, radius RadiusRegistrar, plans PlanLister, wg WireGuardPeerQueuer) *Service {
+	return &Service{repo: repo, cfg: cfg, radius: radius, plans: plans, wg: wg}
 }
 func (s *Service) BootstrapScript(token string) (string, error) {
 	router, err := s.repo.FindByClaimToken(token)
@@ -118,6 +128,26 @@ func (s *Service) HotspotLoginPage(token string) (string, error) {
 	return renderHotspotLoginPage(options.HotspotPortalName, planList), nil
 }
 
+func (s *Service) HotspotSupportFile(token, filename string) (string, error) {
+	router, err := s.repo.FindByClaimToken(token)
+	if err != nil {
+		return "", errors.New("invalid claim token")
+	}
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
+		return "", errors.New("claim token expired")
+	}
+	switch filename {
+	case "flogout.html", "fstatus.html", "rstatus.html":
+	default:
+		return "", errors.New("unsupported hotspot support file")
+	}
+	data, err := hotspotSupportFiles.ReadFile("hotspot/" + filename)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
 func (s *Service) ClaimConfig(token, serial string, sourceIP string) (string, error) {
 	router, err := s.repo.FindByClaimToken(token)
 	if err != nil {
@@ -144,6 +174,7 @@ func (s *Service) ClaimConfig(token, serial string, sourceIP string) (string, er
 	}
 	options := s.renderOptionsForRouter(router)
 	options.LoginPageURL = hotspotLoginURL(token, s.cfg.ProvisioningBaseURL)
+	options.HotspotSupportBaseURL = hotspotSupportURL(token, s.cfg.ProvisioningBaseURL)
 	if err := s.registerRadiusNAS(router, options, sourceIP); err != nil {
 		log.Printf("provisioning: radius NAS registration failed for router %s from %q: %v", router.ID, sourceIP, err)
 	}
@@ -174,9 +205,10 @@ func (s *Service) registerRadiusNAS(router routers.Router, options portprofiles.
 }
 
 type WireGuardKeyInput struct {
-	ClaimToken string `json:"claim_token"`
-	Token      string `json:"token"`
-	PublicKey  string `json:"public_key"`
+	ClaimToken   string `json:"claim_token"`
+	Token        string `json:"token"`
+	SerialNumber string `json:"serial_number"`
+	PublicKey    string `json:"public_key"`
 }
 
 type WireGuardStatusInput struct {
@@ -185,45 +217,82 @@ type WireGuardStatusInput struct {
 	Status     string `json:"status"`
 }
 
-func (s *Service) WireGuardKey(input WireGuardKeyInput) error {
+type WireGuardKeyResponse struct {
+	Status       string `json:"status"`
+	ClientIP     string `json:"client_ip"`
+	RadiusServer string `json:"radius_server"`
+	LastError    string `json:"last_error"`
+}
+
+func (s *Service) WireGuardKey(input WireGuardKeyInput) (WireGuardKeyResponse, error) {
 	token := strings.TrimSpace(input.ClaimToken)
 	if token == "" {
 		token = strings.TrimSpace(input.Token)
 	}
 	if token == "" {
-		return errors.New("claim token is required")
+		return WireGuardKeyResponse{}, errors.New("claim token is required")
 	}
 	if err := routers.ValidateWireGuardPublicKey(input.PublicKey); err != nil {
-		return err
+		return WireGuardKeyResponse{}, err
 	}
 	router, err := s.repo.FindByClaimToken(token)
 	if err != nil {
-		return errors.New("invalid claim token")
+		return WireGuardKeyResponse{}, errors.New("invalid claim token")
 	}
 	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
-		return errors.New("WireGuard has not been prepared for this router")
+		address, allocErr := routers.AllocateWireGuardIP(s.repo, s.cfg)
+		if allocErr != nil {
+			return WireGuardKeyResponse{}, allocErr
+		}
+		router.WireGuardTunnelIP = &address
 	}
 	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
-		return errors.New("claim token expired")
+		return WireGuardKeyResponse{}, errors.New("claim token expired")
 	}
 	publicKey := strings.TrimSpace(input.PublicKey)
 	now := time.Now()
+	if strings.TrimSpace(input.SerialNumber) != "" {
+		router.SerialNumber = &input.SerialNumber
+	}
 	router.WireGuardPublicKey = &publicKey
-	router.WireGuardStatus = "awaiting_vps_peer"
+	router.WireGuardStatus = "peer_queued"
+	router.WireGuardPeerStatus = "peer_queued"
 	router.WireGuardLastSeenAt = &now
+	router.WireGuardPeerUpdatedAt = &now
+	router.ManagementIP = router.WireGuardTunnelIP
 	if err := s.repo.Save(&router); err != nil {
-		return err
+		return WireGuardKeyResponse{}, err
+	}
+	if s.wg != nil {
+		if _, err := s.wg.QueuePeerUpsert(router); err != nil {
+			msg := err.Error()
+			router.WireGuardLastError = &msg
+			router.WireGuardPeerStatus = "failed"
+			_ = s.repo.Save(&router)
+			return WireGuardKeyResponse{}, err
+		}
+	}
+	options := s.renderOptionsForRouter(router)
+	if err := s.registerRadiusNAS(router, options, ""); err != nil {
+		log.Printf("provisioning: radius NAS upsert failed for router %s: %v", router.ID, err)
 	}
 	payload, _ := json.Marshal(map[string]string{
 		"public_key": publicKey,
 		"tunnel_ip":  strings.TrimSpace(*router.WireGuardTunnelIP),
 	})
-	return s.repo.CreateConfigLog(&routers.RouterConfigLog{
+	if err := s.repo.CreateConfigLog(&routers.RouterConfigLog{
 		RouterID:        router.ID,
 		Action:          "wireguard_key_reported",
 		Status:          router.WireGuardStatus,
 		ResponsePayload: payload,
-	})
+	}); err != nil {
+		return WireGuardKeyResponse{}, err
+	}
+	return WireGuardKeyResponse{
+		Status:       router.WireGuardPeerStatus,
+		ClientIP:     strings.TrimSpace(*router.WireGuardTunnelIP),
+		RadiusServer: s.cfg.WireGuardServerIP,
+	}, nil
 }
 
 func (s *Service) WireGuardStatus(input WireGuardStatusInput) error {
@@ -572,6 +641,10 @@ func renderStatusCommand(token, status, baseURL string) string {
 
 func hotspotLoginURL(token, baseURL string) string {
 	return normalizeProvisioningBaseURL(baseURL) + "/hotspot-login/" + token
+}
+
+func hotspotSupportURL(token, baseURL string) string {
+	return normalizeProvisioningBaseURL(baseURL) + "/hotspot-support/" + token
 }
 
 func renderHotspotLoginPage(portalName string, planList []plans.Plan) string {

@@ -14,12 +14,20 @@ import (
 	"github.com/noblifi/noblifi/backend/internal/radius"
 	"github.com/noblifi/noblifi/backend/internal/routers"
 	"github.com/noblifi/noblifi/backend/internal/vouchers"
+	"github.com/noblifi/noblifi/backend/internal/wireguard"
 )
 
 type radiusSyncAdapter struct{ r *radius.Service }
 
 func (a radiusSyncAdapter) SyncVoucherForVoucher(v vouchers.Voucher) error {
 	return a.r.SyncVoucherForVoucher(v.Code)
+}
+
+type wireGuardCleanupAdapter struct{ w *wireguard.Service }
+
+func (a wireGuardCleanupAdapter) QueuePeerRemoval(router routers.Router) error {
+	_, err := a.w.QueuePeerRemoval(router)
+	return err
 }
 
 func Run() {
@@ -117,6 +125,9 @@ func Run() {
 		cfg,
 	)
 
+	wireGuardControlPlane := wireguard.NewService(db, cfg)
+	routerService.SetWireGuardCleanup(wireGuardCleanupAdapter{w: wireGuardControlPlane})
+
 	routers.NewHandler(
 		routerService,
 	).RegisterRoutes(api)
@@ -171,6 +182,7 @@ func Run() {
 		cfg,
 		radiusService,
 		planService,
+		wireGuardControlPlane,
 	)
 
 	provisioning.NewHandler(
@@ -191,6 +203,10 @@ func Run() {
 
 	radius.NewHandler(
 		radiusService,
+	).RegisterRoutes(api)
+
+	wireguard.NewHandler(
+		wireGuardControlPlane,
 	).RegisterRoutes(api)
 
 	// ---------------------------------------------------------

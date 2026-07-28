@@ -17,6 +17,7 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Get("/provisioning/install/:token", h.install)
 	router.Get("/provisioning/wireguard/:token", h.wireGuard)
 	router.Get("/provisioning/hotspot-login/:token", h.hotspotLogin)
+	router.Get("/provisioning/hotspot-support/:token/:file", h.hotspotSupport)
 	router.Get("/provisioning/interface", h.interfaceCheckIn)
 	router.Post("/provisioning/interface", h.interfaceCheckIn)
 	router.Get("/provisioning/config.rsc", h.config)
@@ -32,10 +33,11 @@ func (h *Handler) wireGuardKey(c *fiber.Ctx) error {
 	if err := c.BodyParser(&input); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
 	}
-	if err := h.service.WireGuardKey(input); err != nil {
+	result, err := h.service.WireGuardKey(input)
+	if err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
 	}
-	return c.JSON(fiber.Map{"status": "ok"})
+	return c.JSON(result)
 }
 
 func (h *Handler) wireGuardStatus(c *fiber.Ctx) error {
@@ -81,6 +83,15 @@ func (h *Handler) wireGuard(c *fiber.Ctx) error {
 
 func (h *Handler) hotspotLogin(c *fiber.Ctx) error {
 	html, err := h.service.HotspotLoginPage(c.Params("token"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, err.Error())
+	}
+	c.Set(fiber.HeaderContentType, fiber.MIMETextHTMLCharsetUTF8)
+	return c.SendString(html)
+}
+
+func (h *Handler) hotspotSupport(c *fiber.Ctx) error {
+	html, err := h.service.HotspotSupportFile(c.Params("token"), c.Params("file"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, err.Error())
 	}

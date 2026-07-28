@@ -54,6 +54,8 @@ type Config struct {
 	WireGuardServerIP        string
 	WireGuardSubnetCIDR      string
 	WireGuardKeepalive       int
+	AgentToken               string
+	AgentID                  string
 	ProvisioningTokenTTLHour int
 }
 
@@ -104,6 +106,8 @@ func Load() Config {
 		WireGuardServerIP:        getEnv("NOBLIFI_WIREGUARD_SERVER_IP", "10.77.0.1"),
 		WireGuardSubnetCIDR:      getEnv("NOBLIFI_WIREGUARD_SUBNET", "10.77.0.0/24"),
 		WireGuardKeepalive:       getIntEnv("NOBLIFI_WIREGUARD_KEEPALIVE", 25),
+		AgentToken:               strings.TrimSpace(getEnv("NOBLIFI_AGENT_TOKEN", "")),
+		AgentID:                  strings.TrimSpace(getEnv("NOBLIFI_AGENT_ID", "xneelo-wg-agent-01")),
 		ProvisioningTokenTTLHour: 24,
 	}
 }

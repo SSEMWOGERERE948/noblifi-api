@@ -154,6 +154,7 @@ func TestRenderRouterOSInstallsHotspotLoginTemplate(t *testing.T) {
 
 	options := validRenderOptions()
 	options.LoginPageURL = "https://api.example.com/api/v1/provisioning/hotspot-login/NOB-1234-5678"
+	options.HotspotSupportBaseURL = "https://api.example.com/api/v1/provisioning/hotspot-support/NOB-1234-5678"
 	script, err := RenderRouterOSWithOptions(assignments, options)
 	if err != nil {
 		t.Fatalf("RenderRouterOSWithOptions returned error: %v", err)
@@ -212,5 +213,35 @@ func TestRenderRouterOSInstallsHotspotLoginTemplate(t *testing.T) {
 	fetchIndex := strings.Index(script, `/tool fetch url="https://api.example.com/api/v1/provisioning/hotspot-login/NOB-1234-5678" mode=https dst-path=$hotspotLoginFile`)
 	if serverIndex == -1 || fetchIndex == -1 || serverIndex > fetchIndex {
 		t.Fatalf("expected HotSpot server to be installed before custom login fetch can fail, got:\n%s", script)
+	}
+}
+
+func TestRenderRouterOSAddsFallbackHotspotSupportPages(t *testing.T) {
+	assignments := []Assignment{
+		{InterfaceName: "ether1", Role: "WAN"},
+		{InterfaceName: "ether2", Role: "HOTSPOT_LAN"},
+		{InterfaceName: "ether5", Role: "STAFF_LAN"},
+	}
+
+	options := validRenderOptions()
+	options.LoginPageURL = "https://api.example.com/api/v1/provisioning/hotspot-login/NOB-1234-5678"
+	options.HotspotSupportBaseURL = "https://api.example.com/api/v1/provisioning/hotspot-support/NOB-1234-5678"
+	script, err := RenderRouterOSWithOptions(assignments, options)
+	if err != nil {
+		t.Fatalf("RenderRouterOSWithOptions returned error: %v", err)
+	}
+
+	required := []string{
+		`:if ($f = "flogout.html") do={ :set fallbackURL "https://api.example.com/api/v1/provisioning/hotspot-support/NOB-1234-5678/flogout.html" }`,
+		`:if ($f = "fstatus.html") do={ :set fallbackURL "https://api.example.com/api/v1/provisioning/hotspot-support/NOB-1234-5678/fstatus.html" }`,
+		`:if ($f = "rstatus.html") do={ :set fallbackURL "https://api.example.com/api/v1/provisioning/hotspot-support/NOB-1234-5678/rstatus.html" }`,
+		`:local fallbackResult [/tool fetch url=$fallbackURL output=user as-value idle-timeout=30s duration=1m]`,
+		`:put ("NobliFi support file ready: " . $f . " (NobliFi captive portal)")`,
+		`:put ("NobliFi WARNING: default HotSpot support file missing: " . $src)`,
+	}
+	for _, item := range required {
+		if !strings.Contains(script, item) {
+			t.Fatalf("expected script to contain %q, got:\n%s", item, script)
+		}
 	}
 }

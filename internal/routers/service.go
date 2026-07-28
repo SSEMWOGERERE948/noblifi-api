@@ -16,12 +16,21 @@ import (
 )
 
 type Service struct {
-	repo *Repository
-	cfg  config.Config
+	repo    *Repository
+	cfg     config.Config
+	cleanup WireGuardCleanupQueuer
+}
+
+type WireGuardCleanupQueuer interface {
+	QueuePeerRemoval(router Router) error
 }
 
 func NewService(repo *Repository, cfg config.Config) *Service {
 	return &Service{repo: repo, cfg: cfg}
+}
+
+func (s *Service) SetWireGuardCleanup(cleanup WireGuardCleanupQueuer) {
+	s.cleanup = cleanup
 }
 
 type CreateRouterInput struct {
@@ -67,6 +76,37 @@ func (s *Service) List() ([]Router, error) {
 
 func (s *Service) Find(id uuid.UUID) (Router, error) {
 	return s.repo.Find(id)
+}
+
+func (s *Service) RequestDelete(routerID uuid.UUID) (Router, error) {
+	router, err := s.repo.Find(routerID)
+	if err != nil {
+		return router, err
+	}
+	if router.DeletedAt != nil {
+		return router, nil
+	}
+	now := time.Now().UTC()
+	router.DeleteRequestedAt = &now
+	router.Status = "delete_requested"
+	router.ProvisioningStatus = "delete_requested"
+	if router.WireGuardTunnelIP != nil && strings.TrimSpace(*router.WireGuardTunnelIP) != "" && s.cleanup != nil {
+		router.WireGuardPeerStatus = "removal_queued"
+		router.ProvisioningStatus = "removal_queued"
+		if err := s.cleanup.QueuePeerRemoval(router); err != nil {
+			msg := err.Error()
+			router.ProvisioningError = &msg
+			router.WireGuardLastError = &msg
+			_ = s.repo.Save(&router)
+			return router, err
+		}
+	} else {
+		router.Status = "deleted"
+		router.ProvisioningStatus = "deleted"
+		router.DeletedAt = &now
+	}
+	err = s.repo.Save(&router)
+	return router, err
 }
 
 func (s *Service) NetworkProfile(routerID uuid.UUID) (RouterNetworkProfile, error) {
@@ -340,6 +380,7 @@ func (s *Service) ConfigPreview(routerID uuid.UUID) (ConfigPreview, error) {
 		return ConfigPreview{}, err
 	}
 	options.LoginPageURL = hotspotLoginURL(router.ClaimToken, s.cfg.ProvisioningBaseURL)
+	options.HotspotSupportBaseURL = hotspotSupportURL(router.ClaimToken, s.cfg.ProvisioningBaseURL)
 	script, err := portprofiles.RenderRouterOSWithOptions(assignments, options)
 	if err != nil {
 		return ConfigPreview{}, err
@@ -424,6 +465,10 @@ func routerOSFetchImportCommand(url, mode, filename string) string {
 
 func hotspotLoginURL(token, baseURL string) string {
 	return normalizeProvisioningBaseURL(baseURL) + "/hotspot-login/" + token
+}
+
+func hotspotSupportURL(token, baseURL string) string {
+	return normalizeProvisioningBaseURL(baseURL) + "/hotspot-support/" + token
 }
 
 func legacyRandomToken() string {
