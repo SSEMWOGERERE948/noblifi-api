@@ -23,41 +23,50 @@ type RenderOptions struct {
 	RadiusSecret          string
 	LoginPageURL          string
 	HotspotSupportBaseURL string
-	RouterIdentity        string
-	APIUsername           string
-	APIPassword           string
-	HotspotBridge         string
-	StaffBridge           string
-	POSBridge             string
-	CCTVBridge            string
-	HotspotSubnet         string
-	HotspotGateway        string
-	HotspotPool           string
-	StaffSubnet           string
-	StaffGateway          string
-	StaffPool             string
-	POSSubnet             string
-	POSGateway            string
-	POSPool               string
-	CCTVSubnet            string
-	CCTVGateway           string
-	CCTVPool              string
-	HotspotDNSName        string
-	HotspotPortalName     string
-	DisableWWWService     bool
-	EnableAPIService      bool
-	EnableAPISSLService   bool
-	WalledGardenHosts     []string
+
+	// ProvisioningBaseURL must end in /api/v1/provisioning. The claim token is
+	// embedded only in the generated RouterOS installer; the xneelo agent token
+	// must never be passed to this renderer.
+	ProvisioningBaseURL    string
+	ProvisioningClaimToken string
+
+	RouterIdentity      string
+	APIUsername         string
+	APIPassword         string
+	HotspotBridge       string
+	StaffBridge         string
+	POSBridge           string
+	CCTVBridge          string
+	HotspotSubnet       string
+	HotspotGateway      string
+	HotspotPool         string
+	StaffSubnet         string
+	StaffGateway        string
+	StaffPool           string
+	POSSubnet           string
+	POSGateway          string
+	POSPool             string
+	CCTVSubnet          string
+	CCTVGateway         string
+	CCTVPool            string
+	HotspotDNSName      string
+	HotspotPortalName   string
+	DisableWWWService   bool
+	EnableAPIService    bool
+	EnableAPISSLService bool
+	WalledGardenHosts   []string
 
 	// WireGuard management tunnel. WireGuardClientIP must be unique per router.
-	WireGuardEnabled   bool
-	WireGuardEndpoint  string
-	WireGuardPort      int
-	WireGuardPublicKey string
-	WireGuardInterface string
-	WireGuardServerIP  string
-	WireGuardClientIP  string
-	WireGuardKeepalive int
+	WireGuardEnabled              bool
+	WireGuardEndpoint             string
+	WireGuardPort                 int
+	WireGuardPublicKey            string
+	WireGuardInterface            string
+	WireGuardServerIP             string
+	WireGuardClientIP             string
+	WireGuardKeepalive            int
+	WireGuardAgentManaged         bool
+	WireGuardHandshakeWaitSeconds int
 }
 
 func DefaultAssignments() []Assignment {
@@ -107,39 +116,40 @@ func BuildSummary(assignments []Assignment) Summary {
 
 func RenderRouterOS(assignments []Assignment) (string, error) {
 	return RenderRouterOSWithOptions(assignments, RenderOptions{
-		RadiusServer:        "127.0.0.1",
-		RadiusSecret:        "noblifi",
-		LoginPageURL:        "",
-		RouterIdentity:      "NobliFi-Router",
-		APIUsername:         "noblifi-api",
-		APIPassword:         "CHANGE_ME_API_PASSWORD",
-		HotspotBridge:       "br-hotspot",
-		StaffBridge:         "br-staff",
-		POSBridge:           "br-pos",
-		CCTVBridge:          "br-cctv",
-		HotspotSubnet:       "10.10.10.0/24",
-		HotspotGateway:      "10.10.10.1/24",
-		HotspotPool:         "10.10.10.10-10.10.10.254",
-		StaffSubnet:         "10.20.20.0/24",
-		StaffGateway:        "10.20.20.1/24",
-		StaffPool:           "10.20.20.10-10.20.20.254",
-		POSSubnet:           "10.30.30.0/24",
-		POSGateway:          "10.30.30.1/24",
-		POSPool:             "10.30.30.10-10.30.30.254",
-		CCTVSubnet:          "10.40.40.0/24",
-		CCTVGateway:         "10.40.40.1/24",
-		CCTVPool:            "10.40.40.10-10.40.40.254",
-		HotspotDNSName:      "noblifi.login",
-		HotspotPortalName:   "NobliFi WiFi",
-		DisableWWWService:   true,
-		EnableAPIService:    true,
-		EnableAPISSLService: true,
-		WalledGardenHosts:   defaultWalledGardenHosts(),
-		WireGuardEnabled:    false,
-		WireGuardPort:       51820,
-		WireGuardInterface:  "noblifi-wg",
-		WireGuardServerIP:   "10.77.0.1",
-		WireGuardKeepalive:  25,
+		RadiusServer:                  "127.0.0.1",
+		RadiusSecret:                  "noblifi",
+		LoginPageURL:                  "",
+		RouterIdentity:                "NobliFi-Router",
+		APIUsername:                   "noblifi-api",
+		APIPassword:                   "CHANGE_ME_API_PASSWORD",
+		HotspotBridge:                 "br-hotspot",
+		StaffBridge:                   "br-staff",
+		POSBridge:                     "br-pos",
+		CCTVBridge:                    "br-cctv",
+		HotspotSubnet:                 "10.10.10.0/24",
+		HotspotGateway:                "10.10.10.1/24",
+		HotspotPool:                   "10.10.10.10-10.10.10.254",
+		StaffSubnet:                   "10.20.20.0/24",
+		StaffGateway:                  "10.20.20.1/24",
+		StaffPool:                     "10.20.20.10-10.20.20.254",
+		POSSubnet:                     "10.30.30.0/24",
+		POSGateway:                    "10.30.30.1/24",
+		POSPool:                       "10.30.30.10-10.30.30.254",
+		CCTVSubnet:                    "10.40.40.0/24",
+		CCTVGateway:                   "10.40.40.1/24",
+		CCTVPool:                      "10.40.40.10-10.40.40.254",
+		HotspotDNSName:                "noblifi.login",
+		HotspotPortalName:             "NobliFi WiFi",
+		DisableWWWService:             true,
+		EnableAPIService:              true,
+		EnableAPISSLService:           true,
+		WalledGardenHosts:             defaultWalledGardenHosts(),
+		WireGuardEnabled:              false,
+		WireGuardPort:                 51820,
+		WireGuardInterface:            "noblifi-wg",
+		WireGuardServerIP:             "10.77.0.1",
+		WireGuardKeepalive:            25,
+		WireGuardHandshakeWaitSeconds: 120,
 	})
 }
 
@@ -149,6 +159,7 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	}
 
 	options = withDefaults(options)
+	options = withProvisioningContext(options)
 
 	if isPlaceholderRadiusServer(options.RadiusServer) {
 		return "", fmt.Errorf("NOBLIFI_RADIUS_SERVER is %q, but MikroTik routers cannot use localhost, empty values, or setup placeholders for RADIUS. Set it to the public IP or DNS name of the VM/server running NobliFi RADIUS, for example 154.65.105.14, and make sure UDP ports 1812 and 1813 are reachable from the router", options.RadiusServer)
@@ -236,35 +247,36 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 
 func withDefaults(options RenderOptions) RenderOptions {
 	defaults := RenderOptions{
-		RouterIdentity:      "NobliFi-Router",
-		APIUsername:         "noblifi-api",
-		APIPassword:         "CHANGE_ME_API_PASSWORD",
-		HotspotBridge:       "br-hotspot",
-		StaffBridge:         "br-staff",
-		POSBridge:           "br-pos",
-		CCTVBridge:          "br-cctv",
-		HotspotSubnet:       "10.10.10.0/24",
-		HotspotGateway:      "10.10.10.1/24",
-		HotspotPool:         "10.10.10.10-10.10.10.254",
-		StaffSubnet:         "10.20.20.0/24",
-		StaffGateway:        "10.20.20.1/24",
-		StaffPool:           "10.20.20.10-10.20.20.254",
-		POSSubnet:           "10.30.30.0/24",
-		POSGateway:          "10.30.30.1/24",
-		POSPool:             "10.30.30.10-10.30.30.254",
-		CCTVSubnet:          "10.40.40.0/24",
-		CCTVGateway:         "10.40.40.1/24",
-		CCTVPool:            "10.40.40.10-10.40.40.254",
-		HotspotDNSName:      "noblifi.login",
-		HotspotPortalName:   "NobliFi WiFi",
-		DisableWWWService:   true,
-		EnableAPIService:    true,
-		EnableAPISSLService: true,
-		WalledGardenHosts:   defaultWalledGardenHosts(),
-		WireGuardPort:       51820,
-		WireGuardInterface:  "noblifi-wg",
-		WireGuardServerIP:   "10.77.0.1",
-		WireGuardKeepalive:  25,
+		RouterIdentity:                "NobliFi-Router",
+		APIUsername:                   "noblifi-api",
+		APIPassword:                   "CHANGE_ME_API_PASSWORD",
+		HotspotBridge:                 "br-hotspot",
+		StaffBridge:                   "br-staff",
+		POSBridge:                     "br-pos",
+		CCTVBridge:                    "br-cctv",
+		HotspotSubnet:                 "10.10.10.0/24",
+		HotspotGateway:                "10.10.10.1/24",
+		HotspotPool:                   "10.10.10.10-10.10.10.254",
+		StaffSubnet:                   "10.20.20.0/24",
+		StaffGateway:                  "10.20.20.1/24",
+		StaffPool:                     "10.20.20.10-10.20.20.254",
+		POSSubnet:                     "10.30.30.0/24",
+		POSGateway:                    "10.30.30.1/24",
+		POSPool:                       "10.30.30.10-10.30.30.254",
+		CCTVSubnet:                    "10.40.40.0/24",
+		CCTVGateway:                   "10.40.40.1/24",
+		CCTVPool:                      "10.40.40.10-10.40.40.254",
+		HotspotDNSName:                "noblifi.login",
+		HotspotPortalName:             "NobliFi WiFi",
+		DisableWWWService:             true,
+		EnableAPIService:              true,
+		EnableAPISSLService:           true,
+		WalledGardenHosts:             defaultWalledGardenHosts(),
+		WireGuardPort:                 51820,
+		WireGuardInterface:            "noblifi-wg",
+		WireGuardServerIP:             "10.77.0.1",
+		WireGuardKeepalive:            25,
+		WireGuardHandshakeWaitSeconds: 120,
 	}
 	if options.RouterIdentity == "" {
 		options.RouterIdentity = defaults.RouterIdentity
@@ -342,7 +354,44 @@ func withDefaults(options RenderOptions) RenderOptions {
 	if options.WireGuardKeepalive == 0 {
 		options.WireGuardKeepalive = defaults.WireGuardKeepalive
 	}
+	if options.WireGuardHandshakeWaitSeconds == 0 {
+		options.WireGuardHandshakeWaitSeconds = defaults.WireGuardHandshakeWaitSeconds
+	}
 	options.WalledGardenHosts = cleanHosts(options.WalledGardenHosts)
+	return options
+}
+
+// withProvisioningContext derives the public provisioning API base and router
+// claim token from LoginPageURL when the caller did not set them explicitly.
+// ClaimConfig already sets LoginPageURL to
+// .../api/v1/provisioning/hotspot-login/<token>, so existing callers become
+// agent-aware without receiving the private xneelo agent credential.
+func withProvisioningContext(options RenderOptions) RenderOptions {
+	options.ProvisioningBaseURL = strings.TrimRight(strings.TrimSpace(options.ProvisioningBaseURL), "/")
+	options.ProvisioningClaimToken = strings.TrimSpace(options.ProvisioningClaimToken)
+
+	if options.ProvisioningBaseURL == "" || options.ProvisioningClaimToken == "" {
+		loginURL := strings.TrimSpace(options.LoginPageURL)
+		if parsed, err := url.Parse(loginURL); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+			const marker = "/hotspot-login/"
+			if index := strings.LastIndex(parsed.Path, marker); index >= 0 {
+				if options.ProvisioningBaseURL == "" {
+					basePath := strings.TrimRight(parsed.Path[:index], "/")
+					options.ProvisioningBaseURL = parsed.Scheme + "://" + parsed.Host + basePath
+				}
+				if options.ProvisioningClaimToken == "" {
+					options.ProvisioningClaimToken = strings.TrimSpace(parsed.Path[index+len(marker):])
+				}
+			}
+		}
+	}
+
+	if options.WireGuardEnabled &&
+		options.ProvisioningBaseURL != "" &&
+		options.ProvisioningClaimToken != "" {
+		options.WireGuardAgentManaged = true
+	}
+
 	return options
 }
 
@@ -416,6 +465,27 @@ func validateWireGuardOptions(options RenderOptions) error {
 	}
 	if options.WireGuardKeepalive < 1 || options.WireGuardKeepalive > 65535 {
 		return fmt.Errorf("invalid WireGuard keepalive %d", options.WireGuardKeepalive)
+	}
+	if options.WireGuardHandshakeWaitSeconds < 15 || options.WireGuardHandshakeWaitSeconds > 600 {
+		return fmt.Errorf("WireGuard handshake wait must be between 15 and 600 seconds")
+	}
+
+	if options.WireGuardAgentManaged {
+		baseURL := strings.TrimSpace(options.ProvisioningBaseURL)
+		claimToken := strings.TrimSpace(options.ProvisioningClaimToken)
+		if baseURL == "" {
+			return fmt.Errorf("ProvisioningBaseURL is required for agent-managed WireGuard")
+		}
+		if claimToken == "" {
+			return fmt.Errorf("ProvisioningClaimToken is required for agent-managed WireGuard")
+		}
+		parsed, err := url.Parse(baseURL)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return fmt.Errorf("invalid agent provisioning base URL %q", baseURL)
+		}
+		if !strings.HasSuffix(strings.TrimRight(parsed.Path, "/"), "/api/v1/provisioning") {
+			return fmt.Errorf("agent provisioning base URL must end in /api/v1/provisioning")
+		}
 	}
 
 	return nil
@@ -643,33 +713,33 @@ func writeWireGuardManagement(builder *strings.Builder, options RenderOptions) {
 		"ensure WireGuard client address",
 	)
 
-	// Recreate only the VPS peer. The local interface/private key is preserved.
-	writeSafe(
-		builder,
-		fmt.Sprintf(`/interface wireguard peers remove [find where interface="%s" comment="NobliFi VPS"]`, escape(iface)),
-		"cleanup WireGuard VPS peer",
-	)
-	writeCritical(
-		builder,
-		fmt.Sprintf(
-			`/interface wireguard peers add interface="%s" public-key="%s" endpoint-address="%s" endpoint-port=%d allowed-address="%s" persistent-keepalive=%ds disabled=no comment="NobliFi VPS"`,
-			escape(iface), escape(options.WireGuardPublicKey), escape(options.WireGuardEndpoint), options.WireGuardPort, escape(serverCIDR), options.WireGuardKeepalive,
-		),
-		"add WireGuard VPS peer",
-	)
+	// Upsert the single NobliFi-owned VPS peer. Do not remove the local
+	// WireGuard interface because that would rotate the router private key.
+	builder.WriteString(fmt.Sprintf(`:local noblifiWGPeer [/interface wireguard peers find where interface="%s" comment="NobliFi VPS"]`, escape(iface)) + "\n")
+	builder.WriteString(`:if ([:len $noblifiWGPeer] = 0) do={` + "\n")
+	builder.WriteString(fmt.Sprintf(
+		`  /interface wireguard peers add interface="%s" public-key="%s" endpoint-address="%s" endpoint-port=%d allowed-address="%s" persistent-keepalive=%ds disabled=no comment="NobliFi VPS"`,
+		escape(iface), escape(options.WireGuardPublicKey), escape(options.WireGuardEndpoint), options.WireGuardPort, escape(serverCIDR), options.WireGuardKeepalive,
+	) + "\n")
+	builder.WriteString(fmt.Sprintf(`  :set noblifiWGPeer [/interface wireguard peers find where interface="%s" comment="NobliFi VPS"]`, escape(iface)) + "\n")
+	builder.WriteString(`} else={` + "\n")
+	builder.WriteString(fmt.Sprintf(
+		`  /interface wireguard peers set [:pick $noblifiWGPeer 0] public-key="%s" endpoint-address="%s" endpoint-port=%d allowed-address="%s" persistent-keepalive=%ds disabled=no comment="NobliFi VPS"`,
+		escape(options.WireGuardPublicKey), escape(options.WireGuardEndpoint), options.WireGuardPort, escape(serverCIDR), options.WireGuardKeepalive,
+	) + "\n")
+	builder.WriteString(`}` + "\n")
 
-	// Verify that provisioning did not leave an old/stale VPS public key.
 	writeCritical(
 		builder,
 		fmt.Sprintf(
-			`:local configuredWGServerKey [/interface wireguard peers get [find where interface="%s" comment="NobliFi VPS"] public-key]; :if ($configuredWGServerKey != "%s") do={ :error "WireGuard VPS public key mismatch" }`,
-			escape(iface), escape(options.WireGuardPublicKey),
+			`:local configuredWGServerKey [/interface wireguard peers get [:pick $noblifiWGPeer 0] public-key]; :if ($configuredWGServerKey != "%s") do={ :error "WireGuard VPS public key mismatch" }`,
+			escape(options.WireGuardPublicKey),
 		),
 		"verify WireGuard VPS public key",
 	)
 
 	// Allowed-address selects the peer, but RouterOS still requires an explicit
-	// IP route. Remove stale/duplicate NobliFi routes and recreate the host route.
+	// host route to the VPS management address.
 	writeSafe(builder, `/ip route remove [find where comment="NobliFi VPS WireGuard"]`, "cleanup WireGuard VPS route")
 	writeSafe(
 		builder,
@@ -682,9 +752,6 @@ func writeWireGuardManagement(builder *strings.Builder, options RenderOptions) {
 		"add WireGuard VPS route",
 	)
 
-	// The management tunnel is trusted LAN, but also add an explicit narrow
-	// input rule so strict/default firewall rules cannot block ping, API, API-SSL
-	// or other router-management traffic from the single VPS tunnel address.
 	writeCritical(
 		builder,
 		fmt.Sprintf(`:if ([:len [/interface list member find where list="LAN" interface="%s"]] = 0) do={ /interface list member add list=LAN interface="%s" comment="NobliFi WireGuard LAN" }`, escape(iface), escape(iface)),
@@ -700,32 +767,78 @@ func writeWireGuardManagement(builder *strings.Builder, options RenderOptions) {
 		fmt.Sprintf(`/ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s" place-before=0 comment="NobliFi WireGuard management input"`, escape(iface), escape(serverCIDR)),
 		"allow VPS management traffic over WireGuard",
 	)
-
 	writeCritical(
 		builder,
 		fmt.Sprintf(`:if ([:len [/ip route find where dst-address="%s" gateway="%s" active=yes]] = 0) do={ :error "NobliFi WireGuard route is not active" }`, escape(serverCIDR), escape(iface)),
 		"verify WireGuard VPS route",
 	)
 
-	// Give the backend/VPS peer-registration workflow time to replace any stale
-	// server-side peer. A handshake failure is warned rather than made fatal:
-	// the MikroTik renderer cannot itself execute "wg set" on the xneelo VPS.
-	builder.WriteString(`:local noblifiWGPeer [/interface wireguard peers find where interface="` + escape(iface) + `" comment="NobliFi VPS"]` + "\n")
-	builder.WriteString(`:local noblifiWGHandshake false` + "\n")
-	builder.WriteString(`:for i from=1 to=45 do={` + "\n")
-	builder.WriteString(`  :if ([:len $noblifiWGPeer] > 0) do={` + "\n")
-	builder.WriteString(`    :local noblifiWGRx [/interface wireguard peers get [:pick $noblifiWGPeer 0] rx]` + "\n")
-	builder.WriteString(`    :if ($noblifiWGRx > 0) do={ :set noblifiWGHandshake true }` + "\n")
-	builder.WriteString(`  }` + "\n")
-	builder.WriteString(`  :if ($noblifiWGHandshake) do={ :set i 45 } else={ :delay 1s }` + "\n")
-	builder.WriteString(`}` + "\n")
-	builder.WriteString(`:if ($noblifiWGHandshake) do={ :put "NobliFi WireGuard handshake detected" } else={ :put "NobliFi WARNING: no WireGuard handshake yet; verify the xneelo peer public key and AllowedIPs" }` + "\n")
+	builder.WriteString(fmt.Sprintf(`:local noblifiWGPublicKey [/interface wireguard get [find where name="%s"] public-key]`, escape(iface)) + "\n")
+	builder.WriteString(`:if ([:len $noblifiWGPublicKey] = 0) do={ :error "NobliFi could not read the MikroTik WireGuard public key" }` + "\n")
+
+	if options.WireGuardAgentManaged {
+		keyURL := strings.TrimRight(options.ProvisioningBaseURL, "/") + "/wireguard-key"
+		statusURL := strings.TrimRight(options.ProvisioningBaseURL, "/") + "/wireguard-status"
+		claimToken := escape(options.ProvisioningClaimToken)
+
+		builder.WriteString("# Register the router key so App Engine queues an xneelo agent job\n")
+		builder.WriteString(fmt.Sprintf(`:local noblifiWGKeyURL "%s"`, escape(keyURL)) + "\n")
+		builder.WriteString(fmt.Sprintf(`:local noblifiWGStatusURL "%s"`, escape(statusURL)) + "\n")
+		builder.WriteString(fmt.Sprintf(`:local noblifiWGKeyPayload ("{\"claim_token\":\"%s\",\"public_key\":\"" . $noblifiWGPublicKey . "\"}")`, claimToken) + "\n")
+		builder.WriteString(`:local noblifiWGKeyReported false` + "\n")
+		builder.WriteString(`:for attempt from=1 to=3 do={` + "\n")
+		builder.WriteString(`  :if (!$noblifiWGKeyReported) do={` + "\n")
+		builder.WriteString(`    :do {` + "\n")
+		builder.WriteString(`      :local reportResult [/tool fetch url=$noblifiWGKeyURL http-method=post http-header-field="Content-Type: application/json" http-data=$noblifiWGKeyPayload output=user as-value idle-timeout=30s duration=1m]` + "\n")
+		builder.WriteString(`      :if (($reportResult->"status") = "finished") do={ :set noblifiWGKeyReported true }` + "\n")
+		builder.WriteString(`    } on-error={ :log warning ("NobliFi WireGuard key report attempt " . $attempt . " failed") }` + "\n")
+		builder.WriteString(`    :if (!$noblifiWGKeyReported) do={ :delay 3s }` + "\n")
+		builder.WriteString(`  }` + "\n")
+		builder.WriteString(`}` + "\n")
+		builder.WriteString(`:if (!$noblifiWGKeyReported) do={ :error "NobliFi could not register this router WireGuard key with the control plane" }` + "\n")
+		builder.WriteString(`:put "NobliFi WireGuard key registered; waiting for xneelo agent"` + "\n")
+
+		waitSeconds := options.WireGuardHandshakeWaitSeconds
+		builder.WriteString(`:local noblifiWGHandshake false` + "\n")
+		builder.WriteString(`:local noblifiWGLastHandshake ""` + "\n")
+		builder.WriteString(fmt.Sprintf(`:for second from=1 to=%d do={`+"\n", waitSeconds))
+		builder.WriteString(fmt.Sprintf(`  :do { /tool ping address="%s" src-address="%s" interface="%s" count=1 interval=200ms } on-error={}`, escape(options.WireGuardServerIP), escape(options.WireGuardClientIP), escape(iface)) + "\n")
+		builder.WriteString(`  :if ([:len $noblifiWGPeer] > 0) do={` + "\n")
+		builder.WriteString(`    :local noblifiWGRx [/interface wireguard peers get [:pick $noblifiWGPeer 0] rx]` + "\n")
+		builder.WriteString(`    :set noblifiWGLastHandshake [/interface wireguard peers get [:pick $noblifiWGPeer 0] last-handshake]` + "\n")
+		builder.WriteString(`    :if ($noblifiWGRx > 0) do={ :set noblifiWGHandshake true }` + "\n")
+		builder.WriteString(`  }` + "\n")
+		builder.WriteString(fmt.Sprintf(`  :if ($noblifiWGHandshake) do={ :set second %d } else={ :delay 1s }`, waitSeconds) + "\n")
+		builder.WriteString(`}` + "\n")
+
+		builder.WriteString(`:if ($noblifiWGHandshake) do={` + "\n")
+		builder.WriteString(`  :put ("NobliFi WireGuard handshake detected; last-handshake=" . $noblifiWGLastHandshake)` + "\n")
+		builder.WriteString(fmt.Sprintf(`  :local connectedPayload "{\"claim_token\":\"%s\",\"status\":\"connected\"}"`, claimToken) + "\n")
+		builder.WriteString(`  :local connectedReported false` + "\n")
+		builder.WriteString(`  :for attempt from=1 to=3 do={` + "\n")
+		builder.WriteString(`    :if (!$connectedReported) do={` + "\n")
+		builder.WriteString(`      :do {` + "\n")
+		builder.WriteString(`        :local statusResult [/tool fetch url=$noblifiWGStatusURL http-method=post http-header-field="Content-Type: application/json" http-data=$connectedPayload output=user as-value idle-timeout=30s duration=1m]` + "\n")
+		builder.WriteString(`        :if (($statusResult->"status") = "finished") do={ :set connectedReported true }` + "\n")
+		builder.WriteString(`      } on-error={ :log warning ("NobliFi connected status report attempt " . $attempt . " failed") }` + "\n")
+		builder.WriteString(`      :if (!$connectedReported) do={ :delay 3s }` + "\n")
+		builder.WriteString(`    }` + "\n")
+		builder.WriteString(`  }` + "\n")
+		builder.WriteString(`  :if (!$connectedReported) do={ :log warning "NobliFi WireGuard is connected, but the backend status update failed" }` + "\n")
+		builder.WriteString(`} else={` + "\n")
+		builder.WriteString(fmt.Sprintf(`  :local failedPayload "{\"claim_token\":\"%s\",\"status\":\"failed\"}"`, claimToken) + "\n")
+		builder.WriteString(`  :for attempt from=1 to=3 do={` + "\n")
+		builder.WriteString(`    :do { /tool fetch url=$noblifiWGStatusURL http-method=post http-header-field="Content-Type: application/json" http-data=$failedPayload output=user as-value idle-timeout=30s duration=1m } on-error={ :log warning ("NobliFi failed status report attempt " . $attempt . " failed") }` + "\n")
+		builder.WriteString(`    :delay 2s` + "\n")
+		builder.WriteString(`  }` + "\n")
+		builder.WriteString(fmt.Sprintf(`  :error "NobliFi xneelo agent did not establish a WireGuard handshake within %d seconds"`, waitSeconds) + "\n")
+		builder.WriteString(`}` + "\n")
+	} else {
+		builder.WriteString(`:put "NobliFi WARNING: agent-managed WireGuard is disabled because the provisioning base URL or router token is missing"` + "\n")
+	}
 
 	// Test tunneled IP reachability with the exact source/interface used by RADIUS.
-	// ICMP may be blocked by a server firewall, therefore this is diagnostic only.
-	builder.WriteString(fmt.Sprintf(`:do { :local wgReplies [/tool ping address="%s" src-address="%s" interface="%s" count=3 interval=500ms]; :if ($wgReplies = 0) do={ :put "NobliFi WARNING: WireGuard handshake may exist, but the VPS tunnel IP did not answer ping" } else={ :put ("NobliFi WireGuard tunnel ping replies=" . $wgReplies) } } on-error={ :put "NobliFi WARNING: WireGuard tunnel ping test failed" }`, escape(options.WireGuardServerIP), escape(options.WireGuardClientIP), escape(iface)) + "\n")
-
-	builder.WriteString(fmt.Sprintf(`:local noblifiWGPublicKey [/interface wireguard get [find where name="%s"] public-key]`, escape(iface)) + "\n")
+	builder.WriteString(fmt.Sprintf(`:do { :local wgReplies [/tool ping address="%s" src-address="%s" interface="%s" count=3 interval=500ms]; :if ($wgReplies = 0) do={ :put "NobliFi WARNING: WireGuard handshake exists, but the VPS tunnel IP did not answer ping" } else={ :put ("NobliFi WireGuard tunnel ping replies=" . $wgReplies) } } on-error={ :put "NobliFi WARNING: WireGuard tunnel ping test failed" }`, escape(options.WireGuardServerIP), escape(options.WireGuardClientIP), escape(iface)) + "\n")
 	builder.WriteString(fmt.Sprintf(`:put ("NobliFi WireGuard ready: client=%s server=%s public-key=" . $noblifiWGPublicKey)`, escape(options.WireGuardClientIP), escape(options.WireGuardServerIP)) + "\n")
 	builder.WriteString("\n")
 }
