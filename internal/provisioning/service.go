@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"html"
 	"log"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,14 +57,21 @@ func (s *Service) BootstrapScript(token string) (string, error) {
 }
 
 func (s *Service) InstallScript(token, sourceIP string) (string, error) {
-	router, err := s.repo.FindByClaimToken(token)
-	if err != nil {
-		return "", errors.New("invalid claim token")
-	}
-	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
-		return "", errors.New("claim token expired")
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return "", errors.New("claim token is required")
 	}
 
+	// ConsumeClaimToken uses a row lock and marks this public installer URL as
+	// used. A second request for the same token must return ErrClaimTokenUsed,
+	// which the HTTP handler should map to 410 Gone.
+	if _, err := s.repo.ConsumeClaimToken(token); err != nil {
+		return "", err
+	}
+
+	// The consumed token remains available only to callbacks belonging to the
+	// RouterOS script that was just issued. ClaimConfig permits that in-progress
+	// provisioning state.
 	configScript, err := s.ClaimConfig(token, "", sourceIP)
 	if err != nil {
 		return "", err
@@ -70,18 +79,16 @@ func (s *Service) InstallScript(token, sourceIP string) (string, error) {
 
 	var builder strings.Builder
 	builder.WriteString("# NobliFi complete MikroTik install\n")
-	builder.WriteString("# Discovery, management tunnel when prepared, HotSpot, RADIUS, NAT, DHCP, captive portal, and install status.\n\n")
+	builder.WriteString("# Discovery, agent-managed WireGuard, HotSpot, RADIUS, NAT, DHCP, captive portal, and install status.\n\n")
 	builder.WriteString(`:put "NobliFi complete install starting"`)
 	builder.WriteString("\n\n")
 	builder.WriteString(renderBootstrapScript(token, s.cfg.ProvisioningBaseURL))
 	builder.WriteString("\n\n")
-	if shouldIncludeWireGuard(router, s.cfg) {
-		builder.WriteString(routers.RenderWireGuardRouterOS(router, s.cfg))
-		builder.WriteString("\n\n")
-	} else {
-		builder.WriteString(`:put "NobliFi WireGuard skipped: not enabled or not prepared for this router"`)
-		builder.WriteString("\n\n")
-	}
+
+	// Do not append routers.RenderWireGuardRouterOS here. The portprofiles
+	// renderer inside ClaimConfig performs the agent-aware WireGuard stage once:
+	// it reports the MikroTik public key, queues the VPS job, waits for the
+	// xneelo agent and reports the final tunnel status.
 	builder.WriteString(configScript)
 	builder.WriteString("\n")
 	builder.WriteString(renderStatusCommand(token, "installed", s.cfg.ProvisioningBaseURL))
@@ -149,36 +156,99 @@ func (s *Service) HotspotSupportFile(token, filename string) (string, error) {
 }
 
 func (s *Service) ClaimConfig(token, serial string, sourceIP string) (string, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return "", errors.New("claim token is required")
+	}
+
 	router, err := s.repo.FindByClaimToken(token)
 	if err != nil {
 		return "", errors.New("invalid claim token")
 	}
-	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
+	if router.ClaimTokenExpiresAt != nil &&
+		router.ClaimTokenExpiresAt.Before(time.Now()) &&
+		!canFetchConfigAfterClaimExpiry(router) {
 		return "", errors.New("claim token expired")
 	}
 	if serial != "" {
 		router.SerialNumber = &serial
 	}
+
 	now := time.Now()
 	router.LastSeenAt = &now
 	router.Status = "provisioning"
 	if err := s.repo.Save(&router); err != nil {
 		return "", err
 	}
+
 	assignments := make([]portprofiles.Assignment, 0, len(router.PortAssignments))
 	for _, assignment := range router.PortAssignments {
-		assignments = append(assignments, portprofiles.Assignment{InterfaceName: assignment.InterfaceName, Role: assignment.Role})
+		assignments = append(assignments, portprofiles.Assignment{
+			InterfaceName: assignment.InterfaceName,
+			Role:          assignment.Role,
+		})
 	}
 	if len(assignments) == 0 {
 		assignments = portprofiles.DefaultAssignments()
 	}
+
 	options := s.renderOptionsForRouter(router)
 	options.LoginPageURL = hotspotLoginURL(token, s.cfg.ProvisioningBaseURL)
 	options.HotspotSupportBaseURL = hotspotSupportURL(token, s.cfg.ProvisioningBaseURL)
+	options.ProvisioningBaseURL = normalizeProvisioningBaseURL(s.cfg.ProvisioningBaseURL)
+	options.ProvisioningClaimToken = token
+	s.applyWireGuardRenderOptions(&options, router)
+
 	if err := s.registerRadiusNAS(router, options, sourceIP); err != nil {
 		log.Printf("provisioning: radius NAS registration failed for router %s from %q: %v", router.ID, sourceIP, err)
 	}
 	return portprofiles.RenderRouterOSWithOptions(assignments, options)
+}
+
+func (s *Service) applyWireGuardRenderOptions(options *portprofiles.RenderOptions, router routers.Router) {
+	if options == nil {
+		return
+	}
+
+	enabled := shouldIncludeWireGuard(router, s.cfg)
+	options.WireGuardEnabled = enabled
+	options.WireGuardAgentManaged = enabled
+	options.WireGuardHandshakeWaitSeconds = 120
+	if !enabled {
+		return
+	}
+
+	// These are deployment-level public values. Never place the VPS private key
+	// or NOBLIFI_AGENT_TOKEN in generated RouterOS.
+	options.WireGuardEndpoint = strings.TrimSpace(os.Getenv("NOBLIFI_WIREGUARD_ENDPOINT"))
+	options.WireGuardPublicKey = strings.TrimSpace(os.Getenv("NOBLIFI_WIREGUARD_PUBLIC_KEY"))
+	options.WireGuardInterface = envOrDefault("NOBLIFI_ROUTER_WIREGUARD_INTERFACE", "noblifi-wg")
+	options.WireGuardServerIP = envOrDefault("NOBLIFI_WIREGUARD_SERVER_IP", "10.77.0.1")
+	options.WireGuardPort = envIntOrDefault("NOBLIFI_WIREGUARD_PORT", 51820)
+	options.WireGuardKeepalive = envIntOrDefault("NOBLIFI_WIREGUARD_KEEPALIVE", 25)
+
+	if router.WireGuardTunnelIP != nil {
+		options.WireGuardClientIP = strings.TrimSpace(*router.WireGuardTunnelIP)
+	}
+}
+
+func envOrDefault(name, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func envIntOrDefault(name string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 1 {
+		return fallback
+	}
+	return parsed
 }
 
 func (s *Service) registerRadiusNAS(router routers.Router, options portprofiles.RenderOptions, sourceIP string) error {
@@ -186,13 +256,15 @@ func (s *Service) registerRadiusNAS(router routers.Router, options portprofiles.
 		log.Printf("provisioning: radius NAS registration skipped for router %s: radius registrar is nil", router.ID)
 		return nil
 	}
+
 	nasName := firstForwardedIP(sourceIP)
 	if router.WireGuardTunnelIP != nil && strings.TrimSpace(*router.WireGuardTunnelIP) != "" {
-		nasName = strings.TrimSpace(*router.WireGuardTunnelIP)
+		nasName = hostOnly(strings.TrimSpace(*router.WireGuardTunnelIP))
 	}
 	if nasName == "" {
 		return nil
 	}
+
 	shortName := sanitizeNASName(options.RouterIdentity)
 	if shortName == "" {
 		shortName = sanitizeNASName(router.Name)
@@ -232,65 +304,85 @@ func (s *Service) WireGuardKey(input WireGuardKeyInput) (WireGuardKeyResponse, e
 	if token == "" {
 		return WireGuardKeyResponse{}, errors.New("claim token is required")
 	}
-	if err := routers.ValidateWireGuardPublicKey(input.PublicKey); err != nil {
+
+	publicKey := strings.TrimSpace(input.PublicKey)
+	if err := routers.ValidateWireGuardPublicKey(publicKey); err != nil {
 		return WireGuardKeyResponse{}, err
 	}
+
 	router, err := s.repo.FindByClaimToken(token)
 	if err != nil {
 		return WireGuardKeyResponse{}, errors.New("invalid claim token")
 	}
-	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
-		address, allocErr := routers.AllocateWireGuardIP(s.repo, s.cfg)
-		if allocErr != nil {
-			return WireGuardKeyResponse{}, allocErr
-		}
-		router.WireGuardTunnelIP = &address
-	}
-	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
+	if router.ClaimTokenExpiresAt != nil &&
+		router.ClaimTokenExpiresAt.Before(time.Now()) &&
+		!canFetchConfigAfterClaimExpiry(router) {
 		return WireGuardKeyResponse{}, errors.New("claim token expired")
 	}
-	publicKey := strings.TrimSpace(input.PublicKey)
-	now := time.Now()
+	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
+		return WireGuardKeyResponse{}, errors.New("WireGuard has not been prepared for this router")
+	}
+	if s.wg == nil {
+		return WireGuardKeyResponse{}, errors.New("WireGuard job service is unavailable")
+	}
+
+	now := time.Now().UTC()
+	tunnelIP := strings.TrimSpace(*router.WireGuardTunnelIP)
 	if strings.TrimSpace(input.SerialNumber) != "" {
-		router.SerialNumber = &input.SerialNumber
+		serial := strings.TrimSpace(input.SerialNumber)
+		router.SerialNumber = &serial
 	}
 	router.WireGuardPublicKey = &publicKey
-	router.WireGuardStatus = "peer_queued"
+	router.WireGuardStatus = "awaiting_vps_peer"
 	router.WireGuardPeerStatus = "peer_queued"
 	router.WireGuardLastSeenAt = &now
 	router.WireGuardPeerUpdatedAt = &now
+	router.WireGuardLastError = nil
 	router.ManagementIP = router.WireGuardTunnelIP
 	if err := s.repo.Save(&router); err != nil {
 		return WireGuardKeyResponse{}, err
 	}
-	if s.wg != nil {
-		if _, err := s.wg.QueuePeerUpsert(router); err != nil {
-			msg := err.Error()
-			router.WireGuardLastError = &msg
-			router.WireGuardPeerStatus = "failed"
-			_ = s.repo.Save(&router)
-			return WireGuardKeyResponse{}, err
-		}
+
+	// QueuePeerUpsert must be idempotent in the existing wire_guard_jobs table.
+	// Re-reporting the same key/IP should reuse active work; changed desired state
+	// should supersede stale pending work for this router.
+	if _, err := s.wg.QueuePeerUpsert(router); err != nil {
+		message := err.Error()
+		router.WireGuardStatus = "failed"
+		router.WireGuardPeerStatus = "failed"
+		router.WireGuardLastError = &message
+		_ = s.repo.Save(&router)
+		return WireGuardKeyResponse{}, fmt.Errorf("queue WireGuard peer job: %w", err)
 	}
+
+	router.WireGuardStatus = "peer_queued"
+	router.WireGuardPeerStatus = "peer_queued"
+	if err := s.repo.Save(&router); err != nil {
+		return WireGuardKeyResponse{}, err
+	}
+
 	options := s.renderOptionsForRouter(router)
 	if err := s.registerRadiusNAS(router, options, ""); err != nil {
 		log.Printf("provisioning: radius NAS upsert failed for router %s: %v", router.ID, err)
 	}
+
 	payload, _ := json.Marshal(map[string]string{
 		"public_key": publicKey,
-		"tunnel_ip":  strings.TrimSpace(*router.WireGuardTunnelIP),
+		"tunnel_ip":  tunnelIP,
+		"job_status": router.WireGuardPeerStatus,
 	})
 	if err := s.repo.CreateConfigLog(&routers.RouterConfigLog{
 		RouterID:        router.ID,
-		Action:          "wireguard_key_reported",
+		Action:          "wireguard_peer_queued",
 		Status:          router.WireGuardStatus,
 		ResponsePayload: payload,
 	}); err != nil {
 		return WireGuardKeyResponse{}, err
 	}
+
 	return WireGuardKeyResponse{
 		Status:       router.WireGuardPeerStatus,
-		ClientIP:     strings.TrimSpace(*router.WireGuardTunnelIP),
+		ClientIP:     tunnelIP,
 		RadiusServer: s.cfg.WireGuardServerIP,
 	}, nil
 }
@@ -307,22 +399,33 @@ func (s *Service) WireGuardStatus(input WireGuardStatusInput) error {
 	if status != "connected" && status != "failed" {
 		return errors.New("WireGuard status must be connected or failed")
 	}
+
 	router, err := s.repo.FindByClaimToken(token)
 	if err != nil {
 		return errors.New("invalid claim token")
 	}
+	if router.ClaimTokenExpiresAt != nil &&
+		router.ClaimTokenExpiresAt.Before(time.Now()) &&
+		!canFetchConfigAfterClaimExpiry(router) {
+		return errors.New("claim token expired")
+	}
 	if router.WireGuardTunnelIP == nil || router.WireGuardPublicKey == nil {
 		return errors.New("WireGuard setup is incomplete for this router")
 	}
-	now := time.Now()
+
+	now := time.Now().UTC()
 	router.WireGuardStatus = status
+	router.WireGuardPeerStatus = status
 	router.WireGuardLastSeenAt = &now
+	router.WireGuardPeerUpdatedAt = &now
 	if status == "connected" {
 		router.ManagementIP = router.WireGuardTunnelIP
+		router.WireGuardLastError = nil
 	}
 	if err := s.repo.Save(&router); err != nil {
 		return err
 	}
+
 	payload, _ := json.Marshal(map[string]string{
 		"status":    status,
 		"tunnel_ip": strings.TrimSpace(*router.WireGuardTunnelIP),
@@ -333,6 +436,14 @@ func (s *Service) WireGuardStatus(input WireGuardStatusInput) error {
 		Status:          status,
 		ResponsePayload: payload,
 	})
+}
+
+func hostOnly(value string) string {
+	value = strings.TrimSpace(value)
+	if slash := strings.Index(value, "/"); slash >= 0 {
+		return strings.TrimSpace(value[:slash])
+	}
+	return value
 }
 
 func firstForwardedIP(value string) string {
@@ -583,31 +694,25 @@ func (s *Service) Status(token, serial, status string) error {
 
 func renderBootstrapScript(token, baseURL string) string {
 	baseURL = normalizeProvisioningBaseURL(baseURL)
-	fetchMode := provisioningFetchMode(baseURL)
 
+	// Send one JSON check-in containing all interfaces. This avoids the fragile
+	// per-interface GET loop and its RouterOS 401/WWW-Authenticate failure mode.
 	return fmt.Sprintf(`:global claimToken "%s"
 :global baseUrl "%s"
 
 /system identity set name=("noblifi-pending-" . $claimToken)
 
-:global serial [/system routerboard get serial-number]
-:global model [/system routerboard get model]
-:global versionRaw [/system resource get version]
-:global version $versionRaw
-:global spacePos [:find $versionRaw " "]
+:local serial [/system routerboard get serial-number]
+:local model [/system routerboard get model]
+:local versionRaw [/system resource get version]
+:local version $versionRaw
+:local spacePos [:find $versionRaw " "]
 :if ($spacePos != nil) do={ :set version [:pick $versionRaw 0 $spacePos] }
 
 :put ("RAW VERSION: " . $versionRaw)
 :put ("PARSED VERSION: " . $version)
 
-:global checkInUrl ($baseUrl . "/check-in?token=" . $claimToken . "&serial=" . $serial . "&model=" . $model . "&routeros_version=" . $version)
-:global statusUrl ($baseUrl . "/status?token=" . $claimToken . "&serial=" . $serial . "&status=linked")
-
-:put ("NobliFi check-in URL: " . $checkInUrl)
-:put ("NobliFi status URL: " . $statusUrl)
-
-/tool fetch url=$checkInUrl mode=%s keep-result=no
-
+:local ifaceJson ""
 :foreach iface in=[/interface find] do={
   :local name [/interface get $iface name]
   :local type [/interface get $iface type]
@@ -615,16 +720,25 @@ func renderBootstrapScript(token, baseURL string) string {
   :do { :set mac [/interface get $iface mac-address] } on-error={ :set mac "" }
   :local running [/interface get $iface running]
   :local disabled [/interface get $iface disabled]
-  :local ifaceUrl ($baseUrl . "/interface?token=" . $claimToken . "&name=" . $name . "&type=" . $type . "&mac_address=" . $mac . "&running=" . $running . "&disabled=" . $disabled)
-  :put ("NobliFi interface URL: " . $ifaceUrl)
-  :do {
-    /tool fetch url=$ifaceUrl mode=%s keep-result=no
-  } on-error={ :put ("NobliFi WARNING: interface check-in failed for " . $name) }
+  :if ([:len $ifaceJson] > 0) do={ :set ifaceJson ($ifaceJson . ",") }
+  :set ifaceJson ($ifaceJson . "{\"name\":\"" . $name . "\",\"type\":\"" . $type . "\",\"mac_address\":\"" . $mac . "\",\"running\":" . $running . ",\"disabled\":" . $disabled . "}")
 }
 
-/tool fetch url=$statusUrl mode=%s keep-result=no
+:local payload ("{\"claim_token\":\"" . $claimToken . "\",\"serial_number\":\"" . $serial . "\",\"model\":\"" . $model . "\",\"routeros_version\":\"" . $version . "\",\"interfaces\":[" . $ifaceJson . "]}")
+:local checkInURL ($baseUrl . "/check-in")
+:local statusURL ($baseUrl . "/status?token=" . $claimToken . "&serial=" . $serial . "&status=linked")
 
-:put "NobliFi router linked. Return to the dashboard and choose automatic or manual setup."`, token, baseURL, fetchMode, fetchMode, fetchMode)
+:put ("NobliFi check-in URL: " . $checkInURL)
+:local checkInResult [/tool fetch url=$checkInURL http-method=post http-header-field="Content-Type: application/json" http-data=$payload output=user as-value idle-timeout=30s duration=1m]
+:if (($checkInResult->"status") != "finished") do={ :error "NobliFi router check-in failed" }
+
+:do {
+  /tool fetch url=$statusURL keep-result=no idle-timeout=30s duration=1m
+} on-error={
+  :put "NobliFi WARNING: failed to report linked status; continuing installation"
+}
+
+:put "NobliFi router linked; continuing complete installation"`, token, baseURL)
 }
 
 func shouldIncludeWireGuard(router routers.Router, cfg config.Config) bool {
@@ -638,7 +752,12 @@ func renderStatusCommand(token, status, baseURL string) string {
 	baseURL = normalizeProvisioningBaseURL(baseURL)
 	fetchMode := provisioningFetchMode(baseURL)
 	statusURL := baseURL + "/status?token=" + token + "&status=" + status
-	return fmt.Sprintf(`/tool fetch url="%s" mode=%s keep-result=no`, statusURL, fetchMode)
+	return fmt.Sprintf(
+		`:do { /tool fetch url="%s" mode=%s keep-result=no } on-error={ :put "NobliFi WARNING: failed to report status %s; configuration remains installed" }`,
+		statusURL,
+		fetchMode,
+		status,
+	)
 }
 
 func hotspotLoginURL(token, baseURL string) string {
