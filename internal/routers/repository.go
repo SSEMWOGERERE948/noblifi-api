@@ -2,12 +2,15 @@ package routers
 
 import (
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrNotFound = errors.New("router not found")
+var ErrClaimTokenUsed = errors.New("claim token already used")
 
 type Repository struct {
 	db *gorm.DB
@@ -39,6 +42,38 @@ func (r *Repository) Find(id uuid.UUID) (Router, error) {
 func (r *Repository) FindByClaimToken(token string) (Router, error) {
 	var router Router
 	err := r.db.Preload("PortAssignments").Preload("SetupSession").Preload("NetworkProfile").First(&router, "claim_token = ?", token).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return router, ErrNotFound
+	}
+	return router, err
+}
+
+func (r *Repository) ConsumeClaimToken(token string) (Router, error) {
+	var router Router
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Preload("PortAssignments").
+			Preload("SetupSession").
+			Preload("NetworkProfile").
+			First(&router, "claim_token = ?", token).Error; err != nil {
+			return err
+		}
+
+		switch router.ProvisioningStatus {
+		case "install_script_issued", "provisioning", "installed":
+			return ErrClaimTokenUsed
+		}
+		switch router.Status {
+		case "provisioning", "provisioned":
+			return ErrClaimTokenUsed
+		}
+
+		now := time.Now().UTC()
+		router.LastSeenAt = &now
+		router.Status = "provisioning"
+		router.ProvisioningStatus = "install_script_issued"
+		return tx.Save(&router).Error
+	})
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return router, ErrNotFound
 	}
