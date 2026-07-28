@@ -499,7 +499,7 @@ func (s *Service) InterfaceCheckIn(input InterfaceCheckInInput) error {
 	if err != nil {
 		return errors.New("invalid claim token")
 	}
-	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) {
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
 		return errors.New("claim token expired")
 	}
 	now := time.Now()
@@ -617,7 +617,9 @@ func renderBootstrapScript(token, baseURL string) string {
   :local disabled [/interface get $iface disabled]
   :local ifaceUrl ($baseUrl . "/interface?token=" . $claimToken . "&name=" . $name . "&type=" . $type . "&mac_address=" . $mac . "&running=" . $running . "&disabled=" . $disabled)
   :put ("NobliFi interface URL: " . $ifaceUrl)
-  /tool fetch url=$ifaceUrl mode=%s keep-result=no
+  :do {
+    /tool fetch url=$ifaceUrl mode=%s keep-result=no
+  } on-error={ :put ("NobliFi WARNING: interface check-in failed for " . $name) }
 }
 
 /tool fetch url=$statusUrl mode=%s keep-result=no
