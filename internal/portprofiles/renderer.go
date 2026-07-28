@@ -764,7 +764,7 @@ func writeWireGuardManagement(builder *strings.Builder, options RenderOptions) {
 	)
 	writeCritical(
 		builder,
-		fmt.Sprintf(`/ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s" place-before=0 comment="NobliFi WireGuard management input"`, escape(iface), escape(serverCIDR)),
+		fmt.Sprintf(`:local noblifiInputRules [/ip firewall filter find where chain=input]; :if ([:len $noblifiInputRules] = 0) do={ /ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s" comment="NobliFi WireGuard management input" } else={ :local noblifiFirstInputRule [:pick $noblifiInputRules 0]; /ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s" place-before=$noblifiFirstInputRule comment="NobliFi WireGuard management input" }`, escape(iface), escape(serverCIDR), escape(iface), escape(serverCIDR)),
 		"allow VPS management traffic over WireGuard",
 	)
 	writeCritical(
