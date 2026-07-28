@@ -184,6 +184,11 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	writeSafe(&builder, `/ip hotspot remove [find where name="noblifi-hotspot"]`, "cleanup hotspot server")
 	writeSafe(&builder, `/ip hotspot user profile remove [find where name="noblifi-voucher-profile"]`, "cleanup hotspot user profile")
 	writeSafe(&builder, `/ip hotspot walled-garden remove [find where comment="NobliFi captive portal"]`, "cleanup captive portal walled garden")
+	// Remove stale refresh jobs unconditionally. They may contain an expired
+	// claim-token URL from an older router record. A current refresh job is
+	// recreated later only when LoginPageURL is valid.
+	writeSafe(&builder, `/system scheduler remove [find where name="noblifi-hotspot-login-refresh"]`, "cleanup stale hotspot login refresh scheduler")
+	writeSafe(&builder, `/system script remove [find where name="noblifi-hotspot-login-refresh-script"]`, "cleanup stale hotspot login refresh script")
 
 	// IMPORTANT: never delete the currently working NobliFi login/index files
 	// during cleanup. Portal replacement is transactional later: a fresh page
@@ -612,6 +617,7 @@ func writeWireGuardManagement(builder *strings.Builder, options RenderOptions) {
 
 	builder.WriteString("# NobliFi WireGuard management tunnel\n")
 
+	// Preserve the interface itself so RouterOS keeps the generated private key.
 	writeCritical(
 		builder,
 		fmt.Sprintf(
@@ -620,18 +626,23 @@ func writeWireGuardManagement(builder *strings.Builder, options RenderOptions) {
 		),
 		"ensure WireGuard interface",
 	)
+	writeCritical(
+		builder,
+		fmt.Sprintf(`/interface wireguard set [find where name="%s"] disabled=no comment="NobliFi management tunnel"`, escape(iface)),
+		"enable WireGuard interface",
+	)
 
+	// Keep exactly one NobliFi-owned tunnel address and explicitly enable it.
 	writeCritical(
 		builder,
 		fmt.Sprintf(
-			`:if ([:len [/ip address find where interface="%s" address="%s"]] = 0) do={ /ip address remove [find where interface="%s" comment="NobliFi WireGuard address"]; /ip address add address="%s" interface="%s" comment="NobliFi WireGuard address" }`,
-			escape(iface), escape(clientCIDR), escape(iface), escape(clientCIDR), escape(iface),
+			`:if ([:len [/ip address find where interface="%s" address="%s"]] = 0) do={ /ip address remove [find where interface="%s" comment="NobliFi WireGuard address"]; /ip address add address="%s" interface="%s" disabled=no comment="NobliFi WireGuard address" } else={ /ip address set [find where interface="%s" address="%s"] disabled=no comment="NobliFi WireGuard address" }`,
+			escape(iface), escape(clientCIDR), escape(iface), escape(clientCIDR), escape(iface), escape(iface), escape(clientCIDR),
 		),
 		"ensure WireGuard client address",
 	)
 
-	// Recreate only the VPS peer, never the WireGuard interface itself. This
-	// updates endpoint/public-key settings without regenerating the router keypair.
+	// Recreate only the VPS peer. The local interface/private key is preserved.
 	writeSafe(
 		builder,
 		fmt.Sprintf(`/interface wireguard peers remove [find where interface="%s" comment="NobliFi VPS"]`, escape(iface)),
@@ -640,25 +651,53 @@ func writeWireGuardManagement(builder *strings.Builder, options RenderOptions) {
 	writeCritical(
 		builder,
 		fmt.Sprintf(
-			`/interface wireguard peers add interface="%s" public-key="%s" endpoint-address="%s" endpoint-port=%d allowed-address="%s" persistent-keepalive=%ds comment="NobliFi VPS"`,
+			`/interface wireguard peers add interface="%s" public-key="%s" endpoint-address="%s" endpoint-port=%d allowed-address="%s" persistent-keepalive=%ds disabled=no comment="NobliFi VPS"`,
 			escape(iface), escape(options.WireGuardPublicKey), escape(options.WireGuardEndpoint), options.WireGuardPort, escape(serverCIDR), options.WireGuardKeepalive,
 		),
 		"add WireGuard VPS peer",
 	)
 
-	// allowed-address decides which decrypted addresses belong to the peer, but
-	// the router still needs an explicit IP route for the management server.
-	writeSafe(builder, `/ip route remove [find where comment="NobliFi VPS WireGuard"]`, "cleanup WireGuard VPS route")
+	// Verify that provisioning did not leave an old/stale VPS public key.
 	writeCritical(
 		builder,
-		fmt.Sprintf(`/ip route add dst-address="%s" gateway="%s" distance=1 comment="NobliFi VPS WireGuard"`, escape(serverCIDR), escape(iface)),
+		fmt.Sprintf(
+			`:local configuredWGServerKey [/interface wireguard peers get [find where interface="%s" comment="NobliFi VPS"] public-key]; :if ($configuredWGServerKey != "%s") do={ :error "WireGuard VPS public key mismatch" }`,
+			escape(iface), escape(options.WireGuardPublicKey),
+		),
+		"verify WireGuard VPS public key",
+	)
+
+	// Allowed-address selects the peer, but RouterOS still requires an explicit
+	// IP route. Remove stale/duplicate NobliFi routes and recreate the host route.
+	writeSafe(builder, `/ip route remove [find where comment="NobliFi VPS WireGuard"]`, "cleanup WireGuard VPS route")
+	writeSafe(
+		builder,
+		fmt.Sprintf(`/ip route remove [find where dst-address="%s" gateway="%s"]`, escape(serverCIDR), escape(iface)),
+		"cleanup duplicate WireGuard VPS route",
+	)
+	writeCritical(
+		builder,
+		fmt.Sprintf(`/ip route add dst-address="%s" gateway="%s" distance=1 disabled=no comment="NobliFi VPS WireGuard"`, escape(serverCIDR), escape(iface)),
 		"add WireGuard VPS route",
 	)
 
+	// The management tunnel is trusted LAN, but also add an explicit narrow
+	// input rule so strict/default firewall rules cannot block ping, API, API-SSL
+	// or other router-management traffic from the single VPS tunnel address.
+	writeCritical(
+		builder,
+		fmt.Sprintf(`:if ([:len [/interface list member find where list="LAN" interface="%s"]] = 0) do={ /interface list member add list=LAN interface="%s" comment="NobliFi WireGuard LAN" }`, escape(iface), escape(iface)),
+		"add WireGuard interface to LAN list",
+	)
 	writeSafe(
 		builder,
-		fmt.Sprintf(`:if ([:len [/interface list member find where list=LAN interface="%s"]] = 0) do={ /interface list member add list=LAN interface="%s" comment="NobliFi WireGuard LAN" }`, escape(iface), escape(iface)),
-		"add WireGuard interface to LAN list",
+		`/ip firewall filter remove [find where comment="NobliFi WireGuard management input"]`,
+		"cleanup WireGuard management firewall rule",
+	)
+	writeCritical(
+		builder,
+		fmt.Sprintf(`/ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s" place-before=0 comment="NobliFi WireGuard management input"`, escape(iface), escape(serverCIDR)),
+		"allow VPS management traffic over WireGuard",
 	)
 
 	writeCritical(
@@ -666,6 +705,24 @@ func writeWireGuardManagement(builder *strings.Builder, options RenderOptions) {
 		fmt.Sprintf(`:if ([:len [/ip route find where dst-address="%s" gateway="%s" active=yes]] = 0) do={ :error "NobliFi WireGuard route is not active" }`, escape(serverCIDR), escape(iface)),
 		"verify WireGuard VPS route",
 	)
+
+	// Give the backend/VPS peer-registration workflow time to replace any stale
+	// server-side peer. A handshake failure is warned rather than made fatal:
+	// the MikroTik renderer cannot itself execute "wg set" on the xneelo VPS.
+	builder.WriteString(`:local noblifiWGPeer [/interface wireguard peers find where interface="` + escape(iface) + `" comment="NobliFi VPS"]` + "\n")
+	builder.WriteString(`:local noblifiWGHandshake false` + "\n")
+	builder.WriteString(`:for i from=1 to=45 do={` + "\n")
+	builder.WriteString(`  :if ([:len $noblifiWGPeer] > 0) do={` + "\n")
+	builder.WriteString(`    :local noblifiWGRx [/interface wireguard peers get [:pick $noblifiWGPeer 0] rx]` + "\n")
+	builder.WriteString(`    :if ($noblifiWGRx > 0) do={ :set noblifiWGHandshake true }` + "\n")
+	builder.WriteString(`  }` + "\n")
+	builder.WriteString(`  :if ($noblifiWGHandshake) do={ :set i 45 } else={ :delay 1s }` + "\n")
+	builder.WriteString(`}` + "\n")
+	builder.WriteString(`:if ($noblifiWGHandshake) do={ :put "NobliFi WireGuard handshake detected" } else={ :put "NobliFi WARNING: no WireGuard handshake yet; verify the xneelo peer public key and AllowedIPs" }` + "\n")
+
+	// Test tunneled IP reachability with the exact source/interface used by RADIUS.
+	// ICMP may be blocked by a server firewall, therefore this is diagnostic only.
+	builder.WriteString(fmt.Sprintf(`:do { :local wgReplies [/tool ping address="%s" src-address="%s" interface="%s" count=3 interval=500ms]; :if ($wgReplies = 0) do={ :put "NobliFi WARNING: WireGuard handshake may exist, but the VPS tunnel IP did not answer ping" } else={ :put ("NobliFi WireGuard tunnel ping replies=" . $wgReplies) } } on-error={ :put "NobliFi WARNING: WireGuard tunnel ping test failed" }`, escape(options.WireGuardServerIP), escape(options.WireGuardClientIP), escape(iface)) + "\n")
 
 	builder.WriteString(fmt.Sprintf(`:local noblifiWGPublicKey [/interface wireguard get [find where name="%s"] public-key]`, escape(iface)) + "\n")
 	builder.WriteString(fmt.Sprintf(`:put ("NobliFi WireGuard ready: client=%s server=%s public-key=" . $noblifiWGPublicKey)`, escape(options.WireGuardClientIP), escape(options.WireGuardServerIP)) + "\n")
@@ -756,6 +813,16 @@ func writeHotspotPortalRefreshScript(builder *strings.Builder, options RenderOpt
 	)
 }
 
+func writeHotspotRestart(builder *strings.Builder) {
+	builder.WriteString("# Reload HotSpot after profile and portal changes\n")
+	writeSafe(builder, `/ip hotspot active remove [find]`, "clear active hotspot sessions")
+	writeSafe(builder, `/ip hotspot cookie remove [find]`, "clear hotspot cookies")
+	writeSafe(builder, `/ip hotspot disable [find where name="noblifi-hotspot"]`, "disable hotspot before reload")
+	builder.WriteString(`:delay 2s` + "\n")
+	writeCritical(builder, `/ip hotspot enable [find where name="noblifi-hotspot"]`, "enable hotspot after reload")
+	builder.WriteString("\n")
+}
+
 func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotspotGateway string) {
 	hotspotDNSName := normalizeHotspotDNSName(options.HotspotDNSName)
 	loginPageURL := strings.TrimSpace(options.LoginPageURL)
@@ -798,7 +865,9 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		builder.WriteString(`:local existingCustomLogin ($hotspotHtmlPath . "/login.html")` + "\n")
 		builder.WriteString(`:local existingCustomRLogin ($hotspotHtmlPath . "/rlogin.html")` + "\n")
 		builder.WriteString(`:local existingCustomRedirect ($hotspotHtmlPath . "/redirect.html")` + "\n")
-		builder.WriteString(`:if (([:len [/file find where name=$existingCustomLogin]] > 0) && (([:len [/file find where name=$existingCustomRLogin]] > 0) || ([:len [/file find where name=$existingCustomRedirect]] > 0))) do={` + "\n")
+		builder.WriteString(`:local existingCustomLoginReady false` + "\n")
+		builder.WriteString(`:if ([:len [/file find where name=$existingCustomLogin]] > 0) do={ :local existingCustomLoginSize [/file get [find where name=$existingCustomLogin] size]; :if ($existingCustomLoginSize > 0) do={ :set existingCustomLoginReady true } }` + "\n")
+		builder.WriteString(`:if (($existingCustomLoginReady) && (([:len [/file find where name=$existingCustomRLogin]] > 0) || ([:len [/file find where name=$existingCustomRedirect]] > 0))) do={` + "\n")
 		builder.WriteString(`  /ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=$hotspotHtmlDir html-directory-override=""` + "\n")
 		builder.WriteString(`  :put ("NobliFi: preserved existing custom HotSpot portal at " . $hotspotHtmlDir)` + "\n")
 		builder.WriteString(`} else={` + "\n")
@@ -924,7 +993,8 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		builder.WriteString(`:local hotspotRedirectFile ($hotspotHtmlPath . "/redirect.html")` + "\n")
 		builder.WriteString(`:local customPortalReady false` + "\n")
 		builder.WriteString(`:if ([:len [/file find where name=$hotspotLoginFile]] > 0) do={` + "\n")
-		builder.WriteString(`  :if (([:len [/file find where name=$hotspotRLoginFile]] > 0) || ([:len [/file find where name=$hotspotRedirectFile]] > 0)) do={ :set customPortalReady true }` + "\n")
+		builder.WriteString(`  :local hotspotLoginSize [/file get [find where name=$hotspotLoginFile] size]` + "\n")
+		builder.WriteString(`  :if (($hotspotLoginSize > 0) && (([:len [/file find where name=$hotspotRLoginFile]] > 0) || ([:len [/file find where name=$hotspotRedirectFile]] > 0))) do={ :set customPortalReady true }` + "\n")
 		builder.WriteString(`}` + "\n")
 		builder.WriteString(`:if ($customPortalReady) do={` + "\n")
 		builder.WriteString(`  /ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=$hotspotHtmlDir html-directory-override=""` + "\n")
@@ -943,6 +1013,10 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		writeHotspotPortalRefreshScript(builder, options)
 	}
 
+	// Apply the selected HTML directory immediately and force clients to request
+	// a fresh captive-portal session instead of retaining a stale 404/cookie.
+	writeHotspotRestart(builder)
+
 	// 11. Final verification.
 	writeCritical(
 		builder,
@@ -956,6 +1030,16 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 			builder,
 			fmt.Sprintf(`:if ([:len [/ip route find where dst-address="%s" gateway="%s" active=yes]] = 0) do={ :error "NobliFi WireGuard route is missing or inactive" }`, escape(serverCIDR), escape(options.WireGuardInterface)),
 			"final WireGuard route verification",
+		)
+		writeCritical(
+			builder,
+			fmt.Sprintf(`:if ([:len [/interface wireguard peers find where interface="%s" comment="NobliFi VPS" disabled=no]] = 0) do={ :error "NobliFi WireGuard VPS peer is missing or disabled" }`, escape(options.WireGuardInterface)),
+			"final WireGuard peer verification",
+		)
+		writeCritical(
+			builder,
+			`:if ([:len [/ip firewall filter find where comment="NobliFi WireGuard management input" disabled=no]] = 0) do={ :error "NobliFi WireGuard management firewall rule is missing" }`,
+			"final WireGuard firewall verification",
 		)
 	}
 
@@ -991,7 +1075,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	// will actually use, not merely the directory we intended to use.
 	writeCritical(
 		builder,
-		`:local finalHtmlDir [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] html-directory]; :local finalLoginFile ($finalHtmlDir . "/login.html"); :if ([:len [/file find where name=$finalLoginFile]] = 0) do={ :error ("HotSpot login.html missing from active HTML directory: " . $finalHtmlDir) }`,
+		`:local finalHtmlDir [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] html-directory]; :local finalLoginFile ($finalHtmlDir . "/login.html"); :if ([:len [/file find where name=$finalLoginFile]] = 0) do={ :error ("HotSpot login.html missing from active HTML directory: " . $finalHtmlDir) }; :local finalLoginSize [/file get [find where name=$finalLoginFile] size]; :if ($finalLoginSize = 0) do={ :error ("HotSpot login.html is empty in active HTML directory: " . $finalHtmlDir) }`,
 		"verify active hotspot login file",
 	)
 
@@ -1050,16 +1134,11 @@ func writeBridge(builder *strings.Builder, bridge string, interfaces []string, a
 }
 
 func defaultWalledGardenHosts() []string {
+	// Do not whitelist captive-portal detection endpoints such as
+	// captive.apple.com, connectivitycheck.gstatic.com or msftconnecttest.com.
+	// If those probes bypass authentication, phones/computers may conclude that
+	// Internet access is already available and never open the login assistant.
 	return []string{
-		"captive.apple.com",
-		"connectivitycheck.gstatic.com",
-		"connectivitycheck.android.com",
-		"clients3.google.com",
-		"dns.msftncsi.com",
-		"ipv6.msftncsi.com",
-		"www.msftconnecttest.com",
-		"msftconnecttest.com",
-		"www.gstatic.com",
 		"noblifi-frontend.vercel.app",
 		"noblifi.ew.r.appspot.com",
 		"noblifi.uc.r.appspot.com",
