@@ -17,6 +17,8 @@ import (
 
 var ErrUnauthorized = errors.New("agent unauthorized")
 
+const operationConfigureRouter = "configure_router"
+
 type Service struct {
 	db  *gorm.DB
 	cfg config.Config
@@ -48,7 +50,25 @@ func (s *Service) QueuePeerUpsert(router routers.Router) (WireGuardJob, error) {
 	if router.WireGuardPublicKey == nil || strings.TrimSpace(*router.WireGuardPublicKey) == "" {
 		return WireGuardJob{}, errors.New("router WireGuard public key is required")
 	}
-	return s.QueueJob(router.ID, OperationUpsertPeer, strings.TrimSpace(*router.WireGuardPublicKey), strings.TrimSpace(*router.WireGuardTunnelIP)+"/32")
+	return s.QueueJob(
+		router.ID,
+		OperationUpsertPeer,
+		strings.TrimSpace(*router.WireGuardPublicKey),
+		strings.TrimSpace(*router.WireGuardTunnelIP)+"/32",
+	)
+}
+
+// QueueRouterConfigure queues the second provisioning stage. The job intentionally
+// carries no RADIUS secret, RouterOS password, or complete script. The agent fetches
+// the desired configuration from an authenticated internal endpoint after claiming it.
+func (s *Service) QueueRouterConfigure(router routers.Router, _ string) (WireGuardJob, error) {
+	if router.ID == uuid.Nil {
+		return WireGuardJob{}, errors.New("router ID is required")
+	}
+	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
+		return WireGuardJob{}, errors.New("router WireGuard client IP is required")
+	}
+	return s.QueueJob(router.ID, operationConfigureRouter, "", "")
 }
 
 func (s *Service) QueuePeerRemoval(router routers.Router) (WireGuardJob, error) {
@@ -71,7 +91,12 @@ func (s *Service) QueueJob(routerID uuid.UUID, operation, publicKey, allowedIP s
 	var job WireGuardJob
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("router_id = ? AND operation = ? AND status IN ?", routerID, operation, []string{StatusQueued, StatusClaimed, StatusApplying, StatusRetrying}).
+			Where(
+				"router_id = ? AND operation = ? AND status IN ?",
+				routerID,
+				operation,
+				[]string{StatusQueued, StatusClaimed, StatusApplying, StatusRetrying},
+			).
 			Order("created_at desc").
 			First(&job).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -95,6 +120,7 @@ func (s *Service) QueueJob(routerID uuid.UUID, operation, publicKey, allowedIP s
 		job.LastError = ""
 		job.LockedBy = ""
 		job.LockedAt = nil
+		job.CompletedAt = nil
 		job.AvailableAt = now
 		return tx.Save(&job).Error
 	})
@@ -110,7 +136,8 @@ func (s *Service) ClaimJob(agentID string, lease time.Duration) (WireGuardJob, b
 	var job WireGuardJob
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("(status IN ? AND available_at <= ?) OR (status IN ? AND locked_at < ?)",
+			Where(
+				"(status IN ? AND available_at <= ?) OR (status IN ? AND locked_at < ?)",
 				[]string{StatusQueued, StatusRetrying}, now,
 				[]string{StatusClaimed, StatusApplying}, expiredBefore,
 			).
@@ -148,7 +175,23 @@ func (s *Service) CompleteJob(jobID uuid.UUID, agentID string) error {
 	}); err != nil {
 		return err
 	}
-	return s.applyRouterJobStatus(completed, "")
+
+	if err := s.applyRouterJobStatus(completed, ""); err != nil {
+		return err
+	}
+
+	// A successful peer installation makes the management tunnel available.
+	// Queue the complete RouterOS/HotSpot/RADIUS stage only after that succeeds.
+	if completed.Operation == OperationUpsertPeer {
+		var router routers.Router
+		if err := s.db.Preload("PortAssignments").First(&router, "id = ?", completed.RouterID).Error; err != nil {
+			return fmt.Errorf("load router after peer completion: %w", err)
+		}
+		if _, err := s.QueueRouterConfigure(router, ""); err != nil {
+			return fmt.Errorf("queue configure_router job: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) FailJob(jobID uuid.UUID, agentID, message string) error {
@@ -156,7 +199,7 @@ func (s *Service) FailJob(jobID uuid.UUID, agentID, message string) error {
 	var failed WireGuardJob
 	safeMessage := safeError(message)
 	if err := s.updateClaimedJob(jobID, agentID, func(job *WireGuardJob) {
-		job.LastError = safeError(message)
+		job.LastError = safeMessage
 		if job.AttemptCount >= job.MaxAttempts {
 			job.Status = StatusFailed
 			job.CompletedAt = &now
@@ -184,7 +227,7 @@ func (s *Service) updateClaimedJob(jobID uuid.UUID, agentID string, apply func(*
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&job, "id = ?", jobID).Error; err != nil {
 			return err
 		}
-		if job.LockedBy != agentID {
+		if job.LockedBy != strings.TrimSpace(agentID) {
 			return fmt.Errorf("job is not leased to this agent")
 		}
 		apply(&job)
@@ -221,10 +264,23 @@ func (s *Service) applyRouterJobStatus(job WireGuardJob, message string) error {
 			updates["wire_guard_peer_updated_at"] = now
 			updates["wire_guard_last_error"] = nil
 			updates["provisioning_status"] = "wireguard_peer_ready"
+			updates["provisioning_error"] = nil
 		} else if job.Status == StatusFailed {
 			updates["wire_guard_status"] = "failed"
 			updates["wire_guard_peer_status"] = "failed"
 			updates["wire_guard_last_error"] = message
+			updates["provisioning_status"] = "peer_failed"
+			updates["provisioning_error"] = message
+		}
+	case operationConfigureRouter:
+		if job.Status == StatusSucceeded {
+			updates["status"] = "online"
+			updates["provisioning_status"] = "installed"
+			updates["provisioning_error"] = nil
+			updates["wire_guard_last_error"] = nil
+			updates["last_seen_at"] = now
+		} else if job.Status == StatusFailed {
+			updates["provisioning_status"] = "router_config_failed"
 			updates["provisioning_error"] = message
 		}
 	case OperationRemovePeer:

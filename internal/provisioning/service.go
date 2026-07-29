@@ -1,6 +1,7 @@
 package provisioning
 
 import (
+	"crypto/sha256"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -28,6 +29,13 @@ type RadiusRegistrar interface {
 
 type WireGuardPeerQueuer interface {
 	QueuePeerUpsert(router routers.Router) (wireguard.WireGuardJob, error)
+}
+
+// RouterConfigureQueuer is implemented by the agent job service once it also
+// supports the configure_router operation. Keeping it separate preserves
+// compatibility with the existing upsert_peer implementation during rollout.
+type RouterConfigureQueuer interface {
+	QueueRouterConfigure(router routers.Router, configRevision string) (wireguard.WireGuardJob, error)
 }
 
 type PlanLister interface {
@@ -62,38 +70,50 @@ func (s *Service) InstallScript(token, sourceIP string) (string, error) {
 		return "", errors.New("claim token is required")
 	}
 
-	// ConsumeClaimToken uses a row lock and marks this public installer URL as
-	// used. A second request for the same token must return ErrClaimTokenUsed,
-	// which the HTTP handler should map to 410 Gone.
+	// Consume the public installer URL once. The callback token remains usable
+	// by the RouterOS script while provisioning is in progress.
 	if _, err := s.repo.ConsumeClaimToken(token); err != nil {
 		return "", err
 	}
 
-	// The consumed token remains available only to callbacks belonging to the
-	// RouterOS script that was just issued. ClaimConfig permits that in-progress
-	// provisioning state.
-	configScript, err := s.ClaimConfig(token, "", sourceIP)
+	router, err := s.repo.FindByClaimToken(token)
+	if err != nil {
+		return "", errors.New("invalid claim token")
+	}
+
+	now := time.Now().UTC()
+	router.LastSeenAt = &now
+	router.Status = "provisioning"
+	if err := s.repo.Save(&router); err != nil {
+		return "", err
+	}
+
+	options := s.renderOptionsForRouter(router)
+	options.LoginPageURL = hotspotLoginURL(token, s.cfg.ProvisioningBaseURL)
+	options.HotspotSupportBaseURL = hotspotSupportURL(token, s.cfg.ProvisioningBaseURL)
+	options.ProvisioningBaseURL = normalizeProvisioningBaseURL(s.cfg.ProvisioningBaseURL)
+	options.ProvisioningClaimToken = token
+	s.applyWireGuardRenderOptions(&options, router)
+
+	managementScript, err := portprofiles.RenderManagementBootstrap(options)
 	if err != nil {
 		return "", err
 	}
 
+	// sourceIP is intentionally not used for NAS registration here. FreeRADIUS
+	// is registered with the unique tunnel IP after WireGuard reports connected.
+	_ = sourceIP
+
 	var builder strings.Builder
-	builder.WriteString("# NobliFi complete MikroTik install\n")
-	builder.WriteString("# Discovery, agent-managed WireGuard, HotSpot, RADIUS, NAT, DHCP, captive portal, and install status.\n\n")
-	builder.WriteString(`:put "NobliFi complete install starting"`)
+	builder.WriteString("# NobliFi agent-managed MikroTik install\n")
+	builder.WriteString("# The router establishes management first; xneelo applies HotSpot, RADIUS, DHCP, NAT, and portal files afterward.\n\n")
+	builder.WriteString(`:put "NobliFi management bootstrap starting"`)
 	builder.WriteString("\n\n")
 	builder.WriteString(renderBootstrapScript(token, s.cfg.ProvisioningBaseURL))
 	builder.WriteString("\n\n")
-
-	// Do not append routers.RenderWireGuardRouterOS here. The portprofiles
-	// renderer inside ClaimConfig performs the agent-aware WireGuard stage once:
-	// it reports the MikroTik public key, queues the VPS job, waits for the
-	// xneelo agent and reports the final tunnel status.
-	builder.WriteString(configScript)
+	builder.WriteString(managementScript)
 	builder.WriteString("\n")
-	builder.WriteString(renderStatusCommand(token, "installed", s.cfg.ProvisioningBaseURL))
-	builder.WriteString("\n")
-	builder.WriteString(`:put "NobliFi complete install completed"`)
+	builder.WriteString(`:put "NobliFi management bootstrap completed; waiting for xneelo router configuration job"`)
 	return builder.String(), nil
 }
 
@@ -202,7 +222,88 @@ func (s *Service) ClaimConfig(token, serial string, sourceIP string) (string, er
 	if err := s.registerRadiusNAS(router, options, sourceIP); err != nil {
 		log.Printf("provisioning: radius NAS registration failed for router %s from %q: %v", router.ID, sourceIP, err)
 	}
-	return portprofiles.RenderRouterOSWithOptions(assignments, options)
+	return portprofiles.RenderManagedRouterConfig(assignments, options)
+}
+
+// DesiredRouterConfig is returned only through an agent-authenticated internal
+// endpoint. Never include this object in a public provisioning response or logs.
+type DesiredRouterConfig struct {
+	RouterID       string `json:"router_id"`
+	ManagementIP   string `json:"management_ip"`
+	ConfigRevision string `json:"config_revision"`
+	APIUsername    string `json:"api_username"`
+	APIPassword    string `json:"api_password"`
+	APIPort        int    `json:"api_port"`
+	RouterOSScript string `json:"routeros_script"`
+}
+
+// DesiredRouterConfigForRouter prepares the exact desired state that the xneelo
+// agent applies after upsert_peer succeeds. The caller is responsible for
+// resolving the router and authenticating the agent request.
+func (s *Service) DesiredRouterConfigForRouter(router routers.Router, token string) (DesiredRouterConfig, error) {
+	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
+		return DesiredRouterConfig{}, errors.New("router management tunnel IP is missing")
+	}
+
+	assignments := make([]portprofiles.Assignment, 0, len(router.PortAssignments))
+	for _, assignment := range router.PortAssignments {
+		assignments = append(assignments, portprofiles.Assignment{
+			InterfaceName: assignment.InterfaceName,
+			Role:          assignment.Role,
+		})
+	}
+	if len(assignments) == 0 {
+		assignments = portprofiles.DefaultAssignments()
+	}
+
+	options := s.renderOptionsForRouter(router)
+	options.LoginPageURL = hotspotLoginURL(token, s.cfg.ProvisioningBaseURL)
+	options.HotspotSupportBaseURL = hotspotSupportURL(token, s.cfg.ProvisioningBaseURL)
+	options.ProvisioningBaseURL = normalizeProvisioningBaseURL(s.cfg.ProvisioningBaseURL)
+	options.ProvisioningClaimToken = strings.TrimSpace(token)
+	s.applyWireGuardRenderOptions(&options, router)
+	options.RadiusServer = options.WireGuardServerIP
+
+	if err := s.registerRadiusNAS(router, options, ""); err != nil {
+		return DesiredRouterConfig{}, fmt.Errorf("register FreeRADIUS NAS: %w", err)
+	}
+
+	script, err := portprofiles.RenderManagedRouterConfig(assignments, options)
+	if err != nil {
+		return DesiredRouterConfig{}, err
+	}
+
+	sum := sha256.Sum256([]byte(script))
+	apiPort := 8728
+	if options.EnableAPISSLService {
+		apiPort = 8729
+	}
+
+	return DesiredRouterConfig{
+		RouterID:       fmt.Sprint(router.ID),
+		ManagementIP:   hostOnly(strings.TrimSpace(*router.WireGuardTunnelIP)),
+		ConfigRevision: fmt.Sprintf("%x", sum[:]),
+		APIUsername:    options.APIUsername,
+		APIPassword:    options.APIPassword,
+		APIPort:        apiPort,
+		RouterOSScript: script,
+	}, nil
+}
+
+func (s *Service) queueRouterConfigure(router routers.Router, token string) error {
+	queuer, ok := s.wg.(RouterConfigureQueuer)
+	if !ok {
+		return errors.New("WireGuard job service does not implement QueueRouterConfigure")
+	}
+
+	desired, err := s.DesiredRouterConfigForRouter(router, token)
+	if err != nil {
+		return err
+	}
+	if _, err := queuer.QueueRouterConfigure(router, desired.ConfigRevision); err != nil {
+		return fmt.Errorf("queue configure_router job: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) applyWireGuardRenderOptions(options *portprofiles.RenderOptions, router routers.Router) {
@@ -361,11 +462,6 @@ func (s *Service) WireGuardKey(input WireGuardKeyInput) (WireGuardKeyResponse, e
 		return WireGuardKeyResponse{}, err
 	}
 
-	options := s.renderOptionsForRouter(router)
-	if err := s.registerRadiusNAS(router, options, ""); err != nil {
-		log.Printf("provisioning: radius NAS upsert failed for router %s: %v", router.ID, err)
-	}
-
 	payload, _ := json.Marshal(map[string]string{
 		"public_key": publicKey,
 		"tunnel_ip":  tunnelIP,
@@ -418,22 +514,46 @@ func (s *Service) WireGuardStatus(input WireGuardStatusInput) error {
 	router.WireGuardPeerStatus = status
 	router.WireGuardLastSeenAt = &now
 	router.WireGuardPeerUpdatedAt = &now
+
 	if status == "connected" {
 		router.ManagementIP = router.WireGuardTunnelIP
 		router.WireGuardLastError = nil
-	}
-	if err := s.repo.Save(&router); err != nil {
-		return err
+		router.Status = "peer_ready"
+		if err := s.repo.Save(&router); err != nil {
+			return err
+		}
+
+		// Register the NAS with its unique tunnel IP, then queue the full router
+		// configuration. This is the hand-off from management bootstrap to the
+		// xneelo-controlled HotSpot/RADIUS/portal stage.
+		if err := s.queueRouterConfigure(router, token); err != nil {
+			message := err.Error()
+			router.Status = "router_config_failed"
+			router.WireGuardLastError = &message
+			_ = s.repo.Save(&router)
+			return err
+		}
+
+		router.Status = "router_config_queued"
+		if err := s.repo.Save(&router); err != nil {
+			return err
+		}
+	} else {
+		router.Status = "peer_failed"
+		if err := s.repo.Save(&router); err != nil {
+			return err
+		}
 	}
 
 	payload, _ := json.Marshal(map[string]string{
-		"status":    status,
-		"tunnel_ip": strings.TrimSpace(*router.WireGuardTunnelIP),
+		"status":        status,
+		"tunnel_ip":     strings.TrimSpace(*router.WireGuardTunnelIP),
+		"router_status": router.Status,
 	})
 	return s.repo.CreateConfigLog(&routers.RouterConfigLog{
 		RouterID:        router.ID,
 		Action:          "wireguard_status",
-		Status:          status,
+		Status:          router.Status,
 		ResponsePayload: payload,
 	})
 }

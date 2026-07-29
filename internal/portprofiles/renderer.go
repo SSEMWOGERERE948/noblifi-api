@@ -154,6 +154,75 @@ func RenderRouterOS(assignments []Assignment) (string, error) {
 }
 
 func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) (string, error) {
+	// Preserve the legacy renderer contract for installations that have not
+	// enabled agent-managed WireGuard yet.
+	normalized := withDefaults(options)
+	if !normalized.WireGuardEnabled {
+		return RenderManagedRouterConfig(assignments, options)
+	}
+
+	managementScript, err := RenderManagementBootstrap(options)
+	if err != nil {
+		return "", err
+	}
+
+	managedScript, err := RenderManagedRouterConfig(assignments, options)
+	if err != nil {
+		return "", err
+	}
+
+	return managementScript + "\n" + managedScript, nil
+}
+
+// RenderManagementBootstrap renders only the configuration required to create
+// and verify the management tunnel. It deliberately does not touch HotSpot LAN
+// ports, DHCP, NAT, RADIUS, or captive-portal files. Those are applied later by
+// the xneelo agent after the WireGuard peer is reachable.
+func RenderManagementBootstrap(options RenderOptions) (string, error) {
+	options = withDefaults(options)
+	options = withProvisioningContext(options)
+
+	if isPlaceholderAPIPassword(options.APIPassword) {
+		return "", fmt.Errorf("NOBLIFI_ROUTER_API_PASSWORD must be set to a real router API password before provisioning")
+	}
+	if err := validateWireGuardOptions(options); err != nil {
+		return "", err
+	}
+	if !options.WireGuardEnabled {
+		return "", fmt.Errorf("WireGuard must be enabled for agent-managed router provisioning")
+	}
+
+	var builder strings.Builder
+	builder.WriteString("# NobliFi management bootstrap\n")
+	builder.WriteString("# Establishes the xneelo WireGuard management path only.\n\n")
+
+	builder.WriteString("# Management identity, user, and RouterOS services\n")
+	writeSafe(&builder, fmt.Sprintf(`/system identity set name="%s"`, escape(options.RouterIdentity)), "set identity")
+	writeSafe(&builder, fmt.Sprintf(`/user remove [find where name="%s" comment="NobliFi API management user"]`, escape(options.APIUsername)), "cleanup api user")
+	writeCritical(&builder, fmt.Sprintf(`/user add name="%s" group=full password="%s" comment="NobliFi API management user"`, escape(options.APIUsername), escape(options.APIPassword)), "add api user")
+	writeSafe(&builder, `/ip service set telnet disabled=yes`, "disable telnet")
+	writeSafe(&builder, `/ip service set ftp disabled=yes`, "disable ftp")
+	if options.DisableWWWService {
+		writeSafe(&builder, `/ip service set www disabled=yes`, "disable www")
+	}
+	// Restrict management before enabling it. There is no period where the API
+	// is exposed to arbitrary WAN addresses while the tunnel is being created.
+	serverCIDR := routerOSHostRoute(options.WireGuardServerIP)
+	writeSafe(&builder, fmt.Sprintf(`/ip service set api disabled=%s address="%s"`, routerOSDisabled(!options.EnableAPIService), escape(serverCIDR)), "set restricted api service")
+	writeSafe(&builder, fmt.Sprintf(`/ip service set api-ssl disabled=%s address="%s"`, routerOSDisabled(!options.EnableAPISSLService), escape(serverCIDR)), "set restricted api-ssl service")
+	writeCritical(&builder, `:if ([:len [/interface list find where name="LAN"]] = 0) do={ /interface list add name=LAN comment="NobliFi LAN list" }`, "ensure LAN list")
+	builder.WriteString("\n")
+
+	writeWireGuardManagement(&builder, options)
+
+	builder.WriteString(`:put "NobliFi management bootstrap completed; xneelo agent will configure HotSpot, RADIUS, DHCP, NAT, and portal files"` + "\n")
+	return builder.String(), nil
+}
+
+// RenderManagedRouterConfig renders the desired HotSpot/RADIUS/network state
+// that the xneelo agent applies over the already-established WireGuard tunnel.
+// It intentionally excludes WireGuard creation and the public-key callback.
+func RenderManagedRouterConfig(assignments []Assignment, options RenderOptions) (string, error) {
 	if err := Validate(assignments); err != nil {
 		return "", err
 	}
@@ -161,19 +230,18 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	options = withDefaults(options)
 	options = withProvisioningContext(options)
 
+	// RADIUS is carried through the management tunnel. The public xneelo address
+	// remains only the WireGuard endpoint.
+	if strings.TrimSpace(options.WireGuardServerIP) != "" {
+		options.RadiusServer = strings.TrimSpace(options.WireGuardServerIP)
+	}
 	if isPlaceholderRadiusServer(options.RadiusServer) {
-		return "", fmt.Errorf("NOBLIFI_RADIUS_SERVER is %q, but MikroTik routers cannot use localhost, empty values, or setup placeholders for RADIUS. Set it to the public IP or DNS name of the VM/server running NobliFi RADIUS, for example 154.65.105.14, and make sure UDP ports 1812 and 1813 are reachable from the router", options.RadiusServer)
+		return "", fmt.Errorf("agent-managed RADIUS server is %q; set WireGuardServerIP to the xneelo tunnel address, normally 10.77.0.1", options.RadiusServer)
 	}
 	if isPlaceholderRadiusSecret(options.RadiusSecret) {
 		options.RadiusSecret = "noblifi"
 	}
-	if isPlaceholderAPIPassword(options.APIPassword) {
-		return "", fmt.Errorf("NOBLIFI_ROUTER_API_PASSWORD must be set to a real router API password before provisioning")
-	}
 	if err := validateLoginPageURL(options.LoginPageURL); err != nil {
-		return "", err
-	}
-	if err := validateWireGuardOptions(options); err != nil {
 		return "", err
 	}
 
@@ -182,31 +250,20 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	hotspotGateway := strings.Split(options.HotspotGateway, "/")[0]
 
 	var builder strings.Builder
-	builder.WriteString("# NobliFi generated RouterOS configuration\n")
-	builder.WriteString("# Import this file with: /import file-name=noblifi-config.rsc\n\n")
+	builder.WriteString("# NobliFi xneelo agent-managed RouterOS configuration\n")
+	builder.WriteString("# Applied after the WireGuard management tunnel is reachable.\n\n")
 
 	// Resolve the custom HotSpot directory once and keep both values together.
-	// Devices with a persistent flash filesystem use flash/noblifi; devices
-	// without a visible flash directory use noblifi at the root filesystem.
 	builder.WriteString(`:local hotspotHtmlDir "noblifi"` + "\n")
 	builder.WriteString(`:local hotspotHtmlPath "noblifi"` + "\n")
 	builder.WriteString(`:if ([:len [/file find where name="flash"]] > 0) do={ :set hotspotHtmlDir "flash/noblifi"; :set hotspotHtmlPath "flash/noblifi" }` + "\n\n")
 
-	builder.WriteString("# Clean previous NobliFi-owned service setup\n")
+	builder.WriteString("# Replace NobliFi-owned HotSpot, RADIUS, NAT, and LAN state\n")
 	writeSafe(&builder, `/ip hotspot remove [find where name="noblifi-hotspot"]`, "cleanup hotspot server")
 	writeSafe(&builder, `/ip hotspot user profile remove [find where name="noblifi-voucher-profile"]`, "cleanup hotspot user profile")
 	writeSafe(&builder, `/ip hotspot walled-garden remove [find where comment="NobliFi captive portal"]`, "cleanup captive portal walled garden")
-	// Remove stale refresh jobs unconditionally. They may contain an expired
-	// claim-token URL from an older router record. A current refresh job is
-	// recreated later only when LoginPageURL is valid.
 	writeSafe(&builder, `/system scheduler remove [find where name="noblifi-hotspot-login-refresh"]`, "cleanup stale hotspot login refresh scheduler")
 	writeSafe(&builder, `/system script remove [find where name="noblifi-hotspot-login-refresh-script"]`, "cleanup stale hotspot login refresh script")
-
-	// IMPORTANT: never delete the currently working NobliFi login/index files
-	// during cleanup. Portal replacement is transactional later: a fresh page
-	// is fetched into memory first and the live files are updated only after
-	// the fetch succeeds. This prevents a transient WAN/App Engine timeout from
-	// turning the captive portal into Error 404.
 	writeSafe(&builder, `/radius remove [find where comment="NobliFi RADIUS"]`, "cleanup radius client")
 	writeSafe(&builder, `/ip firewall nat remove [find where comment="NobliFi client NAT"]`, "cleanup nat")
 
@@ -216,32 +273,16 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	writeCleanup(&builder, options.CCTVBridge, "dhcp-cctv", "pool-cctv", options.CCTVSubnet)
 	builder.WriteString("\n")
 
-	builder.WriteString("# Management and router services\n")
-	writeSafe(&builder, fmt.Sprintf(`/system identity set name="%s"`, escape(options.RouterIdentity)), "set identity")
-	writeSafe(&builder, fmt.Sprintf(`/user remove [find where name="%s" comment="NobliFi API management user"]`, escape(options.APIUsername)), "cleanup api user")
-	writeSafe(&builder, fmt.Sprintf(`/user add name="%s" group=full password="%s" comment="NobliFi API management user"`, escape(options.APIUsername), escape(options.APIPassword)), "add api user")
-	writeSafe(&builder, `/ip service set telnet disabled=yes`, "disable telnet")
-	writeSafe(&builder, `/ip service set ftp disabled=yes`, "disable ftp")
-	if options.DisableWWWService {
-		writeSafe(&builder, `/ip service set www disabled=yes`, "disable www")
-	}
-	writeSafe(&builder, fmt.Sprintf(`/ip service set api disabled=%s`, routerOSDisabled(!options.EnableAPIService)), "set api service")
-	writeSafe(&builder, fmt.Sprintf(`/ip service set api-ssl disabled=%s`, routerOSDisabled(!options.EnableAPISSLService)), "set api-ssl service")
-	builder.WriteString("\n")
-
-	// Resolve the real L3 WAN. On the current MikroTik family ether1 may be a
-	// slave of bridgeLocal, so DHCP, the default route and WAN list membership
-	// must be attached to bridgeLocal rather than directly to ether1.
+	// The management path is WireGuard, so LAN-port movement can continue even
+	// when the operator's local WinBox/WebFig session is interrupted.
 	writeWANInternet(&builder, wan)
-
 	writeHotspotNetwork(&builder, options, summary.HotspotLAN, hotspotGateway)
 	writeBridge(&builder, options.StaffBridge, summary.StaffLAN, options.StaffGateway, "pool-staff", options.StaffPool, options.StaffSubnet)
 	writeBridge(&builder, options.POSBridge, summary.POSLAN, options.POSGateway, "pool-pos", options.POSPool, options.POSSubnet)
 	writeBridge(&builder, options.CCTVBridge, summary.CCTVLAN, options.CCTVGateway, "pool-cctv", options.CCTVPool, options.CCTVSubnet)
-
-	writeWireGuardManagement(&builder, options)
 	writeHotspotServices(&builder, options, hotspotGateway)
 
+	builder.WriteString(`:put "NobliFi agent-managed HotSpot, RADIUS, DHCP, NAT, and captive portal configuration completed"` + "\n")
 	return builder.String(), nil
 }
 
@@ -637,11 +678,6 @@ func writeHotspotNetwork(builder *strings.Builder, options RenderOptions, interf
 		"verify hotspot bridge ports",
 	)
 
-	for _, iface := range interfaces {
-		writeSafe(builder, fmt.Sprintf(`/interface set [find where name="%s"] disabled=yes`, escape(iface)), "bounce hotspot port disable")
-		writeSafe(builder, fmt.Sprintf(`/interface set [find where name="%s"] disabled=no`, escape(iface)), "bounce hotspot port enable")
-	}
-
 	writeCritical(
 		builder,
 		fmt.Sprintf(`:if ([:len [/ip address find where interface="%s" address="%s"]] = 0) do={ /ip address add address="%s" interface="%s" comment="NobliFi HotSpot gateway" } else={ /ip address set [find where interface="%s" address="%s"] comment="NobliFi HotSpot gateway" }`, escape(options.HotspotBridge), escape(options.HotspotGateway), escape(options.HotspotGateway), escape(options.HotspotBridge), escape(options.HotspotBridge), escape(options.HotspotGateway)),
@@ -961,12 +997,8 @@ func writeHotspotPortalRefreshScript(builder *strings.Builder, options RenderOpt
 }
 
 func writeHotspotRestart(builder *strings.Builder) {
-	builder.WriteString("# Reload HotSpot after profile and portal changes\n")
-	writeSafe(builder, `/ip hotspot active remove [find]`, "clear active hotspot sessions")
-	writeSafe(builder, `/ip hotspot cookie remove [find]`, "clear hotspot cookies")
-	writeSafe(builder, `/ip hotspot disable [find where name="noblifi-hotspot"]`, "disable hotspot before reload")
-	builder.WriteString(`:delay 2s` + "\n")
-	writeCritical(builder, `/ip hotspot enable [find where name="noblifi-hotspot"]`, "enable hotspot after reload")
+	builder.WriteString("# Ensure HotSpot is enabled without clearing active sessions\n")
+	writeCritical(builder, `/ip hotspot enable [find where name="noblifi-hotspot"]`, "ensure hotspot enabled")
 	builder.WriteString("\n")
 }
 
