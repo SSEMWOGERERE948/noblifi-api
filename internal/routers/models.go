@@ -21,8 +21,8 @@ type Router struct {
 	APIUsername              *string                `json:"api_username"`
 	APIPasswordEncrypted     *string                `json:"api_password_encrypted"`
 	RadiusSecretEncrypted    *string                `json:"radius_secret_encrypted"`
-	WireGuardTunnelIP        *string                `gorm:"uniqueIndex" json:"wireguard_tunnel_ip"`
-	WireGuardPublicKey       *string                `gorm:"uniqueIndex" json:"wireguard_public_key"`
+	WireGuardTunnelIP        *string                `gorm:"unique" json:"wireguard_tunnel_ip"`
+	WireGuardPublicKey       *string                `gorm:"unique" json:"wireguard_public_key"`
 	WireGuardStatus          string                 `gorm:"default:disabled" json:"wireguard_status"`
 	WireGuardLastSeenAt      *time.Time             `json:"wireguard_last_seen_at"`
 	WireGuardPeerStatus      string                 `gorm:"default:waiting_for_router_key;index" json:"wireguard_peer_status"`
