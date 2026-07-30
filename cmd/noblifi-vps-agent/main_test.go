@@ -44,12 +44,12 @@ func TestWGConfigUpsertReplacesStaleAllowedIP(t *testing.T) {
 	}
 }
 
-func TestWGConfigRemovePeer(t *testing.T) {
+func TestWGConfigRemovePeerByKey(t *testing.T) {
 	conf, err := parseWGConfig(fixture)
 	if err != nil {
 		t.Fatalf("parseWGConfig: %v", err)
 	}
-	if !conf.RemovePeer("", "10.77.0.9/32") {
+	if !conf.RemovePeerByKey("OLDKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=") {
 		t.Fatalf("expected peer removal")
 	}
 	if strings.Contains(conf.String(), "[Peer]") {

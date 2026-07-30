@@ -202,43 +202,90 @@ func (a *Agent) applyJob(ctx context.Context, job Job) error {
 	}
 }
 
+// withConfigLock serializes every read-modify-write-apply cycle against the
+// WireGuard config file using a real OS file lock (flock). This protects
+// against a second agent process, a manual "wg-quick" run, or an operator
+// editing wg0.conf by hand while a job is in flight.
+func (a *Agent) withConfigLock(fn func() error) error {
+	if err := os.MkdirAll(filepath.Dir(a.cfg.LockPath), 0700); err != nil {
+		return fmt.Errorf("prepare lock directory: %w", err)
+	}
+	lockFile, err := os.OpenFile(a.cfg.LockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return fmt.Errorf("open lock file: %w", err)
+	}
+	defer lockFile.Close()
+
+	unlock, err := lockFileExclusive(lockFile)
+	if err != nil {
+		return fmt.Errorf("acquire wireguard config lock: %w", err)
+	}
+	defer func() { _ = unlock() }()
+
+	return fn()
+}
+
 func (a *Agent) upsertPeer(ctx context.Context, job Job) error {
 	if err := validateAllowedIP(job.AllowedIP); err != nil {
 		return err
 	}
-	if strings.TrimSpace(job.PublicKey) == "" {
+	publicKey := strings.TrimSpace(job.PublicKey)
+	if publicKey == "" {
 		return errors.New("public key is required")
 	}
-	conf, err := readWGConfig(a.cfg.ConfigPath)
-	if err != nil {
-		return err
-	}
-	conf.UpsertPeer(job.PublicKey, job.AllowedIP)
-	if err := a.persist(ctx, conf); err != nil {
-		return err
-	}
-	if _, err := a.runner.Run(ctx, "wg", "set", a.cfg.InterfaceName, "peer", job.PublicKey, "allowed-ips", job.AllowedIP); err != nil {
-		return sanitizeCommandError(err)
-	}
-	return a.verifyPeer(ctx, job.PublicKey, job.AllowedIP, true)
+	allowedIP := strings.TrimSpace(job.AllowedIP)
+
+	return a.withConfigLock(func() error {
+		conf, err := readWGConfig(a.cfg.ConfigPath)
+		if err != nil {
+			return err
+		}
+
+		// Guard against a duplicate tunnel-IP allocation upstream: if some
+		// OTHER public key already holds this exact allowed-ip, refuse rather
+		// than silently evicting it.
+		if existing, ok := conf.PeerByAllowedIP(allowedIP); ok && existing.PublicKey != publicKey {
+			return fmt.Errorf(
+				"refusing to upsert peer: allowed-ip %s is already assigned to a different public key (%s); this indicates a duplicate WireGuardTunnelIP allocation upstream",
+				allowedIP, existing.PublicKey,
+			)
+		}
+
+		conf.UpsertPeer(publicKey, allowedIP)
+		if err := a.persist(ctx, conf); err != nil {
+			return err
+		}
+		if _, err := a.runner.Run(ctx, "wg", "set", a.cfg.InterfaceName, "peer", publicKey, "allowed-ips", allowedIP); err != nil {
+			return sanitizeCommandError(err)
+		}
+		return a.verifyPeer(ctx, publicKey, allowedIP, true)
+	})
 }
 
 func (a *Agent) removePeer(ctx context.Context, job Job) error {
-	conf, err := readWGConfig(a.cfg.ConfigPath)
-	if err != nil {
-		return err
-	}
-	removed := conf.RemovePeer(job.PublicKey, job.AllowedIP)
-	if err := a.persist(ctx, conf); err != nil {
-		return err
-	}
-	if strings.TrimSpace(job.PublicKey) != "" {
-		_, _ = a.runner.Run(ctx, "wg", "set", a.cfg.InterfaceName, "peer", job.PublicKey, "remove")
-	}
-	if removed && strings.TrimSpace(job.PublicKey) != "" {
-		return a.verifyPeer(ctx, job.PublicKey, job.AllowedIP, false)
-	}
-	return nil
+	publicKey := strings.TrimSpace(job.PublicKey)
+	allowedIP := strings.TrimSpace(job.AllowedIP)
+
+	return a.withConfigLock(func() error {
+		conf, err := readWGConfig(a.cfg.ConfigPath)
+		if err != nil {
+			return err
+		}
+		if publicKey == "" {
+			return errors.New("public key is required to remove a peer")
+		}
+		removed := conf.RemovePeerByKey(publicKey)
+		if err := a.persist(ctx, conf); err != nil {
+			return err
+		}
+		if _, err := a.runner.Run(ctx, "wg", "set", a.cfg.InterfaceName, "peer", publicKey, "remove"); err != nil {
+			return sanitizeCommandError(err)
+		}
+		if removed {
+			return a.verifyPeer(ctx, publicKey, allowedIP, false)
+		}
+		return nil
+	})
 }
 
 func (a *Agent) persist(ctx context.Context, conf WGConfig) error {
@@ -262,12 +309,32 @@ func (a *Agent) persist(ctx context.Context, conf WGConfig) error {
 	return os.Rename(tmp, a.cfg.ConfigPath)
 }
 
+// verifyPeer parses "wg show <iface> allowed-ips" (one "<pubkey>\t<ips>" line
+// per peer) and checks the pairing on a single line, instead of doing a
+// substring search across the whole output where the key could match one
+// peer's line and the IP could match a different peer's line.
 func (a *Agent) verifyPeer(ctx context.Context, publicKey, allowedIP string, present bool) error {
 	out, err := a.runner.Run(ctx, "wg", "show", a.cfg.InterfaceName, "allowed-ips")
 	if err != nil {
 		return sanitizeCommandError(err)
 	}
-	found := strings.Contains(string(out), publicKey) && strings.Contains(string(out), allowedIP)
+
+	found := false
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 2 {
+			continue
+		}
+		if fields[0] != publicKey {
+			continue
+		}
+		if strings.Contains(strings.Join(fields[1:], " "), allowedIP) {
+			found = true
+		}
+		break
+	}
+
 	if present && !found {
 		return errors.New("peer_verification_failed")
 	}
@@ -689,8 +756,27 @@ func parseWGConfig(data string) (WGConfig, error) {
 	return conf, nil
 }
 
+// PeerByAllowedIP returns the peer currently holding the given AllowedIPs
+// value, if any. Used to detect a duplicate tunnel-IP allocation before it
+// silently clobbers an existing peer.
+func (c WGConfig) PeerByAllowedIP(allowedIP string) (WGPeer, bool) {
+	allowedIP = strings.TrimSpace(allowedIP)
+	for _, peer := range c.Peers {
+		if strings.TrimSpace(peer.AllowedIPs) == allowedIP {
+			return peer, true
+		}
+	}
+	return WGPeer{}, false
+}
+
+// UpsertPeer replaces (matched by public key only) or appends a peer. It
+// deliberately does NOT also match on AllowedIPs -- callers must check
+// PeerByAllowedIP first if they want to detect an IP collision with a
+// DIFFERENT public key. Previously this matched on "key OR allowed-ip",
+// which meant a new router landing on an already-used tunnel IP would
+// silently delete the existing router's peer instead of erroring.
 func (c *WGConfig) UpsertPeer(publicKey, allowedIP string) {
-	c.RemovePeer(publicKey, allowedIP)
+	c.RemovePeerByKey(publicKey)
 	c.Peers = append(c.Peers, WGPeer{
 		PublicKey:  publicKey,
 		AllowedIPs: allowedIP,
@@ -703,11 +789,16 @@ func (c *WGConfig) UpsertPeer(publicKey, allowedIP string) {
 	})
 }
 
-func (c *WGConfig) RemovePeer(publicKey, allowedIP string) bool {
+// RemovePeerByKey removes only the peer with an exact public key match.
+func (c *WGConfig) RemovePeerByKey(publicKey string) bool {
+	publicKey = strings.TrimSpace(publicKey)
+	if publicKey == "" {
+		return false
+	}
 	next := c.Peers[:0]
 	removed := false
 	for _, peer := range c.Peers {
-		if (publicKey != "" && peer.PublicKey == publicKey) || (allowedIP != "" && peer.AllowedIPs == allowedIP) {
+		if peer.PublicKey == publicKey {
 			removed = true
 			continue
 		}

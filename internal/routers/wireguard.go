@@ -8,12 +8,14 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/noblifi/noblifi/backend/internal/config"
 )
 
 const routerWireGuardInterface = "noblifi-wg"
+var wireGuardAllocMu sync.Mutex
 
 type WireGuardSetupResponse struct {
 	Enabled                bool     `json:"enabled"`
@@ -47,19 +49,25 @@ func (s *Service) PrepareWireGuard(routerID uuid.UUID) (WireGuardSetupResponse, 
 	}
 
 	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
-		address, allocErr := s.allocateWireGuardIP()
-		if allocErr != nil {
-			return WireGuardSetupResponse{}, allocErr
+		err := AllocateWireGuardIPWithRetry(s.repo, s.cfg, func(ip string) error {
+			router.WireGuardTunnelIP = &ip
+			router.ManagementIP = &ip
+			if router.WireGuardPublicKey == nil || strings.TrimSpace(*router.WireGuardPublicKey) == "" {
+				router.WireGuardStatus = "awaiting_router_key"
+			}
+			return s.repo.Save(&router)
+		}, 5)
+		if err != nil {
+			return WireGuardSetupResponse{}, fmt.Errorf("allocate WireGuard tunnel IP: %w", err)
 		}
-		router.WireGuardTunnelIP = &address
-	}
-
-	router.ManagementIP = router.WireGuardTunnelIP
-	if router.WireGuardPublicKey == nil || strings.TrimSpace(*router.WireGuardPublicKey) == "" {
-		router.WireGuardStatus = "awaiting_router_key"
-	}
-	if err := s.repo.Save(&router); err != nil {
-		return WireGuardSetupResponse{}, err
+	} else {
+		router.ManagementIP = router.WireGuardTunnelIP
+		if router.WireGuardPublicKey == nil || strings.TrimSpace(*router.WireGuardPublicKey) == "" {
+			router.WireGuardStatus = "awaiting_router_key"
+		}
+		if err := s.repo.Save(&router); err != nil {
+			return WireGuardSetupResponse{}, err
+		}
 	}
 
 	profile, err := s.NetworkProfile(routerID)
@@ -139,11 +147,10 @@ func (s *Service) wireGuardSetupForRouter(router Router) WireGuardSetupResponse 
 	return response
 }
 
-func (s *Service) allocateWireGuardIP() (string, error) {
-	return AllocateWireGuardIP(s.repo, s.cfg)
-}
-
 func AllocateWireGuardIP(repo *Repository, cfg config.Config) (string, error) {
+	wireGuardAllocMu.Lock()
+	defer wireGuardAllocMu.Unlock()
+
 	baseIP, network, err := net.ParseCIDR(strings.TrimSpace(cfg.WireGuardSubnetCIDR))
 	if err != nil || baseIP.To4() == nil {
 		return "", errors.New("NOBLIFI_WIREGUARD_SUBNET must be a valid IPv4 CIDR")
@@ -176,6 +183,42 @@ func AllocateWireGuardIP(repo *Repository, cfg config.Config) (string, error) {
 		}
 	}
 	return "", errors.New("WireGuard address pool is exhausted")
+}
+
+// AllocateWireGuardIPWithRetry allocates an IP and tries to save it via the
+// supplied save func. If save fails with a unique-constraint violation
+// (another instance took the IP first), it retries with a new candidate.
+func AllocateWireGuardIPWithRetry(repo *Repository, cfg config.Config, save func(ip string) error, maxAttempts int) error {
+	if maxAttempts < 1 {
+		maxAttempts = 3
+	}
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		ip, err := AllocateWireGuardIP(repo, cfg)
+		if err != nil {
+			return err
+		}
+		if err := save(ip); err != nil {
+			if isUniqueViolation(err) {
+				lastErr = err
+				continue
+			}
+			return err
+		}
+		return nil
+	}
+	if lastErr == nil {
+		return errors.New("could not allocate a unique WireGuard tunnel IP: no available IP")
+	}
+	return fmt.Errorf("could not allocate a unique WireGuard tunnel IP after retries: %w", lastErr)
+}
+
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique constraint") || strings.Contains(msg, "duplicate key")
 }
 
 func wireGuardConfigIssues(cfg config.Config) []string {
