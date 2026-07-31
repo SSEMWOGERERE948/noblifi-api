@@ -71,23 +71,17 @@ func (s *Service) InstallScript(token, sourceIP string) (string, error) {
 		return "", errors.New("claim token is required")
 	}
 
-	// Consume the public installer URL once. The callback token remains usable
-	// by the RouterOS script while provisioning is in progress.
-	if _, err := s.repo.ConsumeClaimToken(token); err != nil {
-		return "", err
-	}
-
 	router, err := s.repo.FindByClaimToken(token)
 	if err != nil {
 		return "", errors.New("invalid claim token")
 	}
+	if router.ClaimTokenExpiresAt != nil &&
+		router.ClaimTokenExpiresAt.Before(time.Now()) &&
+		!canFetchConfigAfterClaimExpiry(router) {
+		return "", errors.New("claim token expired")
+	}
 
 	now := time.Now().UTC()
-	router.LastSeenAt = &now
-	router.Status = "provisioning"
-	if err := s.repo.Save(&router); err != nil {
-		return "", err
-	}
 
 	options := s.renderOptionsForRouter(router)
 	options.LoginPageURL = hotspotLoginURL(token, s.cfg.ProvisioningBaseURL)
@@ -100,6 +94,13 @@ func (s *Service) InstallScript(token, sourceIP string) (string, error) {
 
 	managementScript, err := portprofiles.RenderManagementBootstrap(options)
 	if err != nil {
+		return "", err
+	}
+
+	router.LastSeenAt = &now
+	router.Status = "provisioning"
+	router.ProvisioningStatus = "install_script_issued"
+	if err := s.repo.Save(&router); err != nil {
 		return "", err
 	}
 

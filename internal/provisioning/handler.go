@@ -2,6 +2,7 @@ package provisioning
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/noblifi/noblifi/backend/internal/routers"
@@ -69,14 +70,26 @@ func (h *Handler) bootstrap(c *fiber.Ctx) error {
 func (h *Handler) install(c *fiber.Ctx) error {
 	script, err := h.service.InstallScript(c.Params("token"), clientIP(c))
 	if err != nil {
-		if errors.Is(err, routers.ErrClaimTokenUsed) {
-			return fiber.NewError(fiber.StatusGone, err.Error())
-		}
-		return fiber.NewError(fiber.StatusNotFound, err.Error())
+		return fiber.NewError(installErrorStatus(err), err.Error())
 	}
 	c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
 	c.Set(fiber.HeaderContentDisposition, `attachment; filename="noblifi-install.rsc"`)
 	return c.SendString(script)
+}
+
+func installErrorStatus(err error) int {
+	if errors.Is(err, routers.ErrClaimTokenUsed) {
+		return fiber.StatusGone
+	}
+
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "invalid claim token") ||
+		strings.Contains(message, "claim token expired") ||
+		strings.Contains(message, "claim token is required") {
+		return fiber.StatusNotFound
+	}
+
+	return fiber.StatusServiceUnavailable
 }
 
 func (h *Handler) wireGuard(c *fiber.Ctx) error {
