@@ -29,6 +29,7 @@ type RadiusRegistrar interface {
 
 type WireGuardPeerQueuer interface {
 	QueuePeerUpsert(router routers.Router) (wireguard.WireGuardJob, error)
+	ActiveServerPublicKey() (string, error)
 }
 
 // RouterConfigureQueuer is implemented by the agent job service once it also
@@ -93,7 +94,9 @@ func (s *Service) InstallScript(token, sourceIP string) (string, error) {
 	options.HotspotSupportBaseURL = hotspotSupportURL(token, s.cfg.ProvisioningBaseURL)
 	options.ProvisioningBaseURL = normalizeProvisioningBaseURL(s.cfg.ProvisioningBaseURL)
 	options.ProvisioningClaimToken = token
-	s.applyWireGuardRenderOptions(&options, router)
+	if err := s.applyWireGuardRenderOptions(&options, router); err != nil {
+		return "", err
+	}
 
 	managementScript, err := portprofiles.RenderManagementBootstrap(options)
 	if err != nil {
@@ -118,8 +121,8 @@ func (s *Service) InstallScript(token, sourceIP string) (string, error) {
 }
 
 func (s *Service) WireGuardScript(token string) (string, error) {
-	if err := routers.ValidateWireGuardConfig(s.cfg); err != nil {
-		return "", err
+	if !wireGuardConfigUsableWithoutStaticKey(s.cfg) {
+		return "", errors.New("WireGuard provisioning is not fully configured")
 	}
 	router, err := s.repo.FindByClaimToken(token)
 	if err != nil {
@@ -131,7 +134,16 @@ func (s *Service) WireGuardScript(token string) (string, error) {
 	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
 		return "", errors.New("claim token expired")
 	}
-	return routers.RenderWireGuardRouterOS(router, s.cfg), nil
+	if s.wg == nil {
+		return "", errors.New("WireGuard agent service is unavailable")
+	}
+	serverPublicKey, err := s.wg.ActiveServerPublicKey()
+	if err != nil {
+		return "", fmt.Errorf("resolve live VPS WireGuard public key: %w", err)
+	}
+	renderCfg := s.cfg
+	renderCfg.WireGuardPublicKey = serverPublicKey
+	return routers.RenderWireGuardRouterOS(router, renderCfg), nil
 }
 
 func (s *Service) HotspotLoginPage(token string) (string, error) {
@@ -217,7 +229,9 @@ func (s *Service) ClaimConfig(token, serial string, sourceIP string) (string, er
 	options.HotspotSupportBaseURL = hotspotSupportURL(token, s.cfg.ProvisioningBaseURL)
 	options.ProvisioningBaseURL = normalizeProvisioningBaseURL(s.cfg.ProvisioningBaseURL)
 	options.ProvisioningClaimToken = token
-	s.applyWireGuardRenderOptions(&options, router)
+	if err := s.applyWireGuardRenderOptions(&options, router); err != nil {
+		return "", err
+	}
 
 	if err := s.registerRadiusNAS(router, options, sourceIP); err != nil {
 		log.Printf("provisioning: radius NAS registration failed for router %s from %q: %v", router.ID, sourceIP, err)
@@ -261,7 +275,9 @@ func (s *Service) DesiredRouterConfigForRouter(router routers.Router, token stri
 	options.HotspotSupportBaseURL = hotspotSupportURL(token, s.cfg.ProvisioningBaseURL)
 	options.ProvisioningBaseURL = normalizeProvisioningBaseURL(s.cfg.ProvisioningBaseURL)
 	options.ProvisioningClaimToken = strings.TrimSpace(token)
-	s.applyWireGuardRenderOptions(&options, router)
+	if err := s.applyWireGuardRenderOptions(&options, router); err != nil {
+		return DesiredRouterConfig{}, err
+	}
 	options.RadiusServer = options.WireGuardServerIP
 
 	if err := s.registerRadiusNAS(router, options, ""); err != nil {
@@ -306,9 +322,9 @@ func (s *Service) queueRouterConfigure(router routers.Router, token string) erro
 	return nil
 }
 
-func (s *Service) applyWireGuardRenderOptions(options *portprofiles.RenderOptions, router routers.Router) {
+func (s *Service) applyWireGuardRenderOptions(options *portprofiles.RenderOptions, router routers.Router) error {
 	if options == nil {
-		return
+		return errors.New("render options are required")
 	}
 
 	enabled := shouldIncludeWireGuard(router, s.cfg)
@@ -316,21 +332,31 @@ func (s *Service) applyWireGuardRenderOptions(options *portprofiles.RenderOption
 	options.WireGuardAgentManaged = enabled
 	options.WireGuardHandshakeWaitSeconds = 120
 	if !enabled {
-		return
+		return nil
+	}
+	if s.wg == nil {
+		return errors.New("WireGuard agent service is unavailable")
+	}
+
+	serverPublicKey, err := s.wg.ActiveServerPublicKey()
+	if err != nil {
+		return fmt.Errorf("resolve live VPS WireGuard public key: %w", err)
+	}
+	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
+		return errors.New("router has no allocated WireGuard tunnel IP")
 	}
 
 	// These are deployment-level public values. Never place the VPS private key
 	// or NOBLIFI_AGENT_TOKEN in generated RouterOS.
 	options.WireGuardEndpoint = strings.TrimSpace(os.Getenv("NOBLIFI_WIREGUARD_ENDPOINT"))
-	options.WireGuardPublicKey = strings.TrimSpace(os.Getenv("NOBLIFI_WIREGUARD_PUBLIC_KEY"))
+	options.WireGuardPublicKey = serverPublicKey
 	options.WireGuardInterface = envOrDefault("NOBLIFI_ROUTER_WIREGUARD_INTERFACE", "noblifi-wg")
 	options.WireGuardServerIP = envOrDefault("NOBLIFI_WIREGUARD_SERVER_IP", "10.77.0.1")
 	options.WireGuardPort = envIntOrDefault("NOBLIFI_WIREGUARD_PORT", 51820)
 	options.WireGuardKeepalive = envIntOrDefault("NOBLIFI_WIREGUARD_KEEPALIVE", 25)
+	options.WireGuardClientIP = strings.TrimSpace(*router.WireGuardTunnelIP)
 
-	if router.WireGuardTunnelIP != nil {
-		options.WireGuardClientIP = strings.TrimSpace(*router.WireGuardTunnelIP)
-	}
+	return nil
 }
 
 func envOrDefault(name, fallback string) string {
@@ -865,6 +891,11 @@ func shouldIncludeWireGuard(router routers.Router, cfg config.Config) bool {
 	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
 		return false
 	}
+	return wireGuardConfigUsableWithoutStaticKey(cfg)
+}
+
+func wireGuardConfigUsableWithoutStaticKey(cfg config.Config) bool {
+	cfg.WireGuardPublicKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 	return routers.ValidateWireGuardConfig(cfg) == nil
 }
 

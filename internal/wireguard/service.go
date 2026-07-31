@@ -235,8 +235,35 @@ func (s *Service) updateClaimedJob(jobID uuid.UUID, agentID string, apply func(*
 	})
 }
 
-func (s *Service) Heartbeat(agentID, version, iface string, peerCount int, healthy bool, lastReconciliation *time.Time) error {
+func (s *Service) Heartbeat(
+	agentID string,
+	version string,
+	iface string,
+	publicKey string,
+	peerCount int,
+	healthy bool,
+	lastReconciliation *time.Time,
+) error {
 	now := time.Now().UTC()
+
+	agentID = strings.TrimSpace(agentID)
+	version = strings.TrimSpace(version)
+	iface = strings.TrimSpace(iface)
+	publicKey = strings.TrimSpace(publicKey)
+
+	if agentID == "" {
+		return errors.New("agent ID is required")
+	}
+	if iface == "" {
+		return errors.New("WireGuard interface is required")
+	}
+	if healthy && publicKey == "" {
+		return errors.New("healthy WireGuard agent must report its public key")
+	}
+	if peerCount < 0 {
+		return errors.New("peer count cannot be negative")
+	}
+
 	var hb AgentHeartbeat
 	err := s.db.First(&hb, "agent_id = ?", agentID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -246,11 +273,43 @@ func (s *Service) Heartbeat(agentID, version, iface string, peerCount int, healt
 	}
 	hb.Version = version
 	hb.WireGuardInterface = iface
+	hb.WireGuardPublicKey = publicKey
 	hb.PeerCount = peerCount
 	hb.Healthy = healthy
 	hb.LastReconciliation = lastReconciliation
 	hb.LastSeenAt = now
+	hb.UpdatedAt = now
 	return s.db.Save(&hb).Error
+}
+
+func (s *Service) ActiveServerPublicKey() (string, error) {
+	var heartbeat AgentHeartbeat
+
+	err := s.db.
+		Where("healthy = ?", true).
+		Where("wireguard_public_key <> ''").
+		Order("last_seen_at DESC").
+		First(&heartbeat).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", errors.New("no healthy WireGuard agent has reported a server public key")
+	}
+	if err != nil {
+		return "", fmt.Errorf("load WireGuard agent heartbeat: %w", err)
+	}
+	if time.Since(heartbeat.LastSeenAt) > 2*time.Minute {
+		return "", fmt.Errorf(
+			"WireGuard agent heartbeat is stale; last seen at %s",
+			heartbeat.LastSeenAt.UTC().Format(time.RFC3339),
+		)
+	}
+
+	publicKey := strings.TrimSpace(heartbeat.WireGuardPublicKey)
+	if publicKey == "" {
+		return "", errors.New("WireGuard agent reported an empty server public key")
+	}
+
+	return publicKey, nil
 }
 
 func (s *Service) applyRouterJobStatus(job WireGuardJob, message string) error {

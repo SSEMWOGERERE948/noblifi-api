@@ -229,36 +229,92 @@ func (a *Agent) upsertPeer(ctx context.Context, job Job) error {
 	if err := validateAllowedIP(job.AllowedIP); err != nil {
 		return err
 	}
+
 	publicKey := strings.TrimSpace(job.PublicKey)
 	if publicKey == "" {
 		return errors.New("public key is required")
 	}
+
 	allowedIP := strings.TrimSpace(job.AllowedIP)
 
 	return a.withConfigLock(func() error {
 		conf, err := readWGConfig(a.cfg.ConfigPath)
 		if err != nil {
-			return err
+			return fmt.Errorf("read WireGuard configuration: %w", err)
 		}
 
-		// Guard against a duplicate tunnel-IP allocation upstream: if some
-		// OTHER public key already holds this exact allowed-ip, refuse rather
-		// than silently evicting it.
-		if existing, ok := conf.PeerByAllowedIP(allowedIP); ok && existing.PublicKey != publicKey {
-			return fmt.Errorf(
-				"refusing to upsert peer: allowed-ip %s is already assigned to a different public key (%s); this indicates a duplicate WireGuardTunnelIP allocation upstream",
-				allowedIP, existing.PublicKey,
+		/*
+			A recreated MikroTik generates a new WireGuard keypair.
+
+			If its allocated tunnel IP is currently held by an older public key,
+			remove only that stale peer before installing the new one.
+
+			Other MikroTik peers and their AllowedIPs remain untouched.
+		*/
+		if existing, found := conf.PeerByAllowedIP(allowedIP); found &&
+			strings.TrimSpace(existing.PublicKey) != publicKey {
+
+			stalePublicKey := strings.TrimSpace(existing.PublicKey)
+
+			a.log.Warn(
+				"replacing stale WireGuard peer",
+				"router_id", job.RouterID,
+				"allowed_ip", allowedIP,
+				"old_public_key", stalePublicKey,
+				"new_public_key", publicKey,
 			)
+
+			conf.RemovePeerByKey(stalePublicKey)
+
+			if _, err := a.runner.Run(
+				ctx,
+				"wg",
+				"set",
+				a.cfg.InterfaceName,
+				"peer",
+				stalePublicKey,
+				"remove",
+			); err != nil {
+				return fmt.Errorf(
+					"remove stale WireGuard peer %s: %w",
+					stalePublicKey,
+					sanitizeCommandError(err),
+				)
+			}
 		}
 
 		conf.UpsertPeer(publicKey, allowedIP)
+
 		if err := a.persist(ctx, conf); err != nil {
-			return err
+			return fmt.Errorf("persist WireGuard peer: %w", err)
 		}
-		if _, err := a.runner.Run(ctx, "wg", "set", a.cfg.InterfaceName, "peer", publicKey, "allowed-ips", allowedIP); err != nil {
-			return sanitizeCommandError(err)
+
+		if _, err := a.runner.Run(
+			ctx,
+			"wg",
+			"set",
+			a.cfg.InterfaceName,
+			"peer",
+			publicKey,
+			"allowed-ips",
+			allowedIP,
+		); err != nil {
+			return fmt.Errorf(
+				"apply WireGuard peer: %w",
+				sanitizeCommandError(err),
+			)
 		}
-		return a.verifyPeer(ctx, publicKey, allowedIP, true)
+
+		if err := a.verifyPeer(
+			ctx,
+			publicKey,
+			allowedIP,
+			true,
+		); err != nil {
+			return fmt.Errorf("verify WireGuard peer: %w", err)
+		}
+
+		return nil
 	})
 }
 
@@ -344,13 +400,72 @@ func (a *Agent) verifyPeer(ctx context.Context, publicKey, allowedIP string, pre
 	return nil
 }
 
+func (a *Agent) wireGuardRuntimeState(ctx context.Context) (string, int, error) {
+	publicKeyOutput, err := a.runner.Run(
+		ctx,
+		"wg",
+		"show",
+		a.cfg.InterfaceName,
+		"public-key",
+	)
+	if err != nil {
+		return "", 0, fmt.Errorf(
+			"read WireGuard public key: %w",
+			sanitizeCommandError(err),
+		)
+	}
+
+	publicKey := strings.TrimSpace(string(publicKeyOutput))
+	if publicKey == "" {
+		return "", 0, errors.New(
+			"WireGuard interface returned an empty public key",
+		)
+	}
+
+	peerOutput, err := a.runner.Run(
+		ctx,
+		"wg",
+		"show",
+		a.cfg.InterfaceName,
+		"peers",
+	)
+	if err != nil {
+		return "", 0, fmt.Errorf(
+			"read WireGuard peers: %w",
+			sanitizeCommandError(err),
+		)
+	}
+
+	peerCount := 0
+	for _, line := range strings.Split(string(peerOutput), "\n") {
+		if strings.TrimSpace(line) != "" {
+			peerCount++
+		}
+	}
+
+	return publicKey, peerCount, nil
+}
+
 func (a *Agent) heartbeat(ctx context.Context, healthy bool) error {
+	publicKey, peerCount, err := a.wireGuardRuntimeState(ctx)
+	if err != nil {
+		healthy = false
+
+		a.log.Warn(
+			"failed reading WireGuard runtime state",
+			"interface", a.cfg.InterfaceName,
+			"error", err,
+		)
+	}
+
 	return a.post(ctx, "/internal/agents/heartbeat", map[string]any{
-		"agent_id":            a.cfg.AgentID,
-		"version":             version,
-		"wireguard_interface": a.cfg.InterfaceName,
-		"healthy":             healthy,
-		"last_reconciliation": time.Now().UTC(),
+		"agent_id":             a.cfg.AgentID,
+		"version":              version,
+		"wireguard_interface":  a.cfg.InterfaceName,
+		"wireguard_public_key": publicKey,
+		"peer_count":           peerCount,
+		"healthy":              healthy,
+		"last_reconciliation":  time.Now().UTC(),
 	}, nil)
 }
 

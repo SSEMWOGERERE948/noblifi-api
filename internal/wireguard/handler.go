@@ -37,6 +37,7 @@ type heartbeatInput struct {
 	AgentID            string     `json:"agent_id"`
 	Version            string     `json:"version"`
 	WireGuardInterface string     `json:"wireguard_interface"`
+	WireGuardPublicKey string     `json:"wireguard_public_key"`
 	PeerCount          int        `json:"peer_count"`
 	Healthy            bool       `json:"healthy"`
 	LastReconciliation *time.Time `json:"last_reconciliation"`
@@ -50,7 +51,7 @@ func (h *Handler) heartbeat(c *fiber.Ctx) error {
 	if input.AgentID == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "agent_id is required")
 	}
-	if err := h.service.Heartbeat(input.AgentID, input.Version, input.WireGuardInterface, input.PeerCount, input.Healthy, input.LastReconciliation); err != nil {
+	if err := h.service.Heartbeat(input.AgentID, input.Version, input.WireGuardInterface, input.WireGuardPublicKey, input.PeerCount, input.Healthy, input.LastReconciliation); err != nil {
 		return err
 	}
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -127,7 +128,7 @@ func (h *Handler) reconcileReport(c *fiber.Ctx) error {
 	if input.LastReconciliation == nil {
 		input.LastReconciliation = &now
 	}
-	if err := h.service.Heartbeat(input.AgentID, input.Version, input.WireGuardInterface, input.PeerCount, input.Healthy, input.LastReconciliation); err != nil {
+	if err := h.service.Heartbeat(input.AgentID, input.Version, input.WireGuardInterface, input.WireGuardPublicKey, input.PeerCount, input.Healthy, input.LastReconciliation); err != nil {
 		return err
 	}
 	return c.JSON(fiber.Map{"status": "ok"})

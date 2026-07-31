@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS agent_heartbeats (
   agent_id text UNIQUE NOT NULL,
   version text NOT NULL DEFAULT '',
   wire_guard_interface text NOT NULL DEFAULT '',
+  wireguard_public_key varchar(128) NOT NULL DEFAULT '',
   peer_count integer NOT NULL DEFAULT 0,
   healthy boolean NOT NULL DEFAULT false,
   last_reconciliation timestamp NULL,
@@ -37,6 +38,12 @@ CREATE TABLE IF NOT EXISTS agent_heartbeats (
   created_at timestamp NOT NULL DEFAULT now(),
   updated_at timestamp NOT NULL DEFAULT now()
 );
+
+ALTER TABLE agent_heartbeats
+  ADD COLUMN IF NOT EXISTS wireguard_interface text NOT NULL DEFAULT '';
+
+ALTER TABLE agent_heartbeats
+  ADD COLUMN IF NOT EXISTS wireguard_public_key varchar(128) NOT NULL DEFAULT '';
 
 ALTER TABLE routers ADD COLUMN IF NOT EXISTS wire_guard_peer_status text NOT NULL DEFAULT 'waiting_for_router_key';
 ALTER TABLE routers ADD COLUMN IF NOT EXISTS wire_guard_peer_updated_at timestamp NULL;
@@ -50,3 +57,10 @@ ALTER TABLE routers ADD COLUMN IF NOT EXISTS deleted_at timestamp NULL;
 CREATE INDEX IF NOT EXISTS idx_routers_wire_guard_peer_status ON routers(wire_guard_peer_status);
 CREATE INDEX IF NOT EXISTS idx_routers_provisioning_status ON routers(provisioning_status);
 CREATE INDEX IF NOT EXISTS idx_routers_deleted_at ON routers(deleted_at);
+ALTER TABLE routers DROP CONSTRAINT IF EXISTS routers_wire_guard_tunnel_ip_key;
+DROP INDEX IF EXISTS uni_routers_wire_guard_tunnel_ip;
+DROP INDEX IF EXISTS idx_routers_wire_guard_tunnel_ip;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_routers_wireguard_tunnel_ip_unique
+  ON routers (wire_guard_tunnel_ip)
+  WHERE wire_guard_tunnel_ip IS NOT NULL
+    AND deleted_at IS NULL;
