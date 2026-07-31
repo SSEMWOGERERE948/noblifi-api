@@ -12,12 +12,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/noblifi/noblifi/backend/internal/config"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 const routerWireGuardInterface = "noblifi-wg"
-
 var wireGuardAllocMu sync.Mutex
 
 type WireGuardSetupResponse struct {
@@ -43,41 +40,34 @@ func (s *Service) PrepareWireGuard(routerID uuid.UUID) (WireGuardSetupResponse, 
 		return WireGuardSetupResponse{Enabled: s.cfg.WireGuardEnabled, Issues: issues}, errors.New(strings.Join(issues, "; "))
 	}
 
-	var router Router
-	err := s.repo.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Preload("Interfaces").
-			Preload("PortAssignments").
-			Preload("SetupSession").
-			Preload("NetworkProfile").
-			First(&router, "id = ?", routerID).Error; err != nil {
-			return err
-		}
-		if !routerSupportsWireGuard(router.RouterOSVersion) {
-			return errors.New("WireGuard requires RouterOS 7; upgrade this MikroTik before installing the tunnel")
-		}
+	router, err := s.repo.Find(routerID)
+	if err != nil {
+		return WireGuardSetupResponse{}, err
+	}
+	if !routerSupportsWireGuard(router.RouterOSVersion) {
+		return WireGuardSetupResponse{}, errors.New("WireGuard requires RouterOS 7; upgrade this MikroTik before installing the tunnel")
+	}
 
-		if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
-			ip, err := s.allocateWireGuardTunnelIP(tx)
-			if err != nil {
-				return err
-			}
+	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
+		err := AllocateWireGuardIPWithRetry(s.repo, s.cfg, func(ip string) error {
 			router.WireGuardTunnelIP = &ip
 			router.ManagementIP = &ip
 			if router.WireGuardPublicKey == nil || strings.TrimSpace(*router.WireGuardPublicKey) == "" {
 				router.WireGuardStatus = "awaiting_router_key"
 			}
-			return tx.Save(&router).Error
+			return s.repo.Save(&router)
+		}, 5)
+		if err != nil {
+			return WireGuardSetupResponse{}, fmt.Errorf("allocate WireGuard tunnel IP: %w", err)
 		}
-
+	} else {
 		router.ManagementIP = router.WireGuardTunnelIP
 		if router.WireGuardPublicKey == nil || strings.TrimSpace(*router.WireGuardPublicKey) == "" {
 			router.WireGuardStatus = "awaiting_router_key"
 		}
-		return tx.Save(&router).Error
-	})
-	if err != nil {
-		return WireGuardSetupResponse{}, fmt.Errorf("prepare WireGuard tunnel: %w", err)
+		if err := s.repo.Save(&router); err != nil {
+			return WireGuardSetupResponse{}, err
+		}
 	}
 
 	profile, err := s.NetworkProfile(routerID)
@@ -192,48 +182,6 @@ func AllocateWireGuardIP(repo *Repository, cfg config.Config) (string, error) {
 			return address, nil
 		}
 	}
-	return "", errors.New("WireGuard address pool is exhausted")
-}
-
-func (s *Service) allocateWireGuardTunnelIP(tx *gorm.DB) (string, error) {
-	var locked []Router
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("deleted_at IS NULL").
-		Find(&locked).Error; err != nil {
-		return "", err
-	}
-
-	baseIP, network, err := net.ParseCIDR(strings.TrimSpace(s.cfg.WireGuardSubnetCIDR))
-	if err != nil || baseIP.To4() == nil {
-		return "", errors.New("NOBLIFI_WIREGUARD_SUBNET must be a valid IPv4 CIDR")
-	}
-	ones, bits := network.Mask.Size()
-	if bits != 32 || ones > 30 {
-		return "", errors.New("NOBLIFI_WIREGUARD_SUBNET must contain at least two usable router addresses")
-	}
-
-	base := binary.BigEndian.Uint32(baseIP.To4())
-	hostCount := uint64(1) << uint(32-ones)
-	lastUsable := uint64(base) + hostCount - 2
-	for candidate := uint64(base) + 2; candidate <= lastUsable; candidate++ {
-		value := make(net.IP, net.IPv4len)
-		binary.BigEndian.PutUint32(value, uint32(candidate))
-		address := value.String()
-		if address == strings.TrimSpace(s.cfg.WireGuardServerIP) {
-			continue
-		}
-
-		var count int64
-		if err := tx.Model(&Router{}).
-			Where("wire_guard_tunnel_ip = ? AND deleted_at IS NULL", address).
-			Count(&count).Error; err != nil {
-			return "", err
-		}
-		if count == 0 {
-			return address, nil
-		}
-	}
-
 	return "", errors.New("WireGuard address pool is exhausted")
 }
 

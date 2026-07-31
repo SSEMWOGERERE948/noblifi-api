@@ -42,10 +42,9 @@ type WireGuardJob struct {
 
 type AgentHeartbeat struct {
 	ID                 uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	AgentID            string     `gorm:"column:agent_id;uniqueIndex;not null" json:"agent_id"`
-	Version            string     `gorm:"column:version" json:"version"`
-	WireGuardInterface string     `gorm:"column:wireguard_interface" json:"wireguard_interface"`
-	WireGuardPublicKey string     `gorm:"column:wireguard_public_key;size:128;not null;default:''" json:"wireguard_public_key"`
+	AgentID            string     `gorm:"uniqueIndex;not null" json:"agent_id"`
+	Version            string     `json:"version"`
+	WireGuardInterface string     `json:"wireguard_interface"`
 	PeerCount          int        `json:"peer_count"`
 	Healthy            bool       `json:"healthy"`
 	LastReconciliation *time.Time `json:"last_reconciliation"`
