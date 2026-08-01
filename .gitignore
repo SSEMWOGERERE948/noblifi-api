@@ -26,3 +26,21 @@ coverage.out
 Thumbs.db
 .idea/
 .vscode/
+
+# Go build and test caches
+.gocache
+.gocache/**
+.gotestcache
+.gotestcache/**
+
+
+# Build output
+bin
+dist
+build
+tmp
+temp
+
+# Windows files
+Thumbs.db
+Desktop.ini

@@ -100,7 +100,22 @@ func (s *Service) InstallScript(token, sourceIP string) (string, error) {
 	options.ProvisioningClaimToken = token
 	s.applyWireGuardRenderOptions(&options, router)
 
+	assignments := make([]portprofiles.Assignment, 0, len(router.PortAssignments))
+	for _, assignment := range router.PortAssignments {
+		assignments = append(assignments, portprofiles.Assignment{
+			InterfaceName: assignment.InterfaceName,
+			Role:          assignment.Role,
+		})
+	}
+	if len(assignments) == 0 {
+		assignments = portprofiles.DefaultAssignments()
+	}
+
 	managementScript, err := portprofiles.RenderManagementBootstrap(options)
+	if err != nil {
+		return "", err
+	}
+	managedScript, err := portprofiles.RenderManagedRouterConfig(assignments, options)
 	if err != nil {
 		return "", err
 	}
@@ -110,15 +125,17 @@ func (s *Service) InstallScript(token, sourceIP string) (string, error) {
 	_ = sourceIP
 
 	var builder strings.Builder
-	builder.WriteString("# NobliFi agent-managed MikroTik install\n")
-	builder.WriteString("# The router establishes management first; xneelo applies HotSpot, RADIUS, DHCP, NAT, and portal files afterward.\n\n")
+	builder.WriteString("# NobliFi MikroTik install\n")
+	builder.WriteString("# The router establishes management first, then applies HotSpot, RADIUS, DHCP, NAT, and portal files.\n\n")
 	builder.WriteString(`:put "NobliFi management bootstrap starting"`)
 	builder.WriteString("\n\n")
 	builder.WriteString(renderBootstrapScript(token, s.cfg.ProvisioningBaseURL))
 	builder.WriteString("\n\n")
 	builder.WriteString(managementScript)
 	builder.WriteString("\n")
-	builder.WriteString(`:put "NobliFi management bootstrap completed; waiting for xneelo router configuration job"`)
+	builder.WriteString(managedScript)
+	builder.WriteString("\n")
+	builder.WriteString(renderStatusCommand(token, "installed", s.cfg.ProvisioningBaseURL))
 	return builder.String(), nil
 }
 

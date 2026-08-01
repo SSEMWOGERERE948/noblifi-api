@@ -230,9 +230,10 @@ func RenderManagedRouterConfig(assignments []Assignment, options RenderOptions) 
 	options = withDefaults(options)
 	options = withProvisioningContext(options)
 
-	// RADIUS is carried through the management tunnel. The public xneelo address
-	// remains only the WireGuard endpoint.
-	if strings.TrimSpace(options.WireGuardServerIP) != "" {
+	// For WireGuard installs, RADIUS is carried through the management tunnel.
+	// Non-WireGuard/manual installs must keep the explicitly configured public
+	// RADIUS address.
+	if options.WireGuardEnabled && strings.TrimSpace(options.WireGuardServerIP) != "" {
 		options.RadiusServer = strings.TrimSpace(options.WireGuardServerIP)
 	}
 	if isPlaceholderRadiusServer(options.RadiusServer) {
