@@ -66,7 +66,34 @@ func (s *Service) QueueRouterConfigure(router routers.Router, _ string) (WireGua
 	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
 		return WireGuardJob{}, errors.New("router WireGuard client IP is required")
 	}
+	if strings.TrimSpace(router.ProvisioningStatus) == "installed" {
+		return WireGuardJob{}, nil
+	}
+	existing, ok, err := s.existingConfigureJob(router.ID)
+	if err != nil {
+		return WireGuardJob{}, err
+	}
+	if ok {
+		return existing, nil
+	}
 	return s.QueueJob(router.ID, OperationConfigureRouter, "", "")
+}
+
+func (s *Service) existingConfigureJob(routerID uuid.UUID) (WireGuardJob, bool, error) {
+	var job WireGuardJob
+	err := s.db.
+		Where(
+			"router_id = ? AND operation = ? AND status IN ?",
+			routerID,
+			OperationConfigureRouter,
+			[]string{StatusQueued, StatusClaimed, StatusApplying, StatusRetrying, StatusSucceeded},
+		).
+		Order("created_at desc").
+		First(&job).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return WireGuardJob{}, false, nil
+	}
+	return job, err == nil, err
 }
 
 func (s *Service) QueuePeerRemoval(router routers.Router) (WireGuardJob, error) {
@@ -311,6 +338,8 @@ func (s *Service) applyRouterJobStatus(job WireGuardJob, message string) error {
 			updates["provisioning_status"] = "installed"
 			updates["provisioning_error"] = nil
 			updates["wire_guard_last_error"] = nil
+			updates["wire_guard_status"] = "configured"
+			updates["wire_guard_peer_status"] = "configured"
 			updates["last_seen_at"] = now
 		} else if job.Status == StatusFailed {
 			updates["provisioning_status"] = "router_config_failed"
@@ -341,7 +370,27 @@ func (s *Service) applyRouterJobStatus(job WireGuardJob, message string) error {
 	if len(updates) == 1 {
 		return nil
 	}
-	return s.db.Model(&routers.Router{}).Where("id = ?", job.RouterID).Updates(updates).Error
+	if err := s.db.Model(&routers.Router{}).Where("id = ?", job.RouterID).Updates(updates).Error; err != nil {
+		return err
+	}
+	if job.Operation == OperationConfigureRouter && job.Status == StatusSucceeded {
+		return s.db.Model(&WireGuardJob{}).
+			Where(
+				"router_id = ? AND operation = ? AND id <> ? AND status IN ?",
+				job.RouterID,
+				OperationConfigureRouter,
+				job.ID,
+				[]string{StatusQueued, StatusClaimed, StatusApplying, StatusRetrying},
+			).
+			Updates(map[string]any{
+				"status":       StatusCancelled,
+				"completed_at": now,
+				"locked_by":    "",
+				"locked_at":    nil,
+				"last_error":   "cancelled because router configuration already succeeded",
+			}).Error
+	}
+	return nil
 }
 
 func safeError(value string) string {

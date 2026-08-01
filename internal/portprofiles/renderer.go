@@ -669,7 +669,7 @@ func writeHotspotNetwork(builder *strings.Builder, options RenderOptions, interf
 		)
 
 		writeSafe(builder, fmt.Sprintf(`/interface list member remove [find where list="LAN" interface="%s"]`, escape(iface)), "cleanup LAN list member")
-		writeSafe(builder, fmt.Sprintf(`/interface list member add list=LAN interface="%s" comment="NobliFi LAN member"`, escape(iface)), "add LAN list member")
+		writeSafe(builder, fmt.Sprintf(`:if ([:len [/interface list member find where list="LAN" interface="%s"]] = 0) do={ /interface list member add list=LAN interface="%s" comment="NobliFi LAN member" }`, escape(iface), escape(iface)), "add LAN list member")
 	}
 
 	writeCritical(
@@ -1130,6 +1130,11 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	for _, host := range options.WalledGardenHosts {
 		writeSafe(
 			builder,
+			fmt.Sprintf(`/ip hotspot walled-garden remove [find where dst-host=%s comment="NobliFi captive portal"]`, host),
+			"cleanup captive portal walled garden host",
+		)
+		writeSafe(
+			builder,
 			fmt.Sprintf(`/ip hotspot walled-garden add dst-host=%s comment="NobliFi captive portal"`, host),
 			"add captive portal walled garden",
 		)
@@ -1301,13 +1306,13 @@ func writeBridge(builder *strings.Builder, bridge string, interfaces []string, a
 			"add bridge port",
 		)
 		writeSafe(builder, fmt.Sprintf(`/interface list member remove [find where list="LAN" interface="%s"]`, escape(iface)), "cleanup LAN list member")
-		writeSafe(builder, fmt.Sprintf(`/interface list member add list=LAN interface="%s" comment="NobliFi LAN member"`, escape(iface)), "add LAN list member")
+		writeSafe(builder, fmt.Sprintf(`:if ([:len [/interface list member find where list="LAN" interface="%s"]] = 0) do={ /interface list member add list=LAN interface="%s" comment="NobliFi LAN member" }`, escape(iface), escape(iface)), "add LAN list member")
 	}
 
-	writeSafe(builder, fmt.Sprintf(`/ip address add address=%s interface="%s" comment="NobliFi %s gateway"`, address, escape(bridge), escape(role)), "add bridge gateway")
-	writeSafe(builder, fmt.Sprintf(`/ip pool add name=%s ranges=%s comment="NobliFi %s pool"`, pool, ranges, escape(role)), "add address pool")
-	writeSafe(builder, fmt.Sprintf(`/ip dhcp-server add name=dhcp-%s interface="%s" address-pool=%s lease-time=1h disabled=no`, role, escape(bridge), pool), "add dhcp server")
-	writeSafe(builder, fmt.Sprintf(`/ip dhcp-server network add address="%s" gateway="%s" dns-server="%s"`, escape(subnet), escape(gateway), escape(gateway)), "add dhcp network")
+	writeSafe(builder, fmt.Sprintf(`:if ([:len [/ip address find where interface="%s" address="%s"]] = 0) do={ /ip address add address=%s interface="%s" comment="NobliFi %s gateway" } else={ /ip address set [find where interface="%s" address="%s"] comment="NobliFi %s gateway" }`, escape(bridge), escape(address), address, escape(bridge), escape(role), escape(bridge), escape(address), escape(role)), "ensure bridge gateway")
+	writeSafe(builder, fmt.Sprintf(`:if ([:len [/ip pool find where name="%s"]] = 0) do={ /ip pool add name=%s ranges=%s comment="NobliFi %s pool" } else={ /ip pool set [find where name="%s"] ranges=%s comment="NobliFi %s pool" }`, pool, pool, ranges, escape(role), pool, ranges, escape(role)), "ensure address pool")
+	writeSafe(builder, fmt.Sprintf(`:if ([:len [/ip dhcp-server find where name="dhcp-%s"]] = 0) do={ /ip dhcp-server add name=dhcp-%s interface="%s" address-pool=%s lease-time=1h disabled=no } else={ /ip dhcp-server set [find where name="dhcp-%s"] interface="%s" address-pool=%s lease-time=1h disabled=no }`, role, role, escape(bridge), pool, role, escape(bridge), pool), "ensure dhcp server")
+	writeSafe(builder, fmt.Sprintf(`:if ([:len [/ip dhcp-server network find where address="%s"]] = 0) do={ /ip dhcp-server network add address="%s" gateway="%s" dns-server="%s" } else={ /ip dhcp-server network set [find where address="%s"] gateway="%s" dns-server="%s" }`, escape(subnet), escape(subnet), escape(gateway), escape(gateway), escape(subnet), escape(gateway), escape(gateway)), "ensure dhcp network")
 
 	builder.WriteString("\n")
 }
