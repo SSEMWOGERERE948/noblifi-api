@@ -8,11 +8,20 @@ import (
 )
 
 type Handler struct {
-	service *Service
+	service   *Service
+	agentAuth AgentAuthenticator
 }
 
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
+}
+
+type AgentAuthenticator interface {
+	AuthenticateAgent(token string) bool
+}
+
+func (h *Handler) SetAgentAuthenticator(auth AgentAuthenticator) {
+	h.agentAuth = auth
 }
 
 func (h *Handler) RegisterRoutes(router fiber.Router) {
@@ -31,6 +40,24 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Post("/provisioning/wireguard-status", h.wireGuardStatus)
 	router.Post("/provisioning/status", h.status)
 	router.Get("/provisioning/status", h.status)
+
+	internal := router.Group("/internal", h.authAgent)
+	internal.Get("/routers/:id/desired-config", h.desiredConfig)
+}
+
+func (h *Handler) authAgent(c *fiber.Ctx) error {
+	if h.agentAuth == nil || !h.agentAuth.AuthenticateAgent(c.Get(fiber.HeaderAuthorization)) {
+		return fiber.NewError(fiber.StatusUnauthorized, "unauthorized")
+	}
+	return c.Next()
+}
+
+func (h *Handler) desiredConfig(c *fiber.Ctx) error {
+	result, err := h.service.DesiredRouterConfig(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, err.Error())
+	}
+	return c.JSON(result)
 }
 
 func (h *Handler) wireGuardKey(c *fiber.Ctx) error {

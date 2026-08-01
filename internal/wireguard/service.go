@@ -17,8 +17,6 @@ import (
 
 var ErrUnauthorized = errors.New("agent unauthorized")
 
-const operationConfigureRouter = "configure_router"
-
 type Service struct {
 	db  *gorm.DB
 	cfg config.Config
@@ -68,7 +66,7 @@ func (s *Service) QueueRouterConfigure(router routers.Router, _ string) (WireGua
 	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
 		return WireGuardJob{}, errors.New("router WireGuard client IP is required")
 	}
-	return s.QueueJob(router.ID, operationConfigureRouter, "", "")
+	return s.QueueJob(router.ID, OperationConfigureRouter, "", "")
 }
 
 func (s *Service) QueuePeerRemoval(router routers.Router) (WireGuardJob, error) {
@@ -180,12 +178,17 @@ func (s *Service) CompleteJob(jobID uuid.UUID, agentID string) error {
 		return err
 	}
 
-	// A successful peer installation makes the management tunnel available.
-	// Queue the complete RouterOS/HotSpot/RADIUS stage only after that succeeds.
+	// Full router configuration requires both halves of the tunnel lifecycle:
+	// the VPS peer must be installed and the MikroTik must report a current
+	// handshake. If the handshake arrived first, this completion can queue the
+	// second stage; otherwise WireGuardStatus will queue it later.
 	if completed.Operation == OperationUpsertPeer {
 		var router routers.Router
 		if err := s.db.Preload("PortAssignments").First(&router, "id = ?", completed.RouterID).Error; err != nil {
 			return fmt.Errorf("load router after peer completion: %w", err)
+		}
+		if router.WireGuardLastHandshakeAt == nil {
+			return nil
 		}
 		if _, err := s.QueueRouterConfigure(router, ""); err != nil {
 			return fmt.Errorf("queue configure_router job: %w", err)
@@ -235,7 +238,33 @@ func (s *Service) updateClaimedJob(jobID uuid.UUID, agentID string, apply func(*
 	})
 }
 
-func (s *Service) Heartbeat(agentID, version, iface string, peerCount int, healthy bool, lastReconciliation *time.Time) error {
+func (s *Service) ActiveServerPublicKey() (string, error) {
+	var hb AgentHeartbeat
+	err := s.db.
+		Where("healthy = ? AND wire_guard_public_key <> ''", true).
+		Order("last_seen_at desc").
+		First(&hb).Error
+	if err == nil {
+		publicKey := strings.TrimSpace(hb.WireGuardPublicKey)
+		if err := routers.ValidateWireGuardPublicKey(publicKey); err != nil {
+			return "", fmt.Errorf("active WireGuard agent public key is invalid: %w", err)
+		}
+		return publicKey, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	}
+	if strings.TrimSpace(s.cfg.WireGuardPublicKey) != "" {
+		publicKey := strings.TrimSpace(s.cfg.WireGuardPublicKey)
+		if err := routers.ValidateWireGuardPublicKey(publicKey); err != nil {
+			return "", fmt.Errorf("configured WireGuard public key is invalid: %w", err)
+		}
+		return publicKey, nil
+	}
+	return "", errors.New("no healthy WireGuard agent public key is available")
+}
+
+func (s *Service) Heartbeat(agentID, version, iface, publicKey string, peerCount int, healthy bool, lastReconciliation *time.Time) error {
 	now := time.Now().UTC()
 	var hb AgentHeartbeat
 	err := s.db.First(&hb, "agent_id = ?", agentID).Error
@@ -246,6 +275,7 @@ func (s *Service) Heartbeat(agentID, version, iface string, peerCount int, healt
 	}
 	hb.Version = version
 	hb.WireGuardInterface = iface
+	hb.WireGuardPublicKey = strings.TrimSpace(publicKey)
 	hb.PeerCount = peerCount
 	hb.Healthy = healthy
 	hb.LastReconciliation = lastReconciliation
@@ -259,12 +289,15 @@ func (s *Service) applyRouterJobStatus(job WireGuardJob, message string) error {
 	switch job.Operation {
 	case OperationUpsertPeer, OperationReconcilePeer:
 		if job.Status == StatusSucceeded {
-			updates["wire_guard_status"] = "peer_ready"
 			updates["wire_guard_peer_status"] = "peer_ready"
 			updates["wire_guard_peer_updated_at"] = now
 			updates["wire_guard_last_error"] = nil
 			updates["provisioning_status"] = "wireguard_peer_ready"
 			updates["provisioning_error"] = nil
+			updates["wire_guard_status"] = gorm.Expr(
+				"CASE WHEN wire_guard_last_handshake_at IS NULL THEN ? ELSE wire_guard_status END",
+				"peer_ready",
+			)
 		} else if job.Status == StatusFailed {
 			updates["wire_guard_status"] = "failed"
 			updates["wire_guard_peer_status"] = "failed"
@@ -272,7 +305,7 @@ func (s *Service) applyRouterJobStatus(job WireGuardJob, message string) error {
 			updates["provisioning_status"] = "peer_failed"
 			updates["provisioning_error"] = message
 		}
-	case operationConfigureRouter:
+	case OperationConfigureRouter:
 		if job.Status == StatusSucceeded {
 			updates["status"] = "online"
 			updates["provisioning_status"] = "installed"

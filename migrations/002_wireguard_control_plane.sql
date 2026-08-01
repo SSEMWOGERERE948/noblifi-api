@@ -46,6 +46,7 @@ ALTER TABLE routers ADD COLUMN IF NOT EXISTS provisioning_status text NOT NULL D
 ALTER TABLE routers ADD COLUMN IF NOT EXISTS provisioning_error text NULL;
 ALTER TABLE routers ADD COLUMN IF NOT EXISTS delete_requested_at timestamp NULL;
 ALTER TABLE routers ADD COLUMN IF NOT EXISTS deleted_at timestamp NULL;
+ALTER TABLE agent_heartbeats ADD COLUMN IF NOT EXISTS wire_guard_public_key text NOT NULL DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS idx_routers_wire_guard_peer_status ON routers(wire_guard_peer_status);
 CREATE INDEX IF NOT EXISTS idx_routers_provisioning_status ON routers(provisioning_status);

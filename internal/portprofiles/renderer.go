@@ -842,7 +842,7 @@ func writeWireGuardManagement(builder *strings.Builder, options RenderOptions) {
 		builder.WriteString(`  :if ([:len $noblifiWGPeer] > 0) do={` + "\n")
 		builder.WriteString(`    :local noblifiWGRx [/interface wireguard peers get [:pick $noblifiWGPeer 0] rx]` + "\n")
 		builder.WriteString(`    :set noblifiWGLastHandshake [/interface wireguard peers get [:pick $noblifiWGPeer 0] last-handshake]` + "\n")
-		builder.WriteString(`    :if ($noblifiWGRx > 0) do={ :set noblifiWGHandshake true }` + "\n")
+		builder.WriteString(`    :if (($noblifiWGRx > 0) && ($noblifiWGLastHandshake != "")) do={ :set noblifiWGHandshake true }` + "\n")
 		builder.WriteString(`  }` + "\n")
 		builder.WriteString(fmt.Sprintf(`  :if ($noblifiWGHandshake) do={ :set second %d } else={ :delay 1s }`, waitSeconds) + "\n")
 		builder.WriteString(`}` + "\n")

@@ -127,6 +127,7 @@ func Run() {
 
 	wireGuardControlPlane := wireguard.NewService(db, cfg)
 	routerService.SetWireGuardCleanup(wireGuardCleanupAdapter{w: wireGuardControlPlane})
+	routerService.SetWireGuardServerPublicKeyResolver(wireGuardControlPlane)
 
 	routers.NewHandler(
 		routerService,
@@ -185,9 +186,11 @@ func Run() {
 		wireGuardControlPlane,
 	)
 
-	provisioning.NewHandler(
+	provisioningHandler := provisioning.NewHandler(
 		provisioningService,
-	).RegisterRoutes(api)
+	)
+	provisioningHandler.SetAgentAuthenticator(wireGuardControlPlane)
+	provisioningHandler.RegisterRoutes(api)
 
 	// ---------------------------------------------------------
 	// RADIUS MANAGEMENT API

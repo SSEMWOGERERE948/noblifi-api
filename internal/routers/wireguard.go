@@ -42,9 +42,10 @@ type WireGuardSetupResponse struct {
 func (s *Service) PrepareWireGuard(
 	routerID uuid.UUID,
 ) (WireGuardSetupResponse, error) {
-	if issues := wireGuardConfigIssues(s.cfg); len(issues) > 0 {
+	cfg := s.wireGuardConfig()
+	if issues := wireGuardConfigIssues(cfg); len(issues) > 0 {
 		return WireGuardSetupResponse{
-			Enabled: s.cfg.WireGuardEnabled,
+			Enabled: cfg.WireGuardEnabled,
 			Issues:  issues,
 		}, errors.New(strings.Join(issues, "; "))
 	}
@@ -65,7 +66,7 @@ func (s *Service) PrepareWireGuard(
 
 		err := AllocateWireGuardIPWithRetry(
 			s.repo,
-			s.cfg,
+			cfg,
 			func(candidateIP string) error {
 				/*
 					Reload the router for every attempt.
@@ -164,7 +165,7 @@ func (s *Service) PrepareWireGuard(
 		return WireGuardSetupResponse{}, err
 	}
 
-	profile.RadiusServer = s.cfg.WireGuardServerIP
+	profile.RadiusServer = cfg.WireGuardServerIP
 
 	if err := s.repo.SaveNetworkProfile(&profile); err != nil {
 		return WireGuardSetupResponse{}, err
@@ -187,18 +188,19 @@ func (s *Service) WireGuardSetup(
 func (s *Service) wireGuardSetupForRouter(
 	router Router,
 ) WireGuardSetupResponse {
-	issues := wireGuardConfigIssues(s.cfg)
+	cfg := s.wireGuardConfig()
+	issues := wireGuardConfigIssues(cfg)
 
 	response := WireGuardSetupResponse{
-		Enabled:       s.cfg.WireGuardEnabled,
-		Ready:         len(issues) == 0 &&
+		Enabled: cfg.WireGuardEnabled,
+		Ready: len(issues) == 0 &&
 			router.WireGuardTunnelIP != nil,
 		Issues:        issues,
 		Status:        router.WireGuardStatus,
 		InterfaceName: routerWireGuardInterface,
-		Endpoint:      s.cfg.WireGuardEndpoint,
-		EndpointPort:  s.cfg.WireGuardPort,
-		ServerAddress: s.cfg.WireGuardServerIP,
+		Endpoint:      cfg.WireGuardEndpoint,
+		EndpointPort:  cfg.WireGuardPort,
+		ServerAddress: cfg.WireGuardServerIP,
 	}
 
 	if response.Status == "" {
@@ -223,11 +225,11 @@ func (s *Service) wireGuardSetupForRouter(
 
 	if len(issues) == 0 {
 		response.MikroTikScript =
-			RenderWireGuardRouterOS(router, s.cfg)
+			RenderWireGuardRouterOS(router, cfg)
 
 		wireGuardURL :=
 			normalizeProvisioningBaseURL(
-				s.cfg.ProvisioningBaseURL,
+				cfg.ProvisioningBaseURL,
 			) +
 				"/wireguard/" +
 				router.ClaimToken
@@ -253,7 +255,7 @@ func (s *Service) wireGuardSetupForRouter(
 
 	statusURL :=
 		normalizeProvisioningBaseURL(
-			s.cfg.ProvisioningBaseURL,
+			cfg.ProvisioningBaseURL,
 		) + "/wireguard-status"
 
 	statusPayload := fmt.Sprintf(
@@ -269,10 +271,10 @@ func (s *Service) wireGuardSetupForRouter(
 			"-X POST %q "+
 			"-H 'Content-Type: application/json' "+
 			"--data %q",
-		s.cfg.WireGuardInterface,
+		cfg.WireGuardInterface,
 		response.RouterPublicKey,
 		response.RouterAddress,
-		s.cfg.WireGuardInterface,
+		cfg.WireGuardInterface,
 		response.RouterAddress,
 		statusURL,
 		statusPayload,
@@ -291,11 +293,21 @@ func (s *Service) wireGuardSetupForRouter(
 
 	response.VerificationCommands = fmt.Sprintf(
 		"sudo wg show %s\nping -c 3 %s",
-		s.cfg.WireGuardInterface,
+		cfg.WireGuardInterface,
 		response.RouterAddress,
 	)
 
 	return response
+}
+
+func (s *Service) wireGuardConfig() config.Config {
+	cfg := s.cfg
+	if s.serverPublicKeyResolver != nil {
+		if publicKey, err := s.serverPublicKeyResolver.ActiveServerPublicKey(); err == nil {
+			cfg.WireGuardPublicKey = publicKey
+		}
+	}
+	return cfg
 }
 
 // AllocateWireGuardIP returns the next currently unused router address.
@@ -416,9 +428,7 @@ func AllocateWireGuardIP(
 	firstCandidate := uint64(base) + 2
 	lastCandidate := uint64(base) + hostCount - 2
 
-	for candidate := firstCandidate;
-		candidate <= lastCandidate;
-		candidate++ {
+	for candidate := firstCandidate; candidate <= lastCandidate; candidate++ {
 
 		if candidate > uint64(^uint32(0)) {
 			break
@@ -868,7 +878,7 @@ func RenderWireGuardRouterOS(
     :local rx [/interface wireguard peers get [:pick $wgPeer 0] rx]
     :set lastHandshake [/interface wireguard peers get [:pick $wgPeer 0] last-handshake]
 
-    :if ($rx > 0) do={
+    :if (($rx > 0) && ($lastHandshake != "")) do={
       :set connected true
     }
   }

@@ -29,11 +29,19 @@ func TestParseWGConfigPreservesInterfacePrivateKey(t *testing.T) {
 	}
 }
 
-func TestWGConfigUpsertReplacesStaleAllowedIP(t *testing.T) {
+func TestWGConfigReplacesStaleAllowedIPWhenCallerRemovesOwner(t *testing.T) {
 	conf, err := parseWGConfig(fixture)
 	if err != nil {
 		t.Fatalf("parseWGConfig: %v", err)
 	}
+	stale, ok := conf.PeerByAllowedIP("10.77.0.9/32")
+	if !ok {
+		t.Fatalf("expected stale peer lookup")
+	}
+	if stale.PublicKey == "" {
+		t.Fatalf("expected stale peer public key")
+	}
+	conf.RemovePeerByKey(stale.PublicKey)
 	conf.UpsertPeer("NEWKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "10.77.0.9/32")
 	rendered := conf.String()
 	if strings.Contains(rendered, "OLDKEY") {

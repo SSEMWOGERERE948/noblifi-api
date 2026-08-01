@@ -16,13 +16,18 @@ import (
 )
 
 type Service struct {
-	repo    *Repository
-	cfg     config.Config
-	cleanup WireGuardCleanupQueuer
+	repo                    *Repository
+	cfg                     config.Config
+	cleanup                 WireGuardCleanupQueuer
+	serverPublicKeyResolver WireGuardServerPublicKeyResolver
 }
 
 type WireGuardCleanupQueuer interface {
 	QueuePeerRemoval(router Router) error
+}
+
+type WireGuardServerPublicKeyResolver interface {
+	ActiveServerPublicKey() (string, error)
 }
 
 func NewService(repo *Repository, cfg config.Config) *Service {
@@ -31,6 +36,10 @@ func NewService(repo *Repository, cfg config.Config) *Service {
 
 func (s *Service) SetWireGuardCleanup(cleanup WireGuardCleanupQueuer) {
 	s.cleanup = cleanup
+}
+
+func (s *Service) SetWireGuardServerPublicKeyResolver(resolver WireGuardServerPublicKeyResolver) {
+	s.serverPublicKeyResolver = resolver
 }
 
 type CreateRouterInput struct {
@@ -343,7 +352,8 @@ func (s *Service) HotspotInstallCommand(routerID uuid.UUID) (string, error) {
 }
 
 func (s *Service) prepareWireGuardForInstall(routerID uuid.UUID) error {
-	if !s.cfg.WireGuardEnabled || ValidateWireGuardConfig(s.cfg) != nil {
+	cfg := s.wireGuardConfig()
+	if !cfg.WireGuardEnabled || ValidateWireGuardConfig(cfg) != nil {
 		return nil
 	}
 	router, err := s.repo.Find(routerID)

@@ -10,6 +10,7 @@ const (
 	OperationUpsertPeer      = "upsert_peer"
 	OperationRemovePeer      = "remove_peer"
 	OperationReconcilePeer   = "reconcile_peer"
+	OperationConfigureRouter = "configure_router"
 	OperationUpsertRadiusNAS = "upsert_radius_nas"
 	OperationRemoveRadiusNAS = "remove_radius_nas"
 
@@ -45,6 +46,7 @@ type AgentHeartbeat struct {
 	AgentID            string     `gorm:"uniqueIndex;not null" json:"agent_id"`
 	Version            string     `json:"version"`
 	WireGuardInterface string     `json:"wireguard_interface"`
+	WireGuardPublicKey string     `json:"wireguard_public_key"`
 	PeerCount          int        `json:"peer_count"`
 	Healthy            bool       `json:"healthy"`
 	LastReconciliation *time.Time `json:"last_reconciliation"`

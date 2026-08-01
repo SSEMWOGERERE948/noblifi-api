@@ -238,25 +238,25 @@ func (a *Agent) upsertPeer(ctx context.Context, job Job) error {
 	return a.withConfigLock(func() error {
 		conf, err := readWGConfig(a.cfg.ConfigPath)
 		if err != nil {
-			return err
+			return fmt.Errorf("read WireGuard configuration: %w", err)
 		}
 
-		// Guard against a duplicate tunnel-IP allocation upstream: if some
-		// OTHER public key already holds this exact allowed-ip, refuse rather
-		// than silently evicting it.
-		if existing, ok := conf.PeerByAllowedIP(allowedIP); ok && existing.PublicKey != publicKey {
-			return fmt.Errorf(
-				"refusing to upsert peer: allowed-ip %s is already assigned to a different public key (%s); this indicates a duplicate WireGuardTunnelIP allocation upstream",
-				allowedIP, existing.PublicKey,
-			)
+		if stalePeer, ok := conf.PeerByAllowedIP(allowedIP); ok {
+			staleKey := strings.TrimSpace(stalePeer.PublicKey)
+			if staleKey != "" && staleKey != publicKey {
+				if _, err := a.runner.Run(ctx, "wg", "set", a.cfg.InterfaceName, "peer", staleKey, "remove"); err != nil {
+					return fmt.Errorf("remove stale WireGuard peer: %w", sanitizeCommandError(err))
+				}
+				conf.RemovePeerByKey(staleKey)
+			}
 		}
 
 		conf.UpsertPeer(publicKey, allowedIP)
 		if err := a.persist(ctx, conf); err != nil {
-			return err
+			return fmt.Errorf("persist WireGuard peer: %w", err)
 		}
 		if _, err := a.runner.Run(ctx, "wg", "set", a.cfg.InterfaceName, "peer", publicKey, "allowed-ips", allowedIP); err != nil {
-			return sanitizeCommandError(err)
+			return fmt.Errorf("apply WireGuard peer: %w", sanitizeCommandError(err))
 		}
 		return a.verifyPeer(ctx, publicKey, allowedIP, true)
 	})
@@ -309,10 +309,6 @@ func (a *Agent) persist(ctx context.Context, conf WGConfig) error {
 	return os.Rename(tmp, a.cfg.ConfigPath)
 }
 
-// verifyPeer parses "wg show <iface> allowed-ips" (one "<pubkey>\t<ips>" line
-// per peer) and checks the pairing on a single line, instead of doing a
-// substring search across the whole output where the key could match one
-// peer's line and the IP could match a different peer's line.
 func (a *Agent) verifyPeer(ctx context.Context, publicKey, allowedIP string, present bool) error {
 	out, err := a.runner.Run(ctx, "wg", "show", a.cfg.InterfaceName, "allowed-ips")
 	if err != nil {
@@ -329,29 +325,47 @@ func (a *Agent) verifyPeer(ctx context.Context, publicKey, allowedIP string, pre
 		if fields[0] != publicKey {
 			continue
 		}
-		if strings.Contains(strings.Join(fields[1:], " "), allowedIP) {
+		if fields[1] == allowedIP {
 			found = true
 		}
 		break
 	}
 
 	if present && !found {
-		return errors.New("peer_verification_failed")
+		return fmt.Errorf("WireGuard peer verification failed: key %s does not own %s", publicKey, allowedIP)
 	}
 	if !present && found {
-		return errors.New("peer_removal_verification_failed")
+		return errors.New("WireGuard peer still exists after removal")
 	}
 	return nil
 }
 
 func (a *Agent) heartbeat(ctx context.Context, healthy bool) error {
+	publicKey, err := a.serverPublicKey(ctx)
+	if err != nil {
+		a.log.Warn("read WireGuard public key failed", "error", err)
+		healthy = false
+	}
 	return a.post(ctx, "/internal/agents/heartbeat", map[string]any{
-		"agent_id":            a.cfg.AgentID,
-		"version":             version,
-		"wireguard_interface": a.cfg.InterfaceName,
-		"healthy":             healthy,
-		"last_reconciliation": time.Now().UTC(),
+		"agent_id":             a.cfg.AgentID,
+		"version":              version,
+		"wireguard_interface":  a.cfg.InterfaceName,
+		"wireguard_public_key": publicKey,
+		"healthy":              healthy,
+		"last_reconciliation":  time.Now().UTC(),
 	}, nil)
+}
+
+func (a *Agent) serverPublicKey(ctx context.Context) (string, error) {
+	out, err := a.runner.Run(ctx, "wg", "show", a.cfg.InterfaceName, "public-key")
+	if err != nil {
+		return "", sanitizeCommandError(err)
+	}
+	publicKey := strings.TrimSpace(string(out))
+	if publicKey == "" {
+		return "", errors.New("WireGuard interface public key is empty")
+	}
+	return publicKey, nil
 }
 
 func (a *Agent) post(ctx context.Context, path string, payload any, out any) error {

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/noblifi/noblifi/backend/internal/config"
 	"github.com/noblifi/noblifi/backend/internal/plans"
 	"github.com/noblifi/noblifi/backend/internal/portprofiles"
@@ -29,6 +30,10 @@ type RadiusRegistrar interface {
 
 type WireGuardPeerQueuer interface {
 	QueuePeerUpsert(router routers.Router) (wireguard.WireGuardJob, error)
+}
+
+type WireGuardServerPublicKeyResolver interface {
+	ActiveServerPublicKey() (string, error)
 }
 
 // RouterConfigureQueuer is implemented by the agent job service once it also
@@ -131,7 +136,13 @@ func (s *Service) WireGuardScript(token string) (string, error) {
 	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
 		return "", errors.New("claim token expired")
 	}
-	return routers.RenderWireGuardRouterOS(router, s.cfg), nil
+	cfg := s.cfg
+	serverPublicKey, err := s.activeWireGuardServerPublicKey()
+	if err != nil {
+		return "", fmt.Errorf("resolve active WireGuard server public key: %w", err)
+	}
+	cfg.WireGuardPublicKey = serverPublicKey
+	return routers.RenderWireGuardRouterOS(router, cfg), nil
 }
 
 func (s *Service) HotspotLoginPage(token string) (string, error) {
@@ -234,6 +245,7 @@ type DesiredRouterConfig struct {
 	APIUsername    string `json:"api_username"`
 	APIPassword    string `json:"api_password"`
 	APIPort        int    `json:"api_port"`
+	APITLS         bool   `json:"api_tls"`
 	RouterOSScript string `json:"routeros_script"`
 }
 
@@ -286,8 +298,21 @@ func (s *Service) DesiredRouterConfigForRouter(router routers.Router, token stri
 		APIUsername:    options.APIUsername,
 		APIPassword:    options.APIPassword,
 		APIPort:        apiPort,
+		APITLS:         options.EnableAPISSLService,
 		RouterOSScript: script,
 	}, nil
+}
+
+func (s *Service) DesiredRouterConfig(routerID string) (DesiredRouterConfig, error) {
+	id, err := uuid.Parse(strings.TrimSpace(routerID))
+	if err != nil {
+		return DesiredRouterConfig{}, errors.New("invalid router id")
+	}
+	router, err := s.repo.Find(id)
+	if err != nil {
+		return DesiredRouterConfig{}, err
+	}
+	return s.DesiredRouterConfigForRouter(router, router.ClaimToken)
 }
 
 func (s *Service) queueRouterConfigure(router routers.Router, token string) error {
@@ -322,7 +347,10 @@ func (s *Service) applyWireGuardRenderOptions(options *portprofiles.RenderOption
 	// These are deployment-level public values. Never place the VPS private key
 	// or NOBLIFI_AGENT_TOKEN in generated RouterOS.
 	options.WireGuardEndpoint = strings.TrimSpace(os.Getenv("NOBLIFI_WIREGUARD_ENDPOINT"))
-	options.WireGuardPublicKey = strings.TrimSpace(os.Getenv("NOBLIFI_WIREGUARD_PUBLIC_KEY"))
+	options.WireGuardPublicKey = strings.TrimSpace(s.cfg.WireGuardPublicKey)
+	if serverPublicKey, err := s.activeWireGuardServerPublicKey(); err == nil {
+		options.WireGuardPublicKey = serverPublicKey
+	}
 	options.WireGuardInterface = envOrDefault("NOBLIFI_ROUTER_WIREGUARD_INTERFACE", "noblifi-wg")
 	options.WireGuardServerIP = envOrDefault("NOBLIFI_WIREGUARD_SERVER_IP", "10.77.0.1")
 	options.WireGuardPort = envIntOrDefault("NOBLIFI_WIREGUARD_PORT", 51820)
@@ -331,6 +359,17 @@ func (s *Service) applyWireGuardRenderOptions(options *portprofiles.RenderOption
 	if router.WireGuardTunnelIP != nil {
 		options.WireGuardClientIP = strings.TrimSpace(*router.WireGuardTunnelIP)
 	}
+}
+
+func (s *Service) activeWireGuardServerPublicKey() (string, error) {
+	resolver, ok := s.wg.(WireGuardServerPublicKeyResolver)
+	if ok {
+		return resolver.ActiveServerPublicKey()
+	}
+	if strings.TrimSpace(s.cfg.WireGuardPublicKey) != "" {
+		return strings.TrimSpace(s.cfg.WireGuardPublicKey), nil
+	}
+	return "", errors.New("WireGuard server public key is unavailable")
 }
 
 func envOrDefault(name, fallback string) string {
@@ -510,6 +549,7 @@ func (s *Service) WireGuardStatus(input WireGuardStatusInput) error {
 	}
 
 	now := time.Now().UTC()
+	previousPeerStatus := strings.TrimSpace(router.WireGuardPeerStatus)
 	router.WireGuardStatus = status
 	router.WireGuardPeerStatus = status
 	router.WireGuardLastSeenAt = &now
@@ -518,25 +558,27 @@ func (s *Service) WireGuardStatus(input WireGuardStatusInput) error {
 	if status == "connected" {
 		router.ManagementIP = router.WireGuardTunnelIP
 		router.WireGuardLastError = nil
-		router.Status = "peer_ready"
+		router.WireGuardLastHandshakeAt = &now
+		router.Status = "online"
 		if err := s.repo.Save(&router); err != nil {
 			return err
 		}
 
-		// Register the NAS with its unique tunnel IP, then queue the full router
-		// configuration. This is the hand-off from management bootstrap to the
-		// xneelo-controlled HotSpot/RADIUS/portal stage.
-		if err := s.queueRouterConfigure(router, token); err != nil {
-			message := err.Error()
-			router.Status = "router_config_failed"
-			router.WireGuardLastError = &message
-			_ = s.repo.Save(&router)
-			return err
-		}
+		if previousPeerStatus == "peer_ready" || previousPeerStatus == "connected" {
+			// Register the NAS with its unique tunnel IP, then queue the full router
+			// configuration. This runs only after peer install and handshake are both true.
+			if err := s.queueRouterConfigure(router, token); err != nil {
+				message := err.Error()
+				router.Status = "router_config_failed"
+				router.WireGuardLastError = &message
+				_ = s.repo.Save(&router)
+				return err
+			}
 
-		router.Status = "router_config_queued"
-		if err := s.repo.Save(&router); err != nil {
-			return err
+			router.Status = "router_config_queued"
+			if err := s.repo.Save(&router); err != nil {
+				return err
+			}
 		}
 	} else {
 		router.Status = "peer_failed"
