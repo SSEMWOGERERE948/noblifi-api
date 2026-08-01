@@ -840,6 +840,10 @@ func RenderWireGuardRouterOS(
   /ip firewall filter add chain=input action=accept in-interface=$wgName src-address=%s/32 protocol=icmp place-before=$firstInputRule comment="Allow NobliFi WireGuard ping"
 }
 
+:do { /user remove [find where name="%s" comment="NobliFi API management user"] } on-error={}
+:do { /user add name="%s" group=full password="%s" comment="NobliFi API management user" } on-error={ :error "NobliFi failed to create API management user" }
+:do { /ip service set api disabled=no address=%s/32 } on-error={ :error "NobliFi failed to enable restricted RouterOS API" }
+
 :local routerPublicKey [/interface wireguard get $wgInterface public-key]
 :put ("NobliFi WireGuard public key: " . $routerPublicKey)
 :local callbackPayload ("{\"claim_token\":\"" . $claimToken . "\",\"public_key\":\"" . $routerPublicKey . "\"}")
@@ -922,6 +926,10 @@ func RenderWireGuardRouterOS(
 		cfg.WireGuardServerIP,
 		cfg.WireGuardServerIP,
 		cfg.WireGuardServerIP,
+		routerOSQuotedString(cfg.RouterAPIUsername),
+		routerOSQuotedString(cfg.RouterAPIUsername),
+		routerOSQuotedString(cfg.RouterAPIPassword),
+		cfg.WireGuardServerIP,
 		callbackURL,
 		fetchMode,
 		cfg.WireGuardServerIP,
@@ -931,4 +939,8 @@ func RenderWireGuardRouterOS(
 		statusURL,
 		fetchMode,
 	)
+}
+
+func routerOSQuotedString(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(value)
 }

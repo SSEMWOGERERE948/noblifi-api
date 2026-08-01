@@ -286,19 +286,17 @@ func (s *Service) DesiredRouterConfigForRouter(router routers.Router, token stri
 	}
 
 	sum := sha256.Sum256([]byte(script))
-	apiPort := 8728
-	if options.EnableAPISSLService {
-		apiPort = 8729
-	}
-
 	return DesiredRouterConfig{
 		RouterID:       fmt.Sprint(router.ID),
 		ManagementIP:   hostOnly(strings.TrimSpace(*router.WireGuardTunnelIP)),
 		ConfigRevision: fmt.Sprintf("%x", sum[:]),
 		APIUsername:    options.APIUsername,
 		APIPassword:    options.APIPassword,
-		APIPort:        apiPort,
-		APITLS:         options.EnableAPISSLService,
+		// The bootstrap API connection runs inside WireGuard. Use RouterOS'
+		// plain API here because api-ssl commonly rejects TLS until a
+		// certificate is configured on the MikroTik.
+		APIPort:        8728,
+		APITLS:         false,
 		RouterOSScript: script,
 	}, nil
 }
