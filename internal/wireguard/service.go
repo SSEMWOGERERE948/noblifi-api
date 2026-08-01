@@ -66,9 +66,6 @@ func (s *Service) QueueRouterConfigure(router routers.Router, _ string) (WireGua
 	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
 		return WireGuardJob{}, errors.New("router WireGuard client IP is required")
 	}
-	if strings.TrimSpace(router.ProvisioningStatus) == "installed" {
-		return WireGuardJob{}, nil
-	}
 	existing, ok, err := s.existingConfigureJob(router.ID)
 	if err != nil {
 		return WireGuardJob{}, err
@@ -86,7 +83,7 @@ func (s *Service) existingConfigureJob(routerID uuid.UUID) (WireGuardJob, bool, 
 			"router_id = ? AND operation = ? AND status IN ?",
 			routerID,
 			OperationConfigureRouter,
-			[]string{StatusQueued, StatusClaimed, StatusApplying, StatusRetrying, StatusSucceeded},
+			[]string{StatusQueued, StatusClaimed, StatusApplying, StatusRetrying},
 		).
 		Order("created_at desc").
 		First(&job).Error
