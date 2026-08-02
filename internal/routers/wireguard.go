@@ -639,6 +639,13 @@ func wireGuardConfigIssues(
 		)
 	}
 
+	if strings.TrimSpace(cfg.AgentToken) == "" {
+		issues = append(
+			issues,
+			"NOBLIFI_AGENT_TOKEN must be set on both the control plane and the VPS agent",
+		)
+	}
+
 	if !validRouterOSEndpoint(
 		cfg.WireGuardEndpoint,
 	) {

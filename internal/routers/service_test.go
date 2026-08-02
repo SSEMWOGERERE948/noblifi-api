@@ -98,6 +98,29 @@ func TestRouterSupportsWireGuardRequiresRouterOS7(t *testing.T) {
 	}
 }
 
+func TestValidateWireGuardConfigRequiresAgentToken(t *testing.T) {
+	cfg := config.Config{
+		WireGuardEnabled:    true,
+		WireGuardEndpoint:   "vpn.example.com",
+		WireGuardPort:       51820,
+		WireGuardPublicKey:  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		WireGuardInterface:  "wg0",
+		WireGuardServerIP:   "10.77.0.1",
+		WireGuardSubnetCIDR: "10.77.0.0/24",
+		WireGuardKeepalive:  25,
+	}
+
+	err := ValidateWireGuardConfig(cfg)
+	if err == nil || !strings.Contains(err.Error(), "NOBLIFI_AGENT_TOKEN") {
+		t.Fatalf("expected missing agent token error, got %v", err)
+	}
+
+	cfg.AgentToken = "agent-token"
+	if err := ValidateWireGuardConfig(cfg); err != nil {
+		t.Fatalf("expected valid WireGuard config after setting agent token, got %v", err)
+	}
+}
+
 func TestWireGuardInterfacesAreVirtual(t *testing.T) {
 	cases := []RouterInterface{
 		{Name: "noblifi-wg"},

@@ -604,18 +604,26 @@ func writeWANInternet(builder *strings.Builder, wanPhysical string) {
 
 	// Remove only NobliFi DHCP clients attached to the wrong interface.
 	// A factory/default DHCP client already bound to wanL3 is reused.
+	builder.WriteString(`:put "NobliFi TRACE: before dhcp-client cleanup foreach"` + "\n")
 	builder.WriteString(`:foreach id in=[/ip dhcp-client find where comment="NobliFi WAN DHCP client"] do={` + "\n")
-	builder.WriteString(`  :local existingIface [/ip dhcp-client get $id interface]` + "\n")
-	builder.WriteString(`  :if ($existingIface != $wanL3) do={ /ip dhcp-client remove $id }` + "\n")
+	builder.WriteString(`  :do {` + "\n")
+	builder.WriteString(`    :local existingIface [/ip dhcp-client get $id interface]` + "\n")
+	builder.WriteString(`    :if ($existingIface != $wanL3) do={ /ip dhcp-client remove $id }` + "\n")
+	builder.WriteString(`  } on-error={ :put "NobliFi skipped stale WAN DHCP client cleanup" }` + "\n")
 	builder.WriteString(`}` + "\n")
 
-	builder.WriteString(`:local wanDhcp [/ip dhcp-client find where interface=$wanL3]` + "\n")
-	builder.WriteString(`:if ([:len $wanDhcp] = 0) do={` + "\n")
-	builder.WriteString(`  /ip dhcp-client add interface=$wanL3 disabled=no add-default-route=yes use-peer-dns=yes use-peer-ntp=yes comment="NobliFi WAN DHCP client"` + "\n")
-	builder.WriteString(`} else={` + "\n")
-	builder.WriteString(`  :foreach id in=$wanDhcp do={ /ip dhcp-client set $id disabled=no add-default-route=yes use-peer-dns=yes use-peer-ntp=yes }` + "\n")
-	builder.WriteString(`  :put ("NobliFi WAN: reusing existing DHCP client on " . $wanL3)` + "\n")
-	builder.WriteString(`}` + "\n")
+	builder.WriteString(`:put "NobliFi TRACE: before dhcp-client add/reuse"` + "\n")
+	builder.WriteString(`:do {` + "\n")
+	builder.WriteString(`  :local wanDhcp [/ip dhcp-client find where interface=$wanL3]` + "\n")
+	builder.WriteString(`  :if ([:len $wanDhcp] = 0) do={` + "\n")
+	builder.WriteString(`    /ip dhcp-client add interface=$wanL3 disabled=no add-default-route=yes use-peer-dns=yes use-peer-ntp=yes comment="NobliFi WAN DHCP client"` + "\n")
+	builder.WriteString(`  } else={` + "\n")
+	builder.WriteString(`    :foreach id in=$wanDhcp do={` + "\n")
+	builder.WriteString(`      :do { /ip dhcp-client set $id disabled=no add-default-route=yes use-peer-dns=yes use-peer-ntp=yes } on-error={ :put "NobliFi skipped WAN DHCP client reuse" }` + "\n")
+	builder.WriteString(`    }` + "\n")
+	builder.WriteString(`    :put ("NobliFi WAN: reusing existing DHCP client on " . $wanL3)` + "\n")
+	builder.WriteString(`  }` + "\n")
+	builder.WriteString(`} on-error={ :error "NobliFi failed ensure WAN DHCP client" }` + "\n")
 
 	writeWANDHCPWait(builder)
 }
@@ -953,9 +961,7 @@ func writeHotspotPortalRefreshScript(builder *strings.Builder, options RenderOpt
 	loginURL := escape(options.LoginPageURL)
 
 	writeSafe(builder, `/system scheduler remove [find where name="noblifi-hotspot-login-refresh"]`, "cleanup hotspot login refresh scheduler")
-	writeSafe(builder, `/system script remove [find where name="noblifi-hotspot-login-refresh-script"]`, "cleanup hotspot login refresh script")
-
-	builder.WriteString(`/system script add name="noblifi-hotspot-login-refresh-script" policy=ftp,read,write,test source={` + "\n")
+	builder.WriteString(`:do { /system script remove [find where name="noblifi-hotspot-login-refresh-script"]; /system script add name="noblifi-hotspot-login-refresh-script" policy=ftp,read,write,test source={` + "\n")
 	builder.WriteString(`:local hotspotHtmlDir "noblifi"` + "\n")
 	builder.WriteString(`:local hotspotHtmlPath "noblifi"` + "\n")
 	builder.WriteString(`:if ([:len [/file find where name="flash"]] > 0) do={ :set hotspotHtmlDir "flash/noblifi"; :set hotspotHtmlPath "flash/noblifi" }` + "\n")
@@ -989,6 +995,7 @@ func writeHotspotPortalRefreshScript(builder *strings.Builder, options RenderOpt
 	builder.WriteString(`  :log warning "NobliFi portal refresh failed; existing live portal preserved"` + "\n")
 	builder.WriteString(`}` + "\n")
 	builder.WriteString("}\n")
+	builder.WriteString(`} on-error={ :error "NobliFi failed replace hotspot login refresh script" }` + "\n")
 
 	writeCritical(
 		builder,
@@ -1069,26 +1076,31 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	writeSafe(builder, `/ip firewall filter disable [find where action=fasttrack-connection]`, "disable FastTrack for HotSpot shaping")
 
 	// 4. NAT.
-	writeCritical(builder, `/ip firewall nat remove [find where comment="NobliFi client NAT"]`, "cleanup nat")
-	writeCritical(builder, `/ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="NobliFi client NAT"`, "add nat")
+	writeCritical(
+		builder,
+		`:local noblifiNAT [/ip firewall nat find where comment="NobliFi client NAT"]; :if ([:len $noblifiNAT] = 0) do={ /ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="NobliFi client NAT" } else={ /ip firewall nat set [:pick $noblifiNAT 0] chain=srcnat out-interface-list=WAN action=masquerade disabled=no comment="NobliFi client NAT" }`,
+		"ensure nat",
+	)
 
 	// 5. RADIUS.
-	writeCritical(builder, `/radius remove [find where comment="NobliFi RADIUS"]`, "cleanup radius client")
-
-	radiusCommand := fmt.Sprintf(
-		`/radius add service=hotspot address=%s secret="%s" authentication-port=1812 accounting-port=1813 timeout=3s comment="NobliFi RADIUS"`,
+	radiusAttributes := fmt.Sprintf(
+		`service=hotspot address=%s secret="%s" authentication-port=1812 accounting-port=1813 timeout=3s comment="NobliFi RADIUS"`,
 		options.RadiusServer,
 		escape(options.RadiusSecret),
 	)
 	if options.WireGuardEnabled {
-		radiusCommand = fmt.Sprintf(
-			`/radius add service=hotspot address=%s src-address=%s secret="%s" authentication-port=1812 accounting-port=1813 timeout=3s comment="NobliFi RADIUS"`,
+		radiusAttributes = fmt.Sprintf(
+			`service=hotspot address=%s src-address=%s secret="%s" authentication-port=1812 accounting-port=1813 timeout=3s comment="NobliFi RADIUS"`,
 			options.RadiusServer,
 			options.WireGuardClientIP,
 			escape(options.RadiusSecret),
 		)
 	}
-	writeCritical(builder, radiusCommand, "add radius client")
+	writeCritical(
+		builder,
+		fmt.Sprintf(`:local noblifiRadius [/radius find where comment="NobliFi RADIUS"]; :if ([:len $noblifiRadius] = 0) do={ /radius add %s } else={ /radius set [:pick $noblifiRadius 0] %s }`, radiusAttributes, radiusAttributes),
+		"ensure radius client",
+	)
 	writeCritical(builder, `/radius incoming set accept=yes`, "enable radius incoming")
 
 	// 6. Ensure custom directory. This resolves to "noblifi" on routers without

@@ -1,0 +1,219 @@
+﻿name: Deploy NobliFi VPS Agent
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - main
+    paths:
+      - "cmd/noblifi-vps-agent/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/deploy-vps-agent.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: noblifi-vps-agent-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Test, build and deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      BINARY_NAME: noblifi-vps-agent
+      REMOTE_BINARY: /tmp/noblifi-vps-agent.new
+      REMOTE_CHECKSUM: /tmp/noblifi-vps-agent.new.sha256
+      VPS_HOST: ${{ secrets.NOBLIFI_VPS_HOST }}
+      VPS_USER: ${{ secrets.NOBLIFI_VPS_USER }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l cmd/noblifi-vps-agent)"
+
+          if [[ -n "$unformatted" ]]; then
+            echo "The following files are not formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Run agent tests
+        run: go test ./cmd/noblifi-vps-agent
+
+      - name: Run all tests
+        run: go test ./...
+
+      - name: Build Linux AMD64 agent
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          go build \
+            -trimpath \
+            -o "$BINARY_NAME" \
+            ./cmd/noblifi-vps-agent
+
+      - name: Generate SHA256 checksum
+        shell: bash
+        run: |
+          sha256sum "$BINARY_NAME" > "${BINARY_NAME}.sha256"
+
+          echo "Built binary:"
+          ls -lh "$BINARY_NAME"
+
+          echo "Build checksum:"
+          cat "${BINARY_NAME}.sha256"
+
+      - name: Prepare SSH
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.NOBLIFI_VPS_SSH_PRIVATE_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.NOBLIFI_VPS_KNOWN_HOSTS }}
+        run: |
+          install -d -m 0700 "$HOME/.ssh"
+
+          printf '%s\n' "$SSH_PRIVATE_KEY" \
+            > "$HOME/.ssh/noblifi-radius-key.pem"
+
+          chmod 0600 "$HOME/.ssh/noblifi-radius-key.pem"
+
+          printf '%s\n' "$VPS_KNOWN_HOSTS" \
+            > "$HOME/.ssh/known_hosts"
+
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+      - name: Test SSH connection
+        shell: bash
+        run: |
+          ssh \
+            -i "$HOME/.ssh/noblifi-radius-key.pem" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "${VPS_USER}@${VPS_HOST}" \
+            "echo 'SSH connection successful'"
+
+      - name: Upload agent and checksum
+        shell: bash
+        run: |
+          scp \
+            -i "$HOME/.ssh/noblifi-radius-key.pem" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "$BINARY_NAME" \
+            "${VPS_USER}@${VPS_HOST}:${REMOTE_BINARY}"
+
+          scp \
+            -i "$HOME/.ssh/noblifi-radius-key.pem" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "${BINARY_NAME}.sha256" \
+            "${VPS_USER}@${VPS_HOST}:${REMOTE_CHECKSUM}"
+
+      - name: Compare local and uploaded SHA256
+        shell: bash
+        run: |
+          LOCAL_SHA="$(
+            awk '{ print tolower($1) }' \
+              "${BINARY_NAME}.sha256"
+          )"
+
+          REMOTE_SHA="$(
+            ssh \
+              -i "$HOME/.ssh/noblifi-radius-key.pem" \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              "${VPS_USER}@${VPS_HOST}" \
+              "sha256sum '${REMOTE_BINARY}' | awk '{ print tolower(\$1) }'"
+          )"
+
+          echo "Local SHA256:  $LOCAL_SHA"
+          echo "Remote SHA256: $REMOTE_SHA"
+
+          if [[ "$LOCAL_SHA" != "$REMOTE_SHA" ]]; then
+            echo "Uploaded binary checksum mismatch"
+            exit 1
+          fi
+
+      - name: Install agent on VPS
+        shell: bash
+        run: |
+          ssh \
+            -i "$HOME/.ssh/noblifi-radius-key.pem" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "${VPS_USER}@${VPS_HOST}" \
+            "sudo /usr/local/sbin/deploy-noblifi-agent \
+              '${REMOTE_BINARY}' \
+              '${REMOTE_CHECKSUM}'"
+
+      - name: Verify installed SHA256
+        shell: bash
+        run: |
+          EXPECTED_SHA="$(
+            awk '{ print tolower($1) }' \
+              "${BINARY_NAME}.sha256"
+          )"
+
+          INSTALLED_SHA="$(
+            ssh \
+              -i "$HOME/.ssh/noblifi-radius-key.pem" \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              "${VPS_USER}@${VPS_HOST}" \
+              "sha256sum /usr/local/bin/noblifi-vps-agent |
+               awk '{ print tolower(\$1) }'"
+          )"
+
+          echo "Expected SHA256:  $EXPECTED_SHA"
+          echo "Installed SHA256: $INSTALLED_SHA"
+
+          if [[ "$EXPECTED_SHA" != "$INSTALLED_SHA" ]]; then
+            echo "Installed checksum mismatch"
+            exit 1
+          fi
+
+      - name: Verify service
+        shell: bash
+        run: |
+          ssh \
+            -i "$HOME/.ssh/noblifi-radius-key.pem" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "${VPS_USER}@${VPS_HOST}" \
+            "sudo systemctl is-active --quiet noblifi-vps-agent"
+
+      - name: Show recent service logs
+        if: always()
+        shell: bash
+        run: |
+          ssh \
+            -i "$HOME/.ssh/noblifi-radius-key.pem" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "${VPS_USER}@${VPS_HOST}" \
+            "sudo journalctl \
+              -u noblifi-vps-agent \
+              --since '10 minutes ago' \
+              --no-pager \
+              --lines=150" || true

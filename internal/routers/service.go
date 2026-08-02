@@ -353,8 +353,11 @@ func (s *Service) HotspotInstallCommand(routerID uuid.UUID) (string, error) {
 
 func (s *Service) prepareWireGuardForInstall(routerID uuid.UUID) error {
 	cfg := s.wireGuardConfig()
-	if !cfg.WireGuardEnabled || ValidateWireGuardConfig(cfg) != nil {
+	if !cfg.WireGuardEnabled {
 		return nil
+	}
+	if err := ValidateWireGuardConfig(cfg); err != nil {
+		return err
 	}
 	router, err := s.repo.Find(routerID)
 	if err != nil {

@@ -29,14 +29,21 @@ NOBLIFI_AGENT_ID=xneelo-wg-agent-01
 
 ## Agent Installation
 
-Build and install:
+Configure WireGuard first. Run from the `backend` directory so the script can update `app.yaml` with the same `NOBLIFI_AGENT_TOKEN` written to `/etc/noblifi/vps-agent.env`:
+
+```bash
+sudo ./scripts/setup-wireguard-vps.sh
+```
+
+If `app.yaml` is not available on the VPS, the script prints the `NOBLIFI_AGENT_TOKEN` line to add under `env_variables`.
+
+Build and install the agent:
 
 ```bash
 cd backend
 go build -o noblifi-vps-agent ./cmd/noblifi-vps-agent
 sudo install -m 0755 noblifi-vps-agent /usr/local/bin/noblifi-vps-agent
 sudo mkdir -p /etc/noblifi /etc/wireguard/backups
-sudo install -m 0600 deploy/systemd/noblifi-vps-agent.env.example /etc/noblifi/vps-agent.env
 sudo editor /etc/noblifi/vps-agent.env
 sudo install -m 0644 deploy/systemd/noblifi-vps-agent.service /etc/systemd/system/noblifi-vps-agent.service
 sudo systemctl daemon-reload

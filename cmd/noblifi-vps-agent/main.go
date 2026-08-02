@@ -547,35 +547,175 @@ func (c *routerOSAPIClient) login(username, password string) error {
 }
 
 func (c *routerOSAPIClient) ApplyScript(name, source string) error {
-	_, _ = c.command("/system/script/remove", "=.proplist=.id", "?name="+name)
-	reply, err := c.command(
-		"/system/script/add",
-		"=name="+name,
-		"=policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon",
-		"=source="+source,
-	)
+	name = strings.TrimSpace(name)
+	source = strings.TrimSpace(source)
+	if name == "" {
+		return errors.New("script name is required")
+	}
+	if source == "" {
+		return errors.New("script source is required")
+	}
+
+	// Never overlap two runs of the same managed script. A previous job may
+	// still be running after a transport timeout or an agent restart.
+	if err := c.waitForNoRunningJob(name, 90*time.Second); err != nil {
+		return fmt.Errorf("previous run of %q still in progress: %w", name, err)
+	}
+
+	id, err := c.findSystemScriptID(name)
 	if err != nil {
-		return err
+		return fmt.Errorf("find RouterOS script %q: %w", name, err)
 	}
-	id := reply["ret"]
-	if id == "" {
-		id = name
+
+	if id != "" {
+		if _, err := c.command(
+			"/system/script/set",
+			"=.id="+id,
+			"=policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon",
+			"=source="+source,
+		); err != nil {
+			return fmt.Errorf("update RouterOS script %q: %w", name, err)
+		}
+	} else {
+		reply, err := c.command(
+			"/system/script/add",
+			"=name="+name,
+			"=policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon",
+			"=source="+source,
+		)
+		if err != nil {
+			return fmt.Errorf("create RouterOS script %q: %w", name, err)
+		}
+
+		id = strings.TrimSpace(reply["ret"])
+		if id == "" {
+			id, err = c.findSystemScriptID(name)
+			if err != nil {
+				return fmt.Errorf("find created RouterOS script %q: %w", name, err)
+			}
+		}
+		if id == "" {
+			return fmt.Errorf("created RouterOS script %q has no .id", name)
+		}
 	}
+
+	// RouterOS expects the script selector in the number parameter.
 	if _, err := c.command("/system/script/run", "=number="+id); err != nil {
-		return err
+		return fmt.Errorf("run RouterOS script %q: %w", name, err)
 	}
+
+	// Script execution is asynchronous. Wait for the background job to finish
+	// before verification or cleanup.
+	if err := c.waitForScriptCompletion(name, 5*time.Minute); err != nil {
+		return fmt.Errorf("wait for RouterOS script %q to finish: %w", name, err)
+	}
+
+	// Cleanup failure is non-fatal because the next run updates by script name.
 	_, _ = c.command("/system/script/remove", "=.id="+id)
 	return nil
 }
 
-func (c *routerOSAPIClient) VerifyManagedConfiguration() error {
-	if _, err := c.command("/ip/hotspot/print", "=.proplist=.id", "?name=noblifi-hotspot", "?disabled=false"); err != nil {
-		return fmt.Errorf("hotspot verification failed: %w", err)
+func (c *routerOSAPIClient) waitForNoRunningJob(name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		running, err := c.systemScriptJobRunning(name)
+		if err != nil {
+			return err
+		}
+		if !running {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("script job still running after %s", timeout)
+		}
+		time.Sleep(2 * time.Second)
 	}
-	if _, err := c.command("/radius/print", "=.proplist=.id", "?comment=NobliFi RADIUS"); err != nil {
-		return fmt.Errorf("RADIUS verification failed: %w", err)
+}
+
+func (c *routerOSAPIClient) waitForScriptCompletion(name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	firstCheckDeadline := time.Now().Add(2 * time.Second)
+	sawRunning := false
+
+	for {
+		running, err := c.systemScriptJobRunning(name)
+		if err != nil {
+			return err
+		}
+
+		if running {
+			sawRunning = true
+		} else if sawRunning || time.Now().After(firstCheckDeadline) {
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("script job did not finish after %s", timeout)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func (c *routerOSAPIClient) systemScriptJobRunning(name string) (bool, error) {
+	reply, err := c.command(
+		"/system/script/job/print",
+		"=.proplist=.id,script",
+		"?script="+name,
+	)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(reply[".id"]) != "", nil
+}
+
+func (c *routerOSAPIClient) findSystemScriptID(name string) (string, error) {
+	reply, err := c.command(
+		"/system/script/print",
+		"=.proplist=.id,name",
+		"?name="+name,
+	)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(reply["name"]) != name {
+		return "", nil
+	}
+	return strings.TrimSpace(reply[".id"]), nil
+}
+
+func (c *routerOSAPIClient) VerifyManagedConfiguration() error {
+	checks := []struct {
+		label   string
+		path    string
+		queries []string
+	}{
+		{"NobliFi HotSpot server", "/ip/hotspot/print", []string{"?name=noblifi-hotspot", "?disabled=false"}},
+		{"NobliFi HotSpot profile", "/ip/hotspot/profile/print", []string{"?name=noblifi-hotspot-profile"}},
+		{"NobliFi RADIUS client", "/radius/print", []string{"?comment=NobliFi RADIUS", "?disabled=false"}},
+		{"NobliFi HotSpot DHCP server", "/ip/dhcp-server/print", []string{"?name=dhcp-hotspot", "?disabled=false"}},
+		{"NobliFi HotSpot bridge", "/interface/bridge/print", []string{"?name=br-hotspot", "?disabled=false"}},
+	}
+
+	for _, check := range checks {
+		found, err := c.exists(check.path, check.queries...)
+		if err != nil {
+			return fmt.Errorf("verify %s: %w", check.label, err)
+		}
+		if !found {
+			return fmt.Errorf("%s is missing or disabled", check.label)
+		}
 	}
 	return nil
+}
+
+func (c *routerOSAPIClient) exists(path string, queries ...string) (bool, error) {
+	words := []string{path, "=.proplist=.id"}
+	words = append(words, queries...)
+	reply, err := c.command(words...)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(reply[".id"]) != "", nil
 }
 
 func (c *routerOSAPIClient) command(words ...string) (map[string]string, error) {

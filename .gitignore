@@ -43,4 +43,18 @@ temp
 
 # Windows files
 Thumbs.db
-Desktop.ini
+Desktop.ini*.pem
+*.key
+noblifi-vps-agent
+noblifi-vps-agent.new
+noblifi-vps-agent-linux-amd64
+*.pem
+*.key
+noblifi-vps-agent
+noblifi-vps-agent.new
+noblifi-vps-agent-linux-amd64
+*.pem
+*.key
+noblifi-vps-agent
+noblifi-vps-agent.new
+noblifi-vps-agent-linux-amd64

@@ -11,27 +11,29 @@ env_variables:
   PORT: "8080"
   APP_ENV: "production"
 
-  # Replace this with the NEW Neon URL after rotating the exposed password.
-
   DATABASE_URL: "postgresql://neondb_owner:npg_WFD5YkdowM1z@ep-green-pond-adlzg68u-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
   JWT_SECRET: "NoblifiJwt-8wF3nP6qR2xV9zLmT5sK"
+
+  # Must exactly match NOBLIFI_AGENT_TOKEN in:
+  # /etc/noblifi/vps-agent.env
+  NOBLIFI_AGENT_TOKEN: "7y6onsL3V9CXWHONi+HI2SUdVJfnDidYSzjYlLnXd4yKW/vM0XS++DLZ77JayMoe"
 
   PUBLIC_API_BASE_URL: "https://noblifi.ew.r.appspot.com"
   NOBLIFI_PROVISIONING_BASE_URL: "https://noblifi.ew.r.appspot.com/api/v1/provisioning"
 
-  # IMPORTANT:
-  # Do NOT use 127.0.0.1 unless the RADIUS server is running on the same machine.
   # MikroTik reaches RADIUS through the WireGuard tunnel.
-  # App Engine Standard is not suitable for hosting UDP RADIUS 1812/1813.
-  # Run RADIUS on the VPS at the WireGuard server address below.
   NOBLIFI_RADIUS_SERVER: "10.77.0.1"
   NOBLIFI_RADIUS_SECRET: "noblifi"
 
   NOBLIFI_WIREGUARD_ENABLED: "true"
   NOBLIFI_WIREGUARD_ENDPOINT: "154.65.105.14"
   NOBLIFI_WIREGUARD_PORT: "51820"
-  NOBLIFI_WIREGUARD_PUBLIC_KEY: "/b1RR6PVO9LE6+Dp5BBgioQ0APg3LhfSqP2RkJ/Gxm0="
+
+  # Actual public key of the VPS wg0 interface.
+  NOBLIFI_WIREGUARD_PUBLIC_KEY: "9xhRCrocmDAX52eIsUauXsSl+YTqyy5XTJxBzPWJpj4="
+
   NOBLIFI_WIREGUARD_INTERFACE: "wg0"
+  NOBLIFI_ROUTER_WIREGUARD_INTERFACE: "noblifi-wg"
   NOBLIFI_WIREGUARD_SERVER_IP: "10.77.0.1"
   NOBLIFI_WIREGUARD_SUBNET: "10.77.0.0/24"
   NOBLIFI_WIREGUARD_KEEPALIVE: "25"

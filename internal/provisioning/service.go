@@ -92,6 +92,9 @@ func (s *Service) InstallScript(token, sourceIP string) (string, error) {
 	if err := s.repo.Save(&router); err != nil {
 		return "", err
 	}
+	if s.cfg.WireGuardEnabled && strings.TrimSpace(s.cfg.AgentToken) == "" {
+		return "", errors.New("NOBLIFI_AGENT_TOKEN must be set before WireGuard provisioning can install the router")
+	}
 
 	options := s.renderOptionsForRouter(router)
 	options.LoginPageURL = hotspotLoginURL(token, s.cfg.ProvisioningBaseURL)
@@ -99,6 +102,29 @@ func (s *Service) InstallScript(token, sourceIP string) (string, error) {
 	options.ProvisioningBaseURL = normalizeProvisioningBaseURL(s.cfg.ProvisioningBaseURL)
 	options.ProvisioningClaimToken = token
 	s.applyWireGuardRenderOptions(&options, router)
+
+	// sourceIP is intentionally not used for NAS registration here. FreeRADIUS
+	// is registered with the unique tunnel IP after WireGuard reports connected.
+	_ = sourceIP
+
+	if options.WireGuardEnabled {
+		managementScript, err := portprofiles.RenderManagementBootstrap(options)
+		if err != nil {
+			return "", err
+		}
+
+		var builder strings.Builder
+		builder.WriteString("# NobliFi agent-managed MikroTik install\n")
+		builder.WriteString("# The router establishes management first; xneelo applies HotSpot, RADIUS, DHCP, NAT, and portal files afterward.\n\n")
+		builder.WriteString(`:put "NobliFi management bootstrap starting"`)
+		builder.WriteString("\n\n")
+		builder.WriteString(renderBootstrapScript(token, s.cfg.ProvisioningBaseURL))
+		builder.WriteString("\n\n")
+		builder.WriteString(managementScript)
+		builder.WriteString("\n")
+		builder.WriteString(`:put "NobliFi management bootstrap completed; waiting for xneelo router configuration job"`)
+		return builder.String(), nil
+	}
 
 	assignments := make([]portprofiles.Assignment, 0, len(router.PortAssignments))
 	for _, assignment := range router.PortAssignments {
@@ -111,28 +137,18 @@ func (s *Service) InstallScript(token, sourceIP string) (string, error) {
 		assignments = portprofiles.DefaultAssignments()
 	}
 
-	managementScript, err := portprofiles.RenderManagementBootstrap(options)
-	if err != nil {
-		return "", err
-	}
 	managedScript, err := portprofiles.RenderManagedRouterConfig(assignments, options)
 	if err != nil {
 		return "", err
 	}
 
-	// sourceIP is intentionally not used for NAS registration here. FreeRADIUS
-	// is registered with the unique tunnel IP after WireGuard reports connected.
-	_ = sourceIP
-
 	var builder strings.Builder
 	builder.WriteString("# NobliFi MikroTik install\n")
-	builder.WriteString("# The router establishes management first, then applies HotSpot, RADIUS, DHCP, NAT, and portal files.\n\n")
-	builder.WriteString(`:put "NobliFi management bootstrap starting"`)
+	builder.WriteString("# Applies HotSpot, RADIUS, DHCP, NAT, and portal files.\n\n")
+	builder.WriteString(`:put "NobliFi MikroTik configuration starting"`)
 	builder.WriteString("\n\n")
 	builder.WriteString(renderBootstrapScript(token, s.cfg.ProvisioningBaseURL))
 	builder.WriteString("\n\n")
-	builder.WriteString(managementScript)
-	builder.WriteString("\n")
 	builder.WriteString(managedScript)
 	builder.WriteString("\n")
 	builder.WriteString(renderStatusCommand(token, "installed", s.cfg.ProvisioningBaseURL))
