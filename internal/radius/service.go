@@ -49,6 +49,81 @@ func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
 }
 
+func (s *Service) EnsureVoucherConsumptionHooks() error {
+	statements := []string{
+		`
+CREATE OR REPLACE FUNCTION noblifi_consume_voucher_on_radius_accept()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.reply ILIKE 'Access-Accept%' THEN
+    UPDATE vouchers
+       SET status = 'used',
+           used_at = COALESCE(used_at, now()),
+           updated_at = now()
+     WHERE code = NEW.username
+       AND status IN ('unused', 'active');
+
+    DELETE FROM radcheck WHERE username = NEW.username;
+    DELETE FROM radreply WHERE username = NEW.username;
+    DELETE FROM radusergroup WHERE username = NEW.username;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+`,
+		`DROP TRIGGER IF EXISTS consume_voucher_on_radius_accept ON radpostauth;`,
+		`
+CREATE TRIGGER consume_voucher_on_radius_accept
+AFTER INSERT ON radpostauth
+FOR EACH ROW
+EXECUTE FUNCTION noblifi_consume_voucher_on_radius_accept();
+`,
+		`
+UPDATE vouchers
+   SET status = 'used',
+       used_at = COALESCE(used_at, accepted.authdate),
+       updated_at = now()
+  FROM (
+    SELECT username, MIN(authdate) AS authdate
+      FROM radpostauth
+     WHERE reply ILIKE 'Access-Accept%'
+     GROUP BY username
+  ) AS accepted
+ WHERE vouchers.code = accepted.username
+   AND vouchers.status IN ('unused', 'active');
+`,
+		`
+DELETE FROM radcheck
+ WHERE username IN (
+   SELECT username FROM radpostauth WHERE reply ILIKE 'Access-Accept%'
+ );
+`,
+		`
+DELETE FROM radreply
+ WHERE username IN (
+   SELECT username FROM radpostauth WHERE reply ILIKE 'Access-Accept%'
+ );
+`,
+		`
+DELETE FROM radusergroup
+ WHERE username IN (
+   SELECT username FROM radpostauth WHERE reply ILIKE 'Access-Accept%'
+ );
+`,
+	}
+
+	for _, statement := range statements {
+		if err := s.db.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // ---------------------------------------------------------
 // NAS
 // ---------------------------------------------------------

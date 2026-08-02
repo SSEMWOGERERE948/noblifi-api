@@ -114,6 +114,10 @@ func Run() {
 
 	radiusService := radius.NewService(db)
 
+	if err := radiusService.EnsureVoucherConsumptionHooks(); err != nil {
+		log.Fatalf("install RADIUS voucher consumption hooks: %v", err)
+	}
+
 	// ---------------------------------------------------------
 	// ROUTERS
 	// ---------------------------------------------------------
