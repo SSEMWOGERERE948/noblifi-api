@@ -16,7 +16,13 @@ type Config struct {
 	JWTSecret                string
 	AppEnv                   string
 	PublicAPIBaseURL         string
+	FrontendURL              string
 	ProvisioningBaseURL      string
+	PesapalConsumerKey       string
+	PesapalConsumerSecret    string
+	PesapalBaseURL           string
+	PesapalIPNID             string
+	PesapalCurrency          string
 	RadiusServer             string
 	RadiusSecret             string
 	RouterIdentityPrefix     string
@@ -68,7 +74,13 @@ func Load() Config {
 		JWTSecret:                getEnv("JWT_SECRET", "change-this-secret"),
 		AppEnv:                   getEnv("APP_ENV", "development"),
 		PublicAPIBaseURL:         getEnv("PUBLIC_API_BASE_URL", "http://localhost:8080"),
+		FrontendURL:              getEnv("NEXT_PUBLIC_BASE_URL", strings.TrimSpace(getEnv("FRONTEND_URL", "http://localhost:3000"))),
 		ProvisioningBaseURL:      getEnv("NOBLIFI_PROVISIONING_BASE_URL", "http://localhost:8080/api/v1/provisioning"),
+		PesapalConsumerKey:       strings.TrimSpace(getEnv("PESAPAL_CONSUMER_KEY", "")),
+		PesapalConsumerSecret:    strings.TrimSpace(getEnv("PESAPAL_CONSUMER_SECRET", "")),
+		PesapalBaseURL:           strings.TrimRight(strings.TrimSpace(getEnv("PESAPAL_BASE_URL", "")), "/"),
+		PesapalIPNID:             strings.TrimSpace(getEnv("PESAPAL_IPN_ID", "")),
+		PesapalCurrency:          strings.TrimSpace(getEnv("PESAPAL_CURRENCY", "UGX")),
 		RadiusServer:             getEnv("NOBLIFI_RADIUS_SERVER", defaultRadiusServer),
 		RadiusSecret:             normalizeRadiusSecret(getEnv("NOBLIFI_RADIUS_SECRET", "noblifi")),
 		RouterIdentityPrefix:     getEnv("NOBLIFI_ROUTER_IDENTITY_PREFIX", "NobliFi"),

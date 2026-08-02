@@ -20,7 +20,7 @@ func TestRenderHotspotLoginPageShowsVoucherLoginAndPackages(t *testing.T) {
 			DownloadSpeed:   "10M",
 			IsActive:        true,
 		},
-	})
+	}, "https://wifi.example.com")
 
 	required := []string{
 		"NobliFi WiFi",
@@ -31,6 +31,8 @@ func TestRenderHotspotLoginPageShowsVoucherLoginAndPackages(t *testing.T) {
 		"Packages",
 		"Daily Unlimited",
 		"UGX 1,000",
+		"Buy this package",
+		"https://wifi.example.com/buy?plan_id=",
 	}
 	for _, item := range required {
 		if !strings.Contains(html, item) {
@@ -72,7 +74,7 @@ func TestRegisterRadiusNASPrefersWireGuardTunnelAddress(t *testing.T) {
 
 func TestRenderHotspotLoginPageEscapesPortalName(t *testing.T) {
 	rawName := `<script>alert("x")</script>`
-	html := renderHotspotLoginPage(rawName, nil)
+	html := renderHotspotLoginPage(rawName, nil, "")
 
 	if strings.Contains(html, `<h1>`+rawName+`</h1>`) || strings.Contains(html, `<title>`+rawName+` Login</title>`) {
 		t.Fatalf("expected portal name to be escaped, got:\n%s", html)

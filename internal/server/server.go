@@ -9,6 +9,7 @@ import (
 	"github.com/noblifi/noblifi/backend/internal/auth"
 	"github.com/noblifi/noblifi/backend/internal/config"
 	"github.com/noblifi/noblifi/backend/internal/database"
+	"github.com/noblifi/noblifi/backend/internal/payments"
 	"github.com/noblifi/noblifi/backend/internal/plans"
 	"github.com/noblifi/noblifi/backend/internal/provisioning"
 	"github.com/noblifi/noblifi/backend/internal/radius"
@@ -176,6 +177,10 @@ func Run() {
 
 	vouchers.NewHandler(
 		voucherService,
+	).RegisterRoutes(api)
+
+	payments.NewHandler(
+		payments.NewService(db, cfg, radiusService),
 	).RegisterRoutes(api)
 
 	// ---------------------------------------------------------

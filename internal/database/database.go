@@ -1,6 +1,7 @@
 package database
 
 import (
+	"github.com/noblifi/noblifi/backend/internal/payments"
 	"github.com/noblifi/noblifi/backend/internal/plans"
 	"github.com/noblifi/noblifi/backend/internal/radius"
 	"github.com/noblifi/noblifi/backend/internal/routers"
@@ -45,6 +46,7 @@ func AutoMigrate(db *gorm.DB) error {
 
 		// NobliFi commercial models
 		&plans.Plan{},
+		&payments.PaymentOrder{},
 		&vouchers.Voucher{},
 
 		&Session{},

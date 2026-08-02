@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"log"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -196,7 +197,7 @@ func (s *Service) HotspotLoginPage(token string) (string, error) {
 			planList = items
 		}
 	}
-	return renderHotspotLoginPage(options.HotspotPortalName, planList), nil
+	return renderHotspotLoginPage(options.HotspotPortalName, planList, s.cfg.FrontendURL), nil
 }
 
 func (s *Service) HotspotSupportFile(token, filename string) (string, error) {
@@ -961,13 +962,13 @@ func hotspotSupportURL(token, baseURL string) string {
 	return normalizeProvisioningBaseURL(baseURL) + "/hotspot-support/" + token
 }
 
-func renderHotspotLoginPage(portalName string, planList []plans.Plan) string {
+func renderHotspotLoginPage(portalName string, planList []plans.Plan, frontendURL string) string {
 	portalName = strings.TrimSpace(portalName)
 	if portalName == "" {
 		portalName = "NobliFi WiFi"
 	}
 	escapedPortalName := html.EscapeString(portalName)
-	packageHTML := renderHotspotPackageList(planList)
+	packageHTML := renderHotspotPackageList(planList, frontendURL)
 	return `<!doctype html>
 <html>
 <head>
@@ -990,6 +991,7 @@ func renderHotspotLoginPage(portalName string, planList []plans.Plan) string {
     .package strong { display: block; font-size: 15px; }
     .package span { color: var(--muted); font-size: 13px; }
     .price { font-weight: 900; color: var(--accent); white-space: nowrap; }
+    .buy { display: inline-flex; align-items: center; justify-content: center; margin-top: 8px; border-radius: 8px; padding: 9px 11px; background: var(--accent); color: #06111f; font-weight: 800; text-decoration: none; }
     label { display: block; margin-bottom: 8px; font-weight: 700; }
     input { width: 100%; border: 1px solid var(--line); background: #07111d; color: var(--text); border-radius: 9px; padding: 13px; font-size: 16px; }
     button { width: 100%; margin-top: 16px; border: 0; border-radius: 9px; padding: 13px; background: var(--brand); color: #06111f; font-weight: 800; font-size: 16px; }
@@ -1024,10 +1026,11 @@ func renderHotspotLoginPage(portalName string, planList []plans.Plan) string {
 </html>`
 }
 
-func renderHotspotPackageList(planList []plans.Plan) string {
+func renderHotspotPackageList(planList []plans.Plan, frontendURL string) string {
 	if len(planList) == 0 {
 		return ""
 	}
+	buyBaseURL := strings.TrimRight(strings.TrimSpace(frontendURL), "/")
 	var builder strings.Builder
 	builder.WriteString(`<section class="packages" aria-label="Packages"><h2>Packages</h2><div class="package-list">`)
 	for _, plan := range planList {
@@ -1045,6 +1048,11 @@ func renderHotspotPackageList(planList []plans.Plan) string {
 		builder.WriteString(`</span></div><div class="price">UGX `)
 		builder.WriteString(formatUGX(plan.Price))
 		builder.WriteString(`</div></div>`)
+		if buyBaseURL != "" {
+			builder.WriteString(`<a class="buy" href="`)
+			builder.WriteString(html.EscapeString(buyBaseURL + "/buy?plan_id=" + url.QueryEscape(plan.ID.String())))
+			builder.WriteString(`">Buy this package</a>`)
+		}
 	}
 	builder.WriteString(`</div></section>`)
 	return builder.String()
