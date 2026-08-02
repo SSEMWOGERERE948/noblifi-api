@@ -94,7 +94,7 @@ func (s *Service) handleAccessPacket(packet radiusPacket, remote *net.UDPAddr, s
 		return encodeRadiusResponse(packet, radiusAccessReject, secret, replyMessage("Invalid or expired voucher code.")), nil
 	}
 
-	if err := s.markVoucherUsed(username, voucher.Status, voucher.UsedAt); err != nil {
+	if err := s.consumeVoucher(username, voucher.Status, voucher.UsedAt); err != nil {
 		log.Printf("radius: could not mark voucher %s as used: %v", username, err)
 	}
 

@@ -302,21 +302,7 @@ func (s *Service) SyncVoucher(code string) (VoucherRadiusState, error) {
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		// Remove all previous authentication and group information.
-		if err := tx.
-			Where("username = ?", voucher.Code).
-			Delete(&RadCheck{}).Error; err != nil {
-			return err
-		}
-
-		if err := tx.
-			Where("username = ?", voucher.Code).
-			Delete(&RadReply{}).Error; err != nil {
-			return err
-		}
-
-		if err := tx.
-			Where("username = ?", voucher.Code).
-			Delete(&RadUserGroup{}).Error; err != nil {
+		if err := deleteVoucherRadiusRows(tx, voucher.Code); err != nil {
 			return err
 		}
 
@@ -504,7 +490,7 @@ func voucherUsable(voucher vouchers.Voucher) bool {
 	return true
 }
 
-func (s *Service) markVoucherUsed(code string, status string, usedAt *time.Time) error {
+func (s *Service) consumeVoucher(code string, status string, usedAt *time.Time) error {
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return nil
@@ -512,16 +498,44 @@ func (s *Service) markVoucherUsed(code string, status string, usedAt *time.Time)
 
 	now := time.Now().UTC()
 	newStatus, newUsedAt := voucherUsageState(status, usedAt, now)
-	if strings.EqualFold(newStatus, status) && usedAt != nil && newUsedAt != nil && newUsedAt.Equal(*usedAt) {
-		return nil
+
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if !strings.EqualFold(newStatus, status) ||
+			!(usedAt != nil && newUsedAt != nil && newUsedAt.Equal(*usedAt)) {
+			if err := tx.Model(&vouchers.Voucher{}).
+				Where("code = ?", code).
+				Updates(map[string]any{
+					"status":  newStatus,
+					"used_at": newUsedAt,
+				}).Error; err != nil {
+				return err
+			}
+		}
+
+		return deleteVoucherRadiusRows(tx, code)
+	})
+}
+
+func deleteVoucherRadiusRows(tx *gorm.DB, code string) error {
+	if err := tx.
+		Where("username = ?", code).
+		Delete(&RadCheck{}).Error; err != nil {
+		return err
 	}
 
-	return s.db.Model(&vouchers.Voucher{}).
-		Where("code = ?", code).
-		Updates(map[string]any{
-			"status":  newStatus,
-			"used_at": newUsedAt,
-		}).Error
+	if err := tx.
+		Where("username = ?", code).
+		Delete(&RadReply{}).Error; err != nil {
+		return err
+	}
+
+	if err := tx.
+		Where("username = ?", code).
+		Delete(&RadUserGroup{}).Error; err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func voucherUsageState(status string, usedAt *time.Time, now time.Time) (string, *time.Time) {
