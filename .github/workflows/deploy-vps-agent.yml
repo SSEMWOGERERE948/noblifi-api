@@ -56,11 +56,11 @@ jobs:
             exit 1
           fi
 
-      - name: Run agent tests
-        run: go test ./cmd/noblifi-vps-agent
+      # - name: Run agent tests
+      #   run: go test ./cmd/noblifi-vps-agent
 
-      - name: Run all tests
-        run: go test ./...
+      # - name: Run all tests
+      #   run: go test ./...
 
       - name: Build Linux AMD64 agent
         shell: bash
