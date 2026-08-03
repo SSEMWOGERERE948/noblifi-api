@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"html"
 	"log"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -197,7 +196,7 @@ func (s *Service) HotspotLoginPage(token string) (string, error) {
 			planList = items
 		}
 	}
-	return renderHotspotLoginPage(options.HotspotPortalName, planList, s.cfg.FrontendURL), nil
+	return renderHotspotLoginPage(options.HotspotPortalName, planList, s.cfg.PublicAPIBaseURL), nil
 }
 
 func (s *Service) HotspotSupportFile(token, filename string) (string, error) {
@@ -962,13 +961,15 @@ func hotspotSupportURL(token, baseURL string) string {
 	return normalizeProvisioningBaseURL(baseURL) + "/hotspot-support/" + token
 }
 
-func renderHotspotLoginPage(portalName string, planList []plans.Plan, frontendURL string) string {
+func renderHotspotLoginPage(portalName string, planList []plans.Plan, apiBaseURL string) string {
 	portalName = strings.TrimSpace(portalName)
 	if portalName == "" {
 		portalName = "NobliFi WiFi"
 	}
 	escapedPortalName := html.EscapeString(portalName)
-	packageHTML := renderHotspotPackageList(planList, frontendURL)
+	apiBaseURL = strings.TrimRight(strings.TrimSpace(apiBaseURL), "/")
+	apiBaseLiteral := strconv.Quote(apiBaseURL)
+	packageHTML := renderHotspotPackageList(planList)
 	return `<!doctype html>
 <html>
 <head>
@@ -991,7 +992,11 @@ func renderHotspotLoginPage(portalName string, planList []plans.Plan, frontendUR
     .package strong { display: block; font-size: 15px; }
     .package span { color: var(--muted); font-size: 13px; }
     .price { font-weight: 900; color: var(--accent); white-space: nowrap; }
-    .buy { display: inline-flex; align-items: center; justify-content: center; margin-top: 8px; border-radius: 8px; padding: 9px 11px; background: var(--accent); color: #06111f; font-weight: 800; text-decoration: none; }
+    .buy { display: inline-flex; align-items: center; justify-content: center; margin-top: 8px; border: 0; border-radius: 8px; padding: 9px 11px; background: var(--accent); color: #06111f; font-weight: 800; font-size: 14px; cursor: pointer; }
+    .checkout { display: none; width: min(420px, 100%); margin-top: 14px; border: 1px solid var(--line); background: rgba(7,17,29,.92); border-radius: 12px; padding: 18px; }
+    .checkout.active { display: block; }
+    .checkout h2 { margin: 0 0 8px; font-size: 16px; }
+    .checkout .selected { margin: 0 0 14px; text-align: left; color: var(--accent); font-weight: 800; }
     label { display: block; margin-bottom: 8px; font-weight: 700; }
     input { width: 100%; border: 1px solid var(--line); background: #07111d; color: var(--text); border-radius: 9px; padding: 13px; font-size: 16px; }
     button { width: 100%; margin-top: 16px; border: 0; border-radius: 9px; padding: 13px; background: var(--brand); color: #06111f; font-weight: 800; font-size: 16px; }
@@ -1016,21 +1021,110 @@ func renderHotspotLoginPage(portalName string, planList []plans.Plan, frontendUR
       <div class="error">$(if error)$(error)$(endif)</div>
     </form>
     ` + packageHTML + `
+    <section id="checkout" class="checkout" aria-label="Buy package">
+      <h2>Buy package</h2>
+      <p id="selected-package" class="selected"></p>
+      <label for="buyer-phone">Mobile money phone</label>
+      <input id="buyer-phone" inputmode="numeric" autocomplete="tel" placeholder="0111777777">
+      <label for="buyer-email" style="margin-top:12px;">Email optional</label>
+      <input id="buyer-email" type="email" autocomplete="email" placeholder="you@example.com">
+      <button id="pay-button" type="button">Buy now</button>
+      <div id="payment-message" class="error"></div>
+    </section>
   </main>
   <script>
+    var API_BASE = ` + apiBaseLiteral + `;
+    var selectedPlanId = "";
+
     document.forms.login.addEventListener("submit", function () {
       this.password.value = this.username.value;
     });
+
+    document.querySelectorAll(".buy").forEach(function (button) {
+      button.addEventListener("click", function () {
+        showCheckout(this.dataset.planId || "", this.dataset.planName || "");
+      });
+    });
+
+    function showCheckout(planId, planName) {
+      selectedPlanId = planId;
+      document.getElementById("checkout").classList.add("active");
+      document.getElementById("selected-package").textContent = planName;
+      document.getElementById("payment-message").textContent = "";
+      document.getElementById("buyer-phone").focus();
+    }
+
+    function setPaymentMessage(message) {
+      document.getElementById("payment-message").textContent = message;
+    }
+
+    document.getElementById("pay-button").addEventListener("click", function () {
+      if (!API_BASE) return setPaymentMessage("Payment server is not configured.");
+      if (!selectedPlanId) return setPaymentMessage("Choose a package first.");
+      var phone = document.getElementById("buyer-phone").value.trim();
+      var email = document.getElementById("buyer-email").value.trim();
+      if (!phone) return setPaymentMessage("Enter your mobile money phone number.");
+
+      this.disabled = true;
+      this.textContent = "Starting payment...";
+      setPaymentMessage("");
+
+      fetch(API_BASE + "/api/v1/payments/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan_id: selectedPlanId, phone: phone, email: email })
+      }).then(function (response) {
+        return response.json().then(function (body) {
+          if (!response.ok) throw new Error(body.message || body.error || "Payment request failed.");
+          return body;
+        });
+      }).then(function (order) {
+        setPaymentMessage("Approve the mobile money prompt, then wait for confirmation...");
+        pollPayment(order.order_tracking_id, 20);
+      }).catch(function (error) {
+        document.getElementById("pay-button").disabled = false;
+        document.getElementById("pay-button").textContent = "Buy now";
+        setPaymentMessage(error.message || "Payment request failed.");
+      });
+    });
+
+    function pollPayment(id, tries) {
+      fetch(API_BASE + "/api/v1/payments/orders/" + encodeURIComponent(id) + "/status", { cache: "no-store" })
+        .then(function (response) { return response.json(); })
+        .then(function (data) {
+          if (data.status === "paid" && data.voucher) {
+            document.getElementById("username").value = data.voucher;
+            document.forms.login.password.value = data.voucher;
+            document.forms.login.submit();
+            return;
+          }
+          if (data.status === "failed") {
+            document.getElementById("pay-button").disabled = false;
+            document.getElementById("pay-button").textContent = "Buy now";
+            setPaymentMessage(data.raw_status || "Payment failed.");
+            return;
+          }
+          if (tries <= 0) {
+            document.getElementById("pay-button").disabled = false;
+            document.getElementById("pay-button").textContent = "Check again";
+            setPaymentMessage("Payment is still pending. Tap Check again after approving on your phone.");
+            return;
+          }
+          setTimeout(function () { pollPayment(id, tries - 1); }, 3000);
+        }).catch(function () {
+          if (tries <= 0) return setPaymentMessage("Could not verify payment.");
+          setTimeout(function () { pollPayment(id, tries - 1); }, 3000);
+        });
+    }
   </script>
 </body>
 </html>`
 }
 
-func renderHotspotPackageList(planList []plans.Plan, frontendURL string) string {
+func renderHotspotPackageList(planList []plans.Plan) string {
 	if len(planList) == 0 {
 		return ""
 	}
-	buyBaseURL := strings.TrimRight(strings.TrimSpace(frontendURL), "/")
 	var builder strings.Builder
 	builder.WriteString(`<section class="packages" aria-label="Packages"><h2>Packages</h2><div class="package-list">`)
 	for _, plan := range planList {
@@ -1048,11 +1142,11 @@ func renderHotspotPackageList(planList []plans.Plan, frontendURL string) string 
 		builder.WriteString(`</span></div><div class="price">UGX `)
 		builder.WriteString(formatUGX(plan.Price))
 		builder.WriteString(`</div></div>`)
-		if buyBaseURL != "" {
-			builder.WriteString(`<a class="buy" href="`)
-			builder.WriteString(html.EscapeString(buyBaseURL + "/buy?plan_id=" + url.QueryEscape(plan.ID.String())))
-			builder.WriteString(`">Buy this package</a>`)
-		}
+		builder.WriteString(`<button class="buy" type="button" data-plan-id="`)
+		builder.WriteString(html.EscapeString(plan.ID.String()))
+		builder.WriteString(`" data-plan-name="`)
+		builder.WriteString(html.EscapeString(plan.Name))
+		builder.WriteString(`">Buy this package</button>`)
 	}
 	builder.WriteString(`</div></section>`)
 	return builder.String()

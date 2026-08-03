@@ -32,7 +32,11 @@ func TestRenderHotspotLoginPageShowsVoucherLoginAndPackages(t *testing.T) {
 		"Daily Unlimited",
 		"UGX 1,000",
 		"Buy this package",
-		"https://wifi.example.com/buy?plan_id=",
+		`id="checkout"`,
+		`data-plan-id="`,
+		`data-plan-name="Daily Unlimited"`,
+		`API_BASE = "https://wifi.example.com"`,
+		`/api/v1/payments/orders`,
 	}
 	for _, item := range required {
 		if !strings.Contains(html, item) {
@@ -40,7 +44,7 @@ func TestRenderHotspotLoginPageShowsVoucherLoginAndPackages(t *testing.T) {
 		}
 	}
 
-	forbidden := []string{"password\" type=\"password"}
+	forbidden := []string{"password\" type=\"password", "/buy?plan_id="}
 	for _, item := range forbidden {
 		if strings.Contains(html, item) {
 			t.Fatalf("hotspot login page must not contain %q, got:\n%s", item, html)
