@@ -23,9 +23,9 @@ env_variables:
   NEXT_PUBLIC_BASE_URL: "https://ae2e-41-210-143-246.ngrok-free.app"
   FRONTEND_URL: "http://localhost:3000"
 
-  IOTEC_CLIENT_ID: "replace-with-iotec-client-id"
-  IOTEC_CLIENT_SECRET: "replace-with-iotec-client-secret"
-  IOTEC_WALLET_ID: "replace-with-iotec-wallet-id"
+  IOTEC_CLIENT_ID: "pay-019fc76d-d4d8-73e4-aef8-9b65e2340973"
+  IOTEC_CLIENT_SECRET: "set-from-github-actions-secret"
+  IOTEC_WALLET_ID: "019fc76d-d4ef-72d4-8677-2b46fee8b4f5"
   IOTEC_TOKEN_URL: "https://id.iotec.io/connect/token"
   IOTEC_BASE_URL: "https://pay.iotec.io"
   IOTEC_CURRENCY: "UGX"

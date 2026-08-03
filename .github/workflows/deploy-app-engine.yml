@@ -1,0 +1,92 @@
+name: Deploy NobliFi Backend
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "app.yaml"
+      - ".github/workflows/deploy-app-engine.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: noblifi-backend-app-engine-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Test and deploy App Engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l .)"
+
+          if [[ -n "$unformatted" ]]; then
+            echo "The following files are not formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Run focused tests
+        run: go test ./internal/config ./internal/payments
+
+      - name: Inject deploy secrets
+        shell: bash
+        env:
+          IOTEC_CLIENT_SECRET: ${{ secrets.IOTEC_CLIENT_SECRET }}
+        run: |
+          if [[ -z "$IOTEC_CLIENT_SECRET" ]]; then
+            echo "Missing GitHub Actions secret: IOTEC_CLIENT_SECRET"
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("app.yaml")
+          text = path.read_text()
+          secret = json.dumps(os.environ["IOTEC_CLIENT_SECRET"])
+          old = 'IOTEC_CLIENT_SECRET: "set-from-github-actions-secret"'
+          new = f"IOTEC_CLIENT_SECRET: {secret}"
+
+          if old not in text:
+              raise SystemExit("IOTEC_CLIENT_SECRET placeholder was not found in app.yaml")
+
+          path.write_text(text.replace(old, new))
+          PY
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Deploy to App Engine
+        uses: google-github-actions/deploy-appengine@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          deliverables: app.yaml
