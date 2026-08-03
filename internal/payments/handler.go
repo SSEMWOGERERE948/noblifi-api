@@ -29,12 +29,12 @@ func (h *Handler) config(c *fiber.Ctx) error {
 func (h *Handler) startOrder(c *fiber.Ctx) error {
 	var input StartOrderInput
 	if err := c.BodyParser(&input); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "message": "invalid request body"})
 	}
 
 	result, err := h.service.StartOrder(input)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "message": err.Error()})
 	}
 
 	return c.JSON(result)
@@ -43,7 +43,7 @@ func (h *Handler) startOrder(c *fiber.Ctx) error {
 func (h *Handler) status(c *fiber.Ctx) error {
 	result, err := h.service.CheckOrder(c.Params("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "message": err.Error()})
 	}
 	return c.JSON(result)
 }
@@ -66,7 +66,7 @@ func (h *Handler) callback(c *fiber.Ctx) error {
 
 	result, err := h.service.HandleIPN(trackingID, reference)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "message": err.Error()})
 	}
 	return c.JSON(result)
 }

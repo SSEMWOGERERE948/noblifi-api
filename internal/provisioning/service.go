@@ -1058,6 +1058,21 @@ func renderHotspotLoginPage(portalName string, planList []plans.Plan, apiBaseURL
       document.getElementById("payment-message").textContent = message;
     }
 
+    function readJson(response) {
+      return response.text().then(function (text) {
+        var body = {};
+        if (text) {
+          try {
+            body = JSON.parse(text);
+          } catch (error) {
+            body = { message: text };
+          }
+        }
+        if (!response.ok) throw new Error(body.message || body.error || text || "Request failed.");
+        return body;
+      });
+    }
+
     document.getElementById("pay-button").addEventListener("click", function () {
       if (!API_BASE) return setPaymentMessage("Payment server is not configured.");
       if (!selectedPlanId) return setPaymentMessage("Choose a package first.");
@@ -1073,12 +1088,7 @@ func renderHotspotLoginPage(portalName string, planList []plans.Plan, apiBaseURL
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan_id: selectedPlanId, phone: phone, email: email })
-      }).then(function (response) {
-        return response.json().then(function (body) {
-          if (!response.ok) throw new Error(body.message || body.error || "Payment request failed.");
-          return body;
-        });
-      }).then(function (order) {
+      }).then(readJson).then(function (order) {
         setPaymentMessage("Approve the mobile money prompt, then wait for confirmation...");
         pollPayment(order.order_tracking_id, 20);
       }).catch(function (error) {
@@ -1090,7 +1100,7 @@ func renderHotspotLoginPage(portalName string, planList []plans.Plan, apiBaseURL
 
     function pollPayment(id, tries) {
       fetch(API_BASE + "/api/v1/payments/orders/" + encodeURIComponent(id) + "/status", { cache: "no-store" })
-        .then(function (response) { return response.json(); })
+        .then(readJson)
         .then(function (data) {
           if (data.status === "paid" && data.voucher) {
             document.getElementById("username").value = data.voucher;

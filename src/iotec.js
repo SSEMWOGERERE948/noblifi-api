@@ -15,7 +15,14 @@ function requireConfig() {
 
 async function readJSON(response, label) {
   const text = await response.text();
-  const data = text ? JSON.parse(text) : {};
+  let data = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text };
+    }
+  }
   if (!response.ok) {
     throw new Error(`${label} failed with ${response.status}: ${JSON.stringify(data)}`);
   }
