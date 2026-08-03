@@ -18,11 +18,12 @@ type Config struct {
 	PublicAPIBaseURL         string
 	FrontendURL              string
 	ProvisioningBaseURL      string
-	PesapalConsumerKey       string
-	PesapalConsumerSecret    string
-	PesapalBaseURL           string
-	PesapalIPNID             string
-	PesapalCurrency          string
+	IotecClientID            string
+	IotecClientSecret        string
+	IotecTokenURL            string
+	IotecBaseURL             string
+	IotecWalletID            string
+	IotecCurrency            string
 	RadiusServer             string
 	RadiusSecret             string
 	RouterIdentityPrefix     string
@@ -76,11 +77,12 @@ func Load() Config {
 		PublicAPIBaseURL:         getEnv("PUBLIC_API_BASE_URL", "http://localhost:8080"),
 		FrontendURL:              getEnv("NEXT_PUBLIC_BASE_URL", strings.TrimSpace(getEnv("FRONTEND_URL", "http://localhost:3000"))),
 		ProvisioningBaseURL:      getEnv("NOBLIFI_PROVISIONING_BASE_URL", "http://localhost:8080/api/v1/provisioning"),
-		PesapalConsumerKey:       strings.TrimSpace(getEnv("PESAPAL_CONSUMER_KEY", "")),
-		PesapalConsumerSecret:    strings.TrimSpace(getEnv("PESAPAL_CONSUMER_SECRET", "")),
-		PesapalBaseURL:           strings.TrimRight(strings.TrimSpace(getEnv("PESAPAL_BASE_URL", "")), "/"),
-		PesapalIPNID:             strings.TrimSpace(getEnv("PESAPAL_IPN_ID", "")),
-		PesapalCurrency:          strings.TrimSpace(getEnv("PESAPAL_CURRENCY", "UGX")),
+		IotecClientID:            strings.TrimSpace(getEnv("IOTEC_CLIENT_ID", "")),
+		IotecClientSecret:        strings.TrimSpace(getEnv("IOTEC_CLIENT_SECRET", "")),
+		IotecTokenURL:            strings.TrimSpace(getEnv("IOTEC_TOKEN_URL", "https://id.iotec.io/connect/token")),
+		IotecBaseURL:             strings.TrimRight(strings.TrimSpace(getEnv("IOTEC_BASE_URL", "https://pay.iotec.io")), "/"),
+		IotecWalletID:            strings.TrimSpace(getEnv("IOTEC_WALLET_ID", "")),
+		IotecCurrency:            strings.TrimSpace(getEnv("IOTEC_CURRENCY", "UGX")),
 		RadiusServer:             getEnv("NOBLIFI_RADIUS_SERVER", defaultRadiusServer),
 		RadiusSecret:             normalizeRadiusSecret(getEnv("NOBLIFI_RADIUS_SECRET", "noblifi")),
 		RouterIdentityPrefix:     getEnv("NOBLIFI_ROUTER_IDENTITY_PREFIX", "NobliFi"),

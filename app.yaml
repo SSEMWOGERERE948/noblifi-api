@@ -23,11 +23,12 @@ env_variables:
   NEXT_PUBLIC_BASE_URL: "https://ae2e-41-210-143-246.ngrok-free.app"
   FRONTEND_URL: "http://localhost:3000"
 
-  PESAPAL_CONSUMER_KEY: "py7ywOoRNY1+n/3891lCg95pXoFvvGMf"
-  PESAPAL_CONSUMER_SECRET: "38gh0CH+pOsutjrY6IrW7xbwq4w="
-  PESAPAL_BASE_URL: "https://pay.pesapal.com/v3/api"
-  PESAPAL_IPN_ID: "64e6d00c-9fea-458d-bef6-da9bd9fd74cb"
-  PESAPAL_CURRENCY: "UGX"
+  IOTEC_CLIENT_ID: "replace-with-iotec-client-id"
+  IOTEC_CLIENT_SECRET: "replace-with-iotec-client-secret"
+  IOTEC_WALLET_ID: "replace-with-iotec-wallet-id"
+  IOTEC_TOKEN_URL: "https://id.iotec.io/connect/token"
+  IOTEC_BASE_URL: "https://pay.iotec.io"
+  IOTEC_CURRENCY: "UGX"
 
   # MikroTik reaches RADIUS through the WireGuard tunnel.
   NOBLIFI_RADIUS_SERVER: "10.77.0.1"
@@ -72,7 +73,7 @@ env_variables:
   NOBLIFI_CCTV_POOL: "10.40.40.10-10.40.40.254"
 
   NOBLIFI_HOTSPOT_DNS_NAME: "noblifi"
-  NOBLIFI_HOTSPOT_WALLED_GARDEN_HOSTS: "ae2e-41-210-143-246.ngrok-free.app,pay.pesapal.com,noblifi-frontend.vercel.app,noblifi.ew.r.appspot.com,noblifi.uc.r.appspot.com"
+  NOBLIFI_HOTSPOT_WALLED_GARDEN_HOSTS: "ae2e-41-210-143-246.ngrok-free.app,noblifi-frontend.vercel.app,noblifi.ew.r.appspot.com,noblifi.uc.r.appspot.com"
 
   NOBLIFI_DISABLE_WWW_SERVICE: "true"
   NOBLIFI_ENABLE_API_SERVICE: "true"

@@ -68,10 +68,10 @@ var selectedPlan = PLANS[0] || null;
 window.addEventListener("load", function () {
   renderPlans();
   var params = new URLSearchParams(location.search);
-  var returnedTrackingId = params.get("OrderTrackingId") || params.get("orderTrackingId") || params.get("order_tracking_id");
+  var returnedTrackingId = params.get("id") || params.get("requestId") || params.get("transactionId") || params.get("order_tracking_id");
   if (returnedTrackingId) {
     document.getElementById("portal").hidden = false;
-    verifyPesapalAndConnect(returnedTrackingId);
+    verifyIotecAndConnect(returnedTrackingId);
     return;
   }
   if (MT_MAC && MT_MAC.indexOf("$(") !== 0) {
@@ -143,14 +143,14 @@ function payAndConnect() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ phone: phone ? "256" + phone.substring(1) : "", packageId: selectedPlan.id })
   }).then(function (r) { return r.json(); }).then(function (payment) {
-    if (!payment.redirectUrl) return showError(payment.error || "Pesapal order request failed.");
-    sessionStorage.setItem("noblifi_pesapal_tracking", payment.orderTrackingId || "");
-    location.href = payment.redirectUrl;
+    if (!payment.orderTrackingId) return showError(payment.error || "ioTec payment request failed.");
+    sessionStorage.setItem("noblifi_iotec_tracking", payment.orderTrackingId || "");
+    verifyIotecAndConnect(payment.orderTrackingId);
   }).catch(function () { showError("Payment request failed."); });
 }
 
-function verifyPesapalAndConnect(orderTrackingId) {
-  showError("Confirming Pesapal payment...");
+function verifyIotecAndConnect(orderTrackingId) {
+  showError("Approve the mobile money prompt, then wait for confirmation...");
   pollPayment(orderTrackingId, 0);
 }
 

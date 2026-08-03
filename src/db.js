@@ -108,7 +108,7 @@ db.exec(`
     plan_id TEXT NOT NULL,
     order_tracking_id TEXT UNIQUE,
     voucher_code TEXT,
-    provider TEXT NOT NULL DEFAULT 'pesapal',
+    provider TEXT NOT NULL DEFAULT 'iotec',
     status TEXT NOT NULL DEFAULT 'pending',
     raw_status TEXT,
     amount INTEGER NOT NULL,
@@ -482,7 +482,7 @@ function getRevenueMetrics(accountId, period = "month") {
 function recordRevenue(accountId, code, planId, source) {
   const plan = db.prepare("SELECT * FROM plans WHERE account_id = ? AND id = ?").get(accountId, planId);
   if (!plan) return;
-  const netPercent = Number(process.env.PESAPAL_NET_PERCENT || 100);
+  const netPercent = Number(process.env.IOTEC_NET_PERCENT || 100);
   const net = source === "mobile_money" ? Math.floor(plan.price * netPercent / 100) : plan.price;
   db.prepare(`
     INSERT INTO revenue_events (account_id, code, plan_id, source, gross_amount, net_amount)

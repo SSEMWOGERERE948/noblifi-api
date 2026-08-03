@@ -6,7 +6,7 @@ require("dotenv").config();
 const store = require("./db");
 const { renderPortal, getTemplate, saveTemplate } = require("./template");
 const { activeSessions, disconnectUser, renderSetupScript, renderDiscoveryScript, renderHotspotLoginTemplate, routerById, routerSnapshot } = require("./mikrotik");
-const pesapal = require("./pesapal");
+const iotec = require("./iotec");
 const { startRadiusServers } = require("./radius-server");
 
 const app = express();
@@ -48,27 +48,28 @@ function secondsToDuration(seconds) {
   return `${m}m`;
 }
 
-function readPesapalTrackingId(req) {
+function readIotecTransactionId(req) {
   return (
-    req.query.OrderTrackingId ||
-    req.query.orderTrackingId ||
+    req.query.id ||
+    req.query.requestId ||
+    req.query.transactionId ||
     req.query.order_tracking_id ||
-    req.query.OrderTrackingID ||
-    req.body?.OrderTrackingId ||
-    req.body?.orderTrackingId ||
+    req.body?.id ||
+    req.body?.requestId ||
+    req.body?.transactionId ||
     req.body?.order_tracking_id ||
     ""
   );
 }
 
-function readPesapalMerchantReference(req) {
+function readIotecMerchantReference(req) {
   return (
-    req.query.OrderMerchantReference ||
-    req.query.orderMerchantReference ||
+    req.query.externalId ||
+    req.query.external_id ||
     req.query.merchant_reference ||
     req.query.MerchantReference ||
-    req.body?.OrderMerchantReference ||
-    req.body?.orderMerchantReference ||
+    req.body?.externalId ||
+    req.body?.external_id ||
     req.body?.merchant_reference ||
     req.body?.MerchantReference ||
     ""
@@ -156,18 +157,17 @@ app.post("/api/:slug/pay", requireAccount, async (req, res) => {
       email
     });
 
-    const callbackUrl = `${publicBaseUrl.replace(/\/+$/, "")}/portal/${req.account.slug}/login.html?pesapal_return=1`;
-    const order = await pesapal.submitOrder({
+    if (!phone) return res.status(400).json({ error: "Phone is required." });
+    const order = await iotec.submitOrder({
       merchantReference,
       amount: plan.price,
       description: `${req.account.name} - ${plan.name}`,
-      callbackUrl,
       phone,
       email
     });
     store.attachPaymentTracking(merchantReference, order.order_tracking_id);
     res.json({
-      provider: "pesapal",
+      provider: "iotec",
       merchantReference,
       orderTrackingId: order.order_tracking_id,
       redirectUrl: order.redirect_url,
@@ -183,7 +183,7 @@ app.get("/api/:slug/pay/status/:id", requireAccount, async (req, res) => {
     const order = store.getPaymentOrderByTracking(req.params.id) || store.getPaymentOrderByReference(req.params.id);
     if (!order || order.account_id !== req.account.id) return res.status(404).json({ success: false, message: "Payment order not found." });
     const trackingId = order.order_tracking_id || req.params.id;
-    const status = await pesapal.getTransactionStatus(trackingId);
+    const status = await iotec.getTransactionStatus(trackingId);
     let voucher = null;
     let normalizedStatus = status.status;
     if (status.status === "paid") {
@@ -203,7 +203,7 @@ app.get("/api/:slug/pay/status/:id", requireAccount, async (req, res) => {
     }
     res.json({
       success: normalizedStatus === "paid",
-      provider: "pesapal",
+      provider: "iotec",
       status: normalizedStatus,
       rawStatus: status.rawStatus,
       voucher: voucher ? voucher.code : null,
@@ -217,21 +217,21 @@ app.get("/api/:slug/pay/status/:id", requireAccount, async (req, res) => {
 app.post("/api/:slug/pay/connect", requireAccount, (req, res) => {
   res.status(410).json({
     success: false,
-    message: "Pesapal no longer uses /pay/connect. Use /pay/status/:orderTrackingId to verify and create the voucher."
+    message: "Use /pay/status/:transactionId to verify ioTec payment and create the voucher."
   });
 });
 
-app.get("/api/:slug/pesapal/callback", requireAccount, async (req, res) => {
+app.get("/api/:slug/iotec/callback", requireAccount, async (req, res) => {
   try {
-    const trackingId = readPesapalTrackingId(req);
-    const merchantReference = readPesapalMerchantReference(req);
+    const trackingId = readIotecTransactionId(req);
+    const merchantReference = readIotecMerchantReference(req);
     const order = trackingId
       ? store.getPaymentOrderByTracking(trackingId)
       : store.getPaymentOrderByReference(merchantReference);
     if (!order || order.account_id !== req.account.id) {
       return res.status(404).json({ success: false, message: "Payment order not found." });
     }
-    const status = await pesapal.getTransactionStatus(order.order_tracking_id || trackingId);
+    const status = await iotec.getTransactionStatus(order.order_tracking_id || trackingId);
     let voucher = null;
     if (status.status === "paid") voucher = ensurePaidVoucher(order, status);
     else store.markPaymentOrder({ merchantReference: order.merchant_reference, status: status.status === "failed" ? "failed" : "pending", rawStatus: status.rawStatus });
@@ -247,17 +247,17 @@ app.get("/api/:slug/pesapal/callback", requireAccount, async (req, res) => {
   }
 });
 
-app.get("/api/:slug/pesapal/ipn", requireAccount, async (req, res) => {
+app.post("/api/:slug/iotec/callback", requireAccount, async (req, res) => {
   try {
-    const trackingId = readPesapalTrackingId(req);
-    const merchantReference = readPesapalMerchantReference(req);
+    const trackingId = readIotecTransactionId(req);
+    const merchantReference = readIotecMerchantReference(req);
     const order = trackingId
       ? store.getPaymentOrderByTracking(trackingId)
       : store.getPaymentOrderByReference(merchantReference);
     if (!order || order.account_id !== req.account.id) {
       return res.status(404).json({ success: false, message: "Payment order not found." });
     }
-    const status = await pesapal.getTransactionStatus(order.order_tracking_id || trackingId);
+    const status = await iotec.getTransactionStatus(order.order_tracking_id || trackingId);
     if (status.status === "paid") ensurePaidVoucher(order, status);
     else store.markPaymentOrder({ merchantReference: order.merchant_reference, status: status.status === "failed" ? "failed" : "pending", rawStatus: status.rawStatus });
     res.json({ success: true, status: status.status, rawStatus: status.rawStatus });
@@ -266,25 +266,16 @@ app.get("/api/:slug/pesapal/ipn", requireAccount, async (req, res) => {
   }
 });
 
-app.get("/api/pesapal/check-ipn", async (req, res) => {
+app.get("/api/iotec/config", async (req, res) => {
   try {
     res.json({
-      ipnList: await pesapal.getIpnList(),
       env: {
-        PESAPAL_IPN_ID: process.env.PESAPAL_IPN_ID,
+        IOTEC_BASE_URL: process.env.IOTEC_BASE_URL || "https://pay.iotec.io",
+        IOTEC_WALLET_ID: process.env.IOTEC_WALLET_ID,
         PUBLIC_BASE_URL: publicBaseUrl,
-        PESAPAL_BASE_URL: process.env.PESAPAL_BASE_URL
+        callbackUrl: `${publicBaseUrl.replace(/\/+$/, "")}/api/:slug/iotec/callback`
       }
     });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/api/pesapal/register-ipn/:slug", requireAccount, async (req, res) => {
-  try {
-    const url = `${publicBaseUrl.replace(/\/+$/, "")}/api/${req.account.slug}/pesapal/ipn`;
-    res.json({ url, response: await pesapal.registerIpn(url) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

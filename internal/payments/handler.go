@@ -18,8 +18,8 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Get("/payments/config", h.config)
 	router.Post("/payments/orders", h.startOrder)
 	router.Get("/payments/orders/:id/status", h.status)
-	router.Get("/payments/pesapal/ipn", h.ipn)
-	router.Post("/payments/pesapal/ipn", h.ipn)
+	router.Get("/payments/iotec/callback", h.callback)
+	router.Post("/payments/iotec/callback", h.callback)
 }
 
 func (h *Handler) config(c *fiber.Ctx) error {
@@ -48,18 +48,18 @@ func (h *Handler) status(c *fiber.Ctx) error {
 	return c.JSON(result)
 }
 
-func (h *Handler) ipn(c *fiber.Ctx) error {
-	trackingID := firstQuery(c, "OrderTrackingId", "orderTrackingId", "order_tracking_id")
-	reference := firstQuery(c, "OrderMerchantReference", "orderMerchantReference", "merchantReference", "merchant_reference")
+func (h *Handler) callback(c *fiber.Ctx) error {
+	trackingID := firstQuery(c, "id", "requestId", "transactionId", "order_tracking_id")
+	reference := firstQuery(c, "externalId", "external_id", "merchantReference", "merchant_reference")
 
 	if c.Method() == fiber.MethodPost {
 		var body map[string]string
 		if err := c.BodyParser(&body); err == nil {
 			if trackingID == "" {
-				trackingID = firstMapValue(body, "OrderTrackingId", "orderTrackingId", "order_tracking_id")
+				trackingID = firstMapValue(body, "id", "requestId", "transactionId", "order_tracking_id")
 			}
 			if reference == "" {
-				reference = firstMapValue(body, "OrderMerchantReference", "orderMerchantReference", "merchantReference", "merchant_reference")
+				reference = firstMapValue(body, "externalId", "external_id", "merchantReference", "merchant_reference")
 			}
 		}
 	}

@@ -11,7 +11,7 @@ type PaymentOrder struct {
 	ID                uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	MerchantReference string         `gorm:"uniqueIndex;not null" json:"merchant_reference"`
 	OrderTrackingID   string         `gorm:"index" json:"order_tracking_id"`
-	Provider          string         `gorm:"default:pesapal;not null" json:"provider"`
+	Provider          string         `gorm:"default:iotec;not null" json:"provider"`
 	Status            string         `gorm:"default:pending;index;not null" json:"status"`
 	RawStatus         string         `json:"raw_status"`
 	PlanID            uuid.UUID      `gorm:"type:uuid;index;not null" json:"plan_id"`

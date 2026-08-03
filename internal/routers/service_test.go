@@ -149,11 +149,25 @@ func TestBootstrapScriptFetchesImportsAndCleansUp(t *testing.T) {
 		`/import file-name="noblifi-bootstrap.rsc"`,
 		`:delay 1s`,
 		`/file remove "noblifi-bootstrap.rsc"`,
+		`If the NobliFi bootstrap fails because this MikroTik is still below RouterOS 7`,
+		`/system reboot`,
+		`/system routerboard print`,
+		`/system package update set channel=upgrade`,
+		`/system package update check-for-updates`,
+		`/system package update install`,
+		`/system resource print`,
+		`Do not rerun NobliFi bootstrap until /system resource print confirms RouterOS 7.x.`,
 	}
 	for _, item := range required {
 		if !strings.Contains(script, item) {
 			t.Fatalf("expected bootstrap command to contain %q, got:\n%s", item, script)
 		}
+	}
+
+	upgradeIndex := strings.Index(script, `/system package update set channel=upgrade`)
+	bootstrapIndex := strings.Index(script, `/tool fetch url="https://api.example.com/api/v1/provisioning/bootstrap/NOB-1234-5678"`)
+	if upgradeIndex < 0 || bootstrapIndex < 0 || upgradeIndex < bootstrapIndex {
+		t.Fatalf("expected RouterOS upgrade fallback commands below NobliFi bootstrap command, got:\n%s", script)
 	}
 }
 

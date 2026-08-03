@@ -453,7 +453,25 @@ func bootstrapScript(token, baseURL string) string {
 	fetchMode := provisioningFetchMode(baseURL)
 	bootstrapURL := baseURL + "/bootstrap/" + token
 
-	return routerOSFetchImportCommand(bootstrapURL, fetchMode, "noblifi-bootstrap.rsc")
+	return routerOSFetchImportCommand(bootstrapURL, fetchMode, "noblifi-bootstrap.rsc") + `
+
+# If the NobliFi bootstrap fails because this MikroTik is still below RouterOS 7,
+# use the commands below to upgrade first, then rerun the NobliFi bootstrap command above.
+# If you accidentally typed "stem reboot", run the correct command:
+/system reboot
+
+# After the router reconnects, verify RouterBOARD firmware:
+/system routerboard print
+
+# Then upgrade RouterOS 6.x to the RouterOS 7 intermediate release:
+/system package update set channel=upgrade
+/system package update check-for-updates
+/system package update install
+
+# After the router reboots, verify RouterOS is now 7.x:
+/system resource print
+
+# Do not rerun NobliFi bootstrap until /system resource print confirms RouterOS 7.x.`
 }
 
 func configInstallCommand(token, baseURL string) string {

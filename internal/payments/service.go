@@ -67,7 +67,7 @@ func NewService(db *gorm.DB, cfg config.Config, radius RadiusVoucherSyncer) *Ser
 
 func (s *Service) PublicConfig() map[string]any {
 	return map[string]any{
-		"provider":   "pesapal",
+		"provider":   "iotec",
 		"configured": s.configured() == nil,
 		"currency":   s.currency(),
 	}
@@ -90,12 +90,15 @@ func (s *Service) StartOrder(input StartOrderInput) (StartOrderResult, error) {
 	if plan.Price <= 0 {
 		return StartOrderResult{}, errors.New("package price must be greater than zero")
 	}
+	if strings.TrimSpace(input.Phone) == "" {
+		return StartOrderResult{}, errors.New("phone is required for ioTec mobile money collection")
+	}
 
 	merchantReference := "NOBLIFI-" + strings.ToUpper(randomHex(8))
 	order := PaymentOrder{
 		ID:                uuid.New(),
 		MerchantReference: merchantReference,
-		Provider:          "pesapal",
+		Provider:          "iotec",
 		Status:            "pending",
 		PlanID:            plan.ID,
 		Amount:            plan.Price,
@@ -107,7 +110,7 @@ func (s *Service) StartOrder(input StartOrderInput) (StartOrderResult, error) {
 		return StartOrderResult{}, err
 	}
 
-	response, err := s.submitPesapalOrder(order, plan)
+	response, err := s.submitIotecCollection(order, plan)
 	if err != nil {
 		return StartOrderResult{}, err
 	}
@@ -123,7 +126,7 @@ func (s *Service) StartOrder(input StartOrderInput) (StartOrderResult, error) {
 	}
 
 	return StartOrderResult{
-		Provider:          "pesapal",
+		Provider:          "iotec",
 		MerchantReference: merchantReference,
 		OrderTrackingID:   response.OrderTrackingID,
 		RedirectURL:       response.RedirectURL,
@@ -145,10 +148,10 @@ func (s *Service) CheckOrder(id string) (OrderStatusResult, error) {
 		return OrderStatusResult{}, errors.New("payment order not found")
 	}
 	if order.OrderTrackingID == "" {
-		return OrderStatusResult{}, errors.New("payment order has no Pesapal tracking id yet")
+		return OrderStatusResult{}, errors.New("payment order has no ioTec transaction id yet")
 	}
 
-	status, err := s.getPesapalTransactionStatus(order.OrderTrackingID)
+	status, err := s.getIotecCollectionStatus(order.OrderTrackingID)
 	if err != nil {
 		return OrderStatusResult{}, err
 	}
@@ -164,7 +167,7 @@ func (s *Service) HandleIPN(orderTrackingID, merchantReference string) (OrderSta
 	return s.CheckOrder(id)
 }
 
-func (s *Service) applyStatus(order PaymentOrder, status pesapalStatusResponse) (OrderStatusResult, error) {
+func (s *Service) applyStatus(order PaymentOrder, status iotecStatusResponse) (OrderStatusResult, error) {
 	normalized := normalizePaymentStatus(status.RawStatus)
 	updateStatus := normalized
 	if updateStatus == "unpaid" {
@@ -191,7 +194,7 @@ func (s *Service) applyStatus(order PaymentOrder, status pesapalStatusResponse) 
 
 	return OrderStatusResult{
 		Success:           normalized == "paid",
-		Provider:          "pesapal",
+		Provider:          "iotec",
 		Status:            normalized,
 		RawStatus:         status.RawStatus,
 		MerchantReference: order.MerchantReference,
@@ -242,98 +245,114 @@ func (s *Service) ensureVoucher(order *PaymentOrder) (vouchers.Voucher, error) {
 	return voucher, nil
 }
 
-type pesapalOrderResponse struct {
+type iotecOrderResponse struct {
 	OrderTrackingID string
 	RedirectURL     string
 	raw             map[string]any
 }
 
-type pesapalStatusResponse struct {
+type iotecStatusResponse struct {
 	RawStatus string
 	raw       map[string]any
 }
 
-func (s *Service) submitPesapalOrder(order PaymentOrder, plan plans.Plan) (pesapalOrderResponse, error) {
-	token, err := s.pesapalToken()
+func (s *Service) submitIotecCollection(order PaymentOrder, plan plans.Plan) (iotecOrderResponse, error) {
+	token, err := s.iotecToken()
 	if err != nil {
-		return pesapalOrderResponse{}, err
+		return iotecOrderResponse{}, err
 	}
 
-	callbackURL := strings.TrimRight(s.cfg.FrontendURL, "/") + "/buy"
 	body := map[string]any{
-		"id":              order.MerchantReference,
-		"currency":        order.Currency,
-		"amount":          order.Amount,
-		"description":     "NobliFi - " + plan.Name,
-		"callback_url":    callbackURL,
-		"notification_id": s.cfg.PesapalIPNID,
-		"billing_address": map[string]any{
-			"email_address": emptyToNil(order.Email),
-			"phone_number":  emptyToNil(order.Phone),
-			"country_code":  "UG",
-		},
+		"category":   "MobileMoney",
+		"currency":   order.Currency,
+		"walletId":   s.cfg.IotecWalletID,
+		"externalId": order.MerchantReference,
+		"payer":      order.Phone,
+		"amount":     order.Amount,
+		"payerNote":  "NobliFi - " + plan.Name,
+		"payeeNote":  "NobliFi voucher " + order.MerchantReference,
 	}
 
 	var payload map[string]any
-	if err := s.pesapalRequest(http.MethodPost, "/Transactions/SubmitOrderRequest", token, body, &payload); err != nil {
-		return pesapalOrderResponse{}, err
+	if err := s.iotecRequest(http.MethodPost, "/api/collections/collect", token, body, &payload); err != nil {
+		return iotecOrderResponse{}, err
 	}
 
-	trackingID, _ := payload["order_tracking_id"].(string)
-	redirectURL, _ := payload["redirect_url"].(string)
-	if trackingID == "" || redirectURL == "" {
-		return pesapalOrderResponse{}, fmt.Errorf("Pesapal did not return redirect_url/order_tracking_id: %v", payload)
+	trackingID := firstString(payload, "id", "requestId", "transactionId")
+	if trackingID == "" {
+		return iotecOrderResponse{}, fmt.Errorf("ioTec did not return a transaction id: %v", payload)
 	}
 
-	return pesapalOrderResponse{
+	return iotecOrderResponse{
 		OrderTrackingID: trackingID,
-		RedirectURL:     redirectURL,
+		RedirectURL:     "",
 		raw:             payload,
 	}, nil
 }
 
-func (s *Service) getPesapalTransactionStatus(orderTrackingID string) (pesapalStatusResponse, error) {
-	token, err := s.pesapalToken()
+func (s *Service) getIotecCollectionStatus(orderTrackingID string) (iotecStatusResponse, error) {
+	token, err := s.iotecToken()
 	if err != nil {
-		return pesapalStatusResponse{}, err
+		return iotecStatusResponse{}, err
 	}
 
-	path := "/Transactions/GetTransactionStatus?orderTrackingId=" + url.QueryEscape(orderTrackingID)
+	path := "/api/collections/status/" + url.PathEscape(orderTrackingID)
 	var payload map[string]any
-	if err := s.pesapalRequest(http.MethodGet, path, token, nil, &payload); err != nil {
-		return pesapalStatusResponse{}, err
+	if err := s.iotecRequest(http.MethodGet, path, token, nil, &payload); err != nil {
+		return iotecStatusResponse{}, err
 	}
 
-	rawStatus := firstString(payload, "payment_status_description", "status", "payment_status")
+	rawStatus := firstString(payload, "status", "statusCode", "statusMessage")
 	if rawStatus == "" {
 		rawStatus = "UNKNOWN"
 	}
 
-	return pesapalStatusResponse{
+	return iotecStatusResponse{
 		RawStatus: rawStatus,
 		raw:       payload,
 	}, nil
 }
 
-func (s *Service) pesapalToken() (string, error) {
+func (s *Service) iotecToken() (string, error) {
 	var payload struct {
-		Token string `json:"token"`
+		AccessToken string `json:"access_token"`
 	}
-	body := map[string]string{
-		"consumer_key":    s.cfg.PesapalConsumerKey,
-		"consumer_secret": s.cfg.PesapalConsumerSecret,
-	}
-	if err := s.pesapalRequest(http.MethodPost, "/Auth/RequestToken", "", body, &payload); err != nil {
+	form := url.Values{}
+	form.Set("client_id", s.cfg.IotecClientID)
+	form.Set("client_secret", s.cfg.IotecClientSecret)
+	form.Set("grant_type", "client_credentials")
+
+	req, err := http.NewRequest(http.MethodPost, s.cfg.IotecTokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(payload.Token) == "" {
-		return "", errors.New("Pesapal auth did not return token")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", err
 	}
-	return payload.Token, nil
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("ioTec auth failed with %d: %s", resp.StatusCode, string(data))
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return "", fmt.Errorf("decode ioTec auth response: %w", err)
+	}
+	if strings.TrimSpace(payload.AccessToken) == "" {
+		return "", errors.New("ioTec auth did not return access_token")
+	}
+	return payload.AccessToken, nil
 }
 
-func (s *Service) pesapalRequest(method, path, token string, body any, out any) error {
-	endpoint := strings.TrimRight(s.cfg.PesapalBaseURL, "/") + path
+func (s *Service) iotecRequest(method, path, token string, body any, out any) error {
+	endpoint := strings.TrimRight(s.cfg.IotecBaseURL, "/") + path
 
 	var reader io.Reader
 	if body != nil {
@@ -367,43 +386,43 @@ func (s *Service) pesapalRequest(method, path, token string, body any, out any) 
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("Pesapal request failed with %d: %s", resp.StatusCode, string(data))
+		return fmt.Errorf("ioTec request failed with %d: %s", resp.StatusCode, string(data))
 	}
 	if out == nil || len(data) == 0 {
 		return nil
 	}
 	if err := json.Unmarshal(data, out); err != nil {
-		return fmt.Errorf("decode Pesapal response: %w", err)
+		return fmt.Errorf("decode ioTec response: %w", err)
 	}
 	return nil
 }
 
 func (s *Service) configured() error {
 	var missing []string
-	if s.cfg.PesapalBaseURL == "" {
-		missing = append(missing, "PESAPAL_BASE_URL")
+	if s.cfg.IotecBaseURL == "" {
+		missing = append(missing, "IOTEC_BASE_URL")
 	}
-	if s.cfg.PesapalConsumerKey == "" {
-		missing = append(missing, "PESAPAL_CONSUMER_KEY")
+	if s.cfg.IotecTokenURL == "" {
+		missing = append(missing, "IOTEC_TOKEN_URL")
 	}
-	if s.cfg.PesapalConsumerSecret == "" {
-		missing = append(missing, "PESAPAL_CONSUMER_SECRET")
+	if s.cfg.IotecClientID == "" {
+		missing = append(missing, "IOTEC_CLIENT_ID")
 	}
-	if s.cfg.PesapalIPNID == "" {
-		missing = append(missing, "PESAPAL_IPN_ID")
+	if s.cfg.IotecClientSecret == "" {
+		missing = append(missing, "IOTEC_CLIENT_SECRET")
 	}
-	if s.cfg.FrontendURL == "" {
-		missing = append(missing, "FRONTEND_URL")
+	if s.cfg.IotecWalletID == "" {
+		missing = append(missing, "IOTEC_WALLET_ID")
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("Pesapal is not configured. Missing: %s", strings.Join(missing, ", "))
+		return fmt.Errorf("ioTec is not configured. Missing: %s", strings.Join(missing, ", "))
 	}
 	return nil
 }
 
 func (s *Service) currency() string {
-	if s.cfg.PesapalCurrency != "" {
-		return s.cfg.PesapalCurrency
+	if s.cfg.IotecCurrency != "" {
+		return s.cfg.IotecCurrency
 	}
 	return "UGX"
 }
@@ -441,12 +460,4 @@ func firstString(values map[string]any, keys ...string) string {
 		}
 	}
 	return ""
-}
-
-func emptyToNil(value string) any {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	return value
 }
