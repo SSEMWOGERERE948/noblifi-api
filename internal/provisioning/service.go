@@ -196,7 +196,7 @@ func (s *Service) HotspotLoginPage(token string) (string, error) {
 			planList = items
 		}
 	}
-	return renderHotspotLoginPage(options.HotspotPortalName, planList, s.cfg.PublicAPIBaseURL), nil
+	return renderHotspotLoginPage(options.HotspotPortalName, options.HotspotTemplateKey, planList, s.cfg.PublicAPIBaseURL), nil
 }
 
 func (s *Service) HotspotSupportFile(token, filename string) (string, error) {
@@ -961,11 +961,12 @@ func hotspotSupportURL(token, baseURL string) string {
 	return normalizeProvisioningBaseURL(baseURL) + "/hotspot-support/" + token
 }
 
-func renderHotspotLoginPage(portalName string, planList []plans.Plan, apiBaseURL string) string {
+func renderHotspotLoginPage(portalName, templateKey string, planList []plans.Plan, apiBaseURL string) string {
 	portalName = strings.TrimSpace(portalName)
 	if portalName == "" {
 		portalName = "NobliFi WiFi"
 	}
+	theme := hotspotPortalTheme(templateKey)
 	escapedPortalName := html.EscapeString(portalName)
 	apiBaseURL = strings.TrimRight(strings.TrimSpace(apiBaseURL), "/")
 	apiBaseLiteral := strconv.Quote(apiBaseURL)
@@ -977,9 +978,9 @@ func renderHotspotLoginPage(portalName string, planList []plans.Plan, apiBaseURL
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>` + escapedPortalName + ` Login</title>
   <style>
-    :root { color-scheme: dark; --bg: #06111f; --panel: #0b1727; --line: #24384f; --text: #f8fbff; --muted: #9fb0c5; --brand: #7dd3fc; --accent: #34d399; --danger: #fca5a5; }
+    :root { color-scheme: dark; --bg: ` + theme.Background + `; --panel: ` + theme.Panel + `; --line: ` + theme.Line + `; --text: ` + theme.Text + `; --muted: ` + theme.Muted + `; --brand: ` + theme.Brand + `; --accent: ` + theme.Accent + `; --danger: #fca5a5; }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: Arial, sans-serif; background: linear-gradient(145deg, #06111f 0%, #0b1727 52%, #102033 100%); color: var(--text); }
+    body { margin: 0; font-family: Arial, sans-serif; background: ` + theme.Body + `; color: var(--text); }
     main { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; }
     form { width: min(420px, 100%); border: 1px solid var(--line); background: rgba(11,23,39,.94); border-radius: 12px; padding: 26px; box-shadow: 0 18px 50px rgba(0,0,0,.32); }
     .mark { width: 48px; height: 48px; display: grid; place-items: center; margin: 0 auto 16px; border-radius: 10px; background: var(--brand); color: #06111f; font-weight: 900; letter-spacing: 0; }
@@ -1163,6 +1164,66 @@ func renderHotspotPackageList(planList []plans.Plan) string {
 	}
 	builder.WriteString(`</div></section>`)
 	return builder.String()
+}
+
+type hotspotTheme struct {
+	Background string
+	Panel      string
+	Line       string
+	Text       string
+	Muted      string
+	Brand      string
+	Accent     string
+	Body       string
+}
+
+func hotspotPortalTheme(key string) hotspotTheme {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "sunrise":
+		return hotspotTheme{
+			Background: "#130f1f",
+			Panel:      "#21182f",
+			Line:       "#4f3b61",
+			Text:       "#fffaf5",
+			Muted:      "#dccfbe",
+			Brand:      "#fbbf24",
+			Accent:     "#fb7185",
+			Body:       "radial-gradient(circle at top left, #7c2d12 0%, #3b1d2f 38%, #130f1f 100%)",
+		}
+	case "fresh":
+		return hotspotTheme{
+			Background: "#03150f",
+			Panel:      "#082218",
+			Line:       "#1d4b39",
+			Text:       "#f3fff9",
+			Muted:      "#a7c8b9",
+			Brand:      "#86efac",
+			Accent:     "#22d3ee",
+			Body:       "linear-gradient(145deg, #03150f 0%, #082218 55%, #083344 100%)",
+		}
+	case "royal":
+		return hotspotTheme{
+			Background: "#0f1020",
+			Panel:      "#17162d",
+			Line:       "#34315c",
+			Text:       "#fbfbff",
+			Muted:      "#b9b6d6",
+			Brand:      "#c4b5fd",
+			Accent:     "#38bdf8",
+			Body:       "linear-gradient(145deg, #0f1020 0%, #17162d 55%, #1e1b4b 100%)",
+		}
+	default:
+		return hotspotTheme{
+			Background: "#06111f",
+			Panel:      "#0b1727",
+			Line:       "#24384f",
+			Text:       "#f8fbff",
+			Muted:      "#9fb0c5",
+			Brand:      "#7dd3fc",
+			Accent:     "#34d399",
+			Body:       "linear-gradient(145deg, #06111f 0%, #0b1727 52%, #102033 100%)",
+		}
+	}
 }
 
 func planDuration(minutes int) string {

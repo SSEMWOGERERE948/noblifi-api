@@ -27,9 +27,10 @@ func NewService(db *gorm.DB, jwtSecret string) *Service {
 }
 
 type SignupInput struct {
-	Name     string `json:"name"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Name       string `json:"name"`
+	Email      string `json:"email"`
+	Password   string `json:"password"`
+	PortalName string `json:"portal_name"`
 }
 
 type AccountDetails struct {
@@ -40,6 +41,7 @@ type AccountDetails struct {
 func (s *Service) Signup(input SignupInput) (database.User, error) {
 	input.Email = strings.ToLower(strings.TrimSpace(input.Email))
 	input.Name = strings.TrimSpace(input.Name)
+	input.PortalName = strings.TrimSpace(input.PortalName)
 
 	if input.Name == "" {
 		return database.User{}, errors.New("name is required")
@@ -49,6 +51,9 @@ func (s *Service) Signup(input SignupInput) (database.User, error) {
 	}
 	if len(input.Password) < 8 {
 		return database.User{}, errors.New("password must be at least 8 characters")
+	}
+	if input.PortalName == "" {
+		input.PortalName = input.Name
 	}
 
 	var count int64
@@ -67,6 +72,7 @@ func (s *Service) Signup(input SignupInput) (database.User, error) {
 	user := database.User{
 		Name:          input.Name,
 		Email:         input.Email,
+		PortalName:    input.PortalName,
 		PasswordHash:  string(hash),
 		Role:          "client",
 		AccountStatus: "pending",
@@ -77,6 +83,15 @@ func (s *Service) Signup(input SignupInput) (database.User, error) {
 	}
 
 	return user, nil
+}
+
+func (s *Service) UpdateAccountProfile(user database.User, portalName string) (database.User, error) {
+	portalName = strings.TrimSpace(portalName)
+	if portalName == "" {
+		return user, errors.New("portal name is required")
+	}
+	user.PortalName = portalName
+	return user, s.db.Save(&user).Error
 }
 
 func (s *Service) Login(email, password string) (string, database.User, error) {
@@ -294,6 +309,7 @@ func (s *Service) SeedAdmin() error {
 	return s.db.Create(&database.User{
 		Name:          "NobliFi Super Admin",
 		Email:         "admin@noblifi.local",
+		PortalName:    "NobliFi WiFi",
 		PasswordHash:  string(hash),
 		Role:          "superadmin",
 		AccountStatus: "approved",

@@ -51,6 +51,7 @@ type RenderOptions struct {
 	CCTVPool            string
 	HotspotDNSName      string
 	HotspotPortalName   string
+	HotspotTemplateKey  string
 	DisableWWWService   bool
 	EnableAPIService    bool
 	EnableAPISSLService bool

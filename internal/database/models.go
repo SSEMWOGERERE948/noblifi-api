@@ -10,6 +10,7 @@ type User struct {
 	ID                   uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	Name                 string     `json:"name"`
 	Email                string     `gorm:"uniqueIndex" json:"email"`
+	PortalName           string     `json:"portal_name"`
 	PasswordHash         string     `json:"-"`
 	Role                 string     `gorm:"default:client;index" json:"role"`
 	AccountStatus        string     `gorm:"default:pending;index" json:"account_status"`

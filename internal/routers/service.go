@@ -64,6 +64,7 @@ type CreateRouterInput struct {
 type AuthUser struct {
 	ID            uuid.UUID
 	Name          string
+	PortalName    string
 	Role          string
 	AccountStatus string
 	RouterLimit   int
@@ -114,7 +115,7 @@ func (s *Service) CreateForUser(input CreateRouterInput, user AuthUser) (Router,
 		return router, err
 	}
 	profile := s.defaultNetworkProfile(router.ID, router.Name)
-	if portalName := strings.TrimSpace(user.Name); portalName != "" && user.Role != "superadmin" {
+	if portalName := firstNonEmpty(user.PortalName, user.Name); portalName != "" && user.Role != "superadmin" {
 		profile.HotspotPortalName = portalName
 	}
 	if err := s.repo.CreateNetworkProfile(&profile); err != nil {
@@ -1030,6 +1031,7 @@ func renderOptions(cfg config.Config) portprofiles.RenderOptions {
 		CCTVPool:            cfg.CCTVPoolRange,
 		HotspotDNSName:      cfg.HotspotDNSName,
 		HotspotPortalName:   cfg.HotspotPortalName,
+		HotspotTemplateKey:  "clean",
 		WalledGardenHosts:   cfg.HotspotWalledGardenHosts,
 		DisableWWWService:   cfg.DisableWWWService,
 		EnableAPIService:    cfg.EnableAPIService,
@@ -1087,6 +1089,7 @@ func (s *Service) defaultNetworkProfile(routerID uuid.UUID, routerName string) R
 		CCTVPool:            s.cfg.CCTVPoolRange,
 		HotspotDNSName:      s.cfg.HotspotDNSName,
 		HotspotPortalName:   s.cfg.HotspotPortalName,
+		HotspotTemplateKey:  "clean",
 		WANMode:             "dhcp",
 		DisableWWWService:   s.cfg.DisableWWWService,
 		EnableAPIService:    s.cfg.EnableAPIService,
@@ -1119,6 +1122,7 @@ func (p RouterNetworkProfile) RenderOptions() portprofiles.RenderOptions {
 		CCTVPool:            p.CCTVPool,
 		HotspotDNSName:      p.HotspotDNSName,
 		HotspotPortalName:   p.HotspotPortalName,
+		HotspotTemplateKey:  p.HotspotTemplateKey,
 		DisableWWWService:   p.DisableWWWService,
 		EnableAPIService:    p.EnableAPIService,
 		EnableAPISSLService: p.EnableAPISSLService,
@@ -1197,6 +1201,9 @@ func mergeNetworkProfile(profile *RouterNetworkProfile, input RouterNetworkProfi
 	}
 	if input.HotspotPortalName != "" {
 		profile.HotspotPortalName = input.HotspotPortalName
+	}
+	if input.HotspotTemplateKey != "" {
+		profile.HotspotTemplateKey = input.HotspotTemplateKey
 	}
 	if input.WANMode != "" {
 		profile.WANMode = input.WANMode

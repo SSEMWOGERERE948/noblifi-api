@@ -46,6 +46,7 @@ func (a routerAuthAdapter) UserFromToken(rawToken string) (routers.AuthUser, err
 	return routers.AuthUser{
 		ID:            user.ID,
 		Name:          user.Name,
+		PortalName:    user.PortalName,
 		Role:          user.Role,
 		AccountStatus: user.AccountStatus,
 		RouterLimit:   user.RouterLimit,

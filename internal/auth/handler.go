@@ -20,6 +20,7 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Post("/auth/signup", h.signup)
 	router.Post("/auth/login", h.login)
 	router.Get("/auth/me", h.me)
+	router.Put("/account/profile", h.updateProfile)
 	router.Post("/auth/change-password", h.changePassword)
 	router.Get("/admin/users", h.users)
 	router.Get("/admin/users/account-details", h.accountDetails)
@@ -88,6 +89,24 @@ func (h *Handler) changePassword(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 	return c.JSON(fiber.Map{"success": true})
+}
+
+func (h *Handler) updateProfile(c *fiber.Ctx) error {
+	user, err := h.requireUser(c)
+	if err != nil {
+		return err
+	}
+	var input struct {
+		PortalName string `json:"portal_name"`
+	}
+	if err := c.BodyParser(&input); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	}
+	updated, err := h.service.UpdateAccountProfile(user, input.PortalName)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	return c.JSON(fiber.Map{"user": updated})
 }
 
 func (h *Handler) users(c *fiber.Ctx) error {

@@ -11,7 +11,7 @@ import (
 )
 
 func TestRenderHotspotLoginPageShowsVoucherLoginAndPackages(t *testing.T) {
-	html := renderHotspotLoginPage("NobliFi WiFi", []plans.Plan{
+	html := renderHotspotLoginPage("NobliFi WiFi", "clean", []plans.Plan{
 		{
 			ID:              uuid.New(),
 			Name:            "Daily Unlimited",
@@ -78,12 +78,23 @@ func TestRegisterRadiusNASPrefersWireGuardTunnelAddress(t *testing.T) {
 
 func TestRenderHotspotLoginPageEscapesPortalName(t *testing.T) {
 	rawName := `<script>alert("x")</script>`
-	html := renderHotspotLoginPage(rawName, nil, "")
+	html := renderHotspotLoginPage(rawName, "clean", nil, "")
 
 	if strings.Contains(html, `<h1>`+rawName+`</h1>`) || strings.Contains(html, `<title>`+rawName+` Login</title>`) {
 		t.Fatalf("expected portal name to be escaped, got:\n%s", html)
 	}
 	if !strings.Contains(html, "&lt;script&gt;alert(&#34;x&#34;)&lt;/script&gt;") {
 		t.Fatalf("expected escaped portal name, got:\n%s", html)
+	}
+}
+
+func TestRenderHotspotLoginPageUsesTemplateTheme(t *testing.T) {
+	html := renderHotspotLoginPage("Cafe Online", "sunrise", nil, "")
+
+	if !strings.Contains(html, "Cafe Online") {
+		t.Fatalf("expected portal name in generated page, got:\n%s", html)
+	}
+	if !strings.Contains(html, "#fbbf24") || !strings.Contains(html, "Powered by <strong>NobliFi</strong>") {
+		t.Fatalf("expected sunrise theme and powered-by footer, got:\n%s", html)
 	}
 }
