@@ -30,6 +30,12 @@ func (r *Repository) List() ([]Router, error) {
 	return routers, err
 }
 
+func (r *Repository) ListByOwner(ownerID uuid.UUID) ([]Router, error) {
+	var routers []Router
+	err := r.db.Where("owner_user_id = ? AND deleted_at IS NULL", ownerID).Order("created_at desc").Find(&routers).Error
+	return routers, err
+}
+
 func (r *Repository) Find(id uuid.UUID) (Router, error) {
 	var router Router
 	err := r.db.Preload("Interfaces").Preload("PortAssignments").Preload("SetupSession").Preload("NetworkProfile").First(&router, "id = ?", id).Error

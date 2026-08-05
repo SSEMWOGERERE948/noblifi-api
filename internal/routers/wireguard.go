@@ -839,17 +839,19 @@ func RenderWireGuardRouterOS(
 /ip firewall filter remove [find where comment="Allow NobliFi WireGuard ping"]
 :local inputRules [/ip firewall filter find where chain=input]
 :if ([:len $inputRules] = 0) do={
-  /ip firewall filter add chain=input action=accept in-interface=$wgName src-address=%s/32 protocol=tcp dst-port=8291,8728,8729 comment="Allow NobliFi management over WireGuard"
+  /ip firewall filter add chain=input action=accept in-interface=$wgName src-address=%s/32 protocol=tcp dst-port=8291,8728,8729,80,443 comment="Allow NobliFi management over WireGuard"
   /ip firewall filter add chain=input action=accept in-interface=$wgName src-address=%s/32 protocol=icmp comment="Allow NobliFi WireGuard ping"
 } else={
   :local firstInputRule [:pick $inputRules 0]
-  /ip firewall filter add chain=input action=accept in-interface=$wgName src-address=%s/32 protocol=tcp dst-port=8291,8728,8729 place-before=$firstInputRule comment="Allow NobliFi management over WireGuard"
+  /ip firewall filter add chain=input action=accept in-interface=$wgName src-address=%s/32 protocol=tcp dst-port=8291,8728,8729,80,443 place-before=$firstInputRule comment="Allow NobliFi management over WireGuard"
   /ip firewall filter add chain=input action=accept in-interface=$wgName src-address=%s/32 protocol=icmp place-before=$firstInputRule comment="Allow NobliFi WireGuard ping"
 }
 
 :do { /user remove [find where name="%s" comment="NobliFi API management user"] } on-error={}
 :do { /user add name="%s" group=full password="%s" comment="NobliFi API management user" } on-error={ :error "NobliFi failed to create API management user" }
 :do { /ip service set api disabled=no address=%s/32 } on-error={ :error "NobliFi failed to enable restricted RouterOS API" }
+:do { /ip service set winbox disabled=no address=%s/32 } on-error={ :log warning "NobliFi could not restrict Winbox service" }
+:do { /ip service set www disabled=no address=%s/32 } on-error={ :log warning "NobliFi could not enable restricted WebFig service" }
 
 :local routerPublicKey [/interface wireguard get $wgInterface public-key]
 :put ("NobliFi WireGuard public key: " . $routerPublicKey)
@@ -936,6 +938,8 @@ func RenderWireGuardRouterOS(
 		routerOSQuotedString(cfg.RouterAPIUsername),
 		routerOSQuotedString(cfg.RouterAPIUsername),
 		routerOSQuotedString(cfg.RouterAPIPassword),
+		cfg.WireGuardServerIP,
+		cfg.WireGuardServerIP,
 		cfg.WireGuardServerIP,
 		callbackURL,
 		fetchMode,

@@ -20,6 +20,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -55,10 +56,12 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 }
 
 type Agent struct {
-	cfg    Config
-	client *http.Client
-	runner CommandRunner
-	log    *slog.Logger
+	cfg        Config
+	client     *http.Client
+	runner     CommandRunner
+	log        *slog.Logger
+	forwarders map[int]net.Listener
+	forwardMu  sync.Mutex
 }
 
 type Job struct {
@@ -81,6 +84,13 @@ type DesiredRouterConfig struct {
 	RouterOSScript string `json:"routeros_script"`
 }
 
+type RemoteAccessConfig struct {
+	RouterID   string `json:"router_id"`
+	RouterIP   string `json:"router_ip"`
+	WebPort    int    `json:"web_port"`
+	WinboxPort int    `json:"winbox_port"`
+}
+
 func main() {
 	cfg, err := loadConfig()
 	if err != nil {
@@ -91,10 +101,11 @@ func main() {
 	defer stop()
 
 	agent := &Agent{
-		cfg:    cfg,
-		client: &http.Client{Timeout: 30 * time.Second},
-		runner: ExecRunner{},
-		log:    slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+		cfg:        cfg,
+		client:     &http.Client{Timeout: 30 * time.Second},
+		runner:     ExecRunner{},
+		log:        slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+		forwarders: map[int]net.Listener{},
 	}
 	if err := agent.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		agent.log.Error("agent stopped", "error", err)
@@ -193,6 +204,10 @@ func (a *Agent) applyJob(ctx context.Context, job Job) error {
 		return a.removePeer(ctx, job)
 	case "configure_router":
 		return a.configureRouter(ctx, job)
+	case "upsert_remote_access":
+		return a.upsertRemoteAccess(ctx, job)
+	case "remove_remote_access":
+		return a.removeRemoteAccess(job)
 	case "sync_portal":
 		return a.syncPortal(ctx, job)
 	case "upsert_radius_nas", "remove_radius_nas":
@@ -450,6 +465,122 @@ func (a *Agent) fetchDesiredRouterConfig(ctx context.Context, routerID string) (
 		return out, err
 	}
 	return out, nil
+}
+
+func (a *Agent) upsertRemoteAccess(ctx context.Context, job Job) error {
+	var cfg RemoteAccessConfig
+	if strings.TrimSpace(job.RouterID) == "" {
+		return errors.New("router ID is required")
+	}
+	if err := a.get(ctx, "/internal/routers/"+job.RouterID+"/remote-access-config", &cfg); err != nil {
+		return fmt.Errorf("fetch remote access config: %w", err)
+	}
+	if strings.TrimSpace(cfg.RouterIP) == "" {
+		return errors.New("remote access config has no router_ip")
+	}
+	if cfg.WebPort > 0 {
+		if err := a.startForwarder(cfg.WebPort, net.JoinHostPort(cfg.RouterIP, "80")); err != nil {
+			return fmt.Errorf("start WebFig forwarder: %w", err)
+		}
+	}
+	if cfg.WinboxPort > 0 {
+		if err := a.startForwarder(cfg.WinboxPort, net.JoinHostPort(cfg.RouterIP, "8291")); err != nil {
+			return fmt.Errorf("start Winbox forwarder: %w", err)
+		}
+	}
+	return nil
+}
+
+func (a *Agent) removeRemoteAccess(job Job) error {
+	// Port numbers are fetched from the current desired state. If the router has
+	// already been deleted, the job can complete because process-local listeners
+	// will disappear on agent restart and peer removal cuts tunnel reachability.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var cfg RemoteAccessConfig
+	if err := a.get(ctx, "/internal/routers/"+job.RouterID+"/remote-access-config", &cfg); err != nil {
+		return nil
+	}
+	if cfg.WebPort > 0 {
+		a.stopForwarder(cfg.WebPort)
+	}
+	if cfg.WinboxPort > 0 {
+		a.stopForwarder(cfg.WinboxPort)
+	}
+	return nil
+}
+
+func (a *Agent) startForwarder(publicPort int, target string) error {
+	if publicPort <= 0 {
+		return errors.New("public port is required")
+	}
+	if strings.TrimSpace(target) == "" {
+		return errors.New("target address is required")
+	}
+	a.forwardMu.Lock()
+	if _, exists := a.forwarders[publicPort]; exists {
+		a.forwardMu.Unlock()
+		return nil
+	}
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", publicPort))
+	if err != nil {
+		a.forwardMu.Unlock()
+		return err
+	}
+	a.forwarders[publicPort] = listener
+	a.forwardMu.Unlock()
+
+	a.log.Info("remote access forwarder started", "public_port", publicPort, "target", target)
+	go a.serveForwarder(listener, publicPort, target)
+	return nil
+}
+
+func (a *Agent) stopForwarder(publicPort int) {
+	a.forwardMu.Lock()
+	listener := a.forwarders[publicPort]
+	delete(a.forwarders, publicPort)
+	a.forwardMu.Unlock()
+	if listener != nil {
+		_ = listener.Close()
+	}
+}
+
+func (a *Agent) serveForwarder(listener net.Listener, publicPort int, target string) {
+	for {
+		client, err := listener.Accept()
+		if err != nil {
+			a.log.Info("remote access forwarder stopped", "public_port", publicPort)
+			return
+		}
+		go a.forwardTCP(client, target)
+	}
+}
+
+func (a *Agent) forwardTCP(client net.Conn, target string) {
+	defer client.Close()
+	router, err := net.DialTimeout("tcp", target, 10*time.Second)
+	if err != nil {
+		a.log.Warn("remote access target dial failed", "target", target, "error", err)
+		return
+	}
+	defer router.Close()
+
+	done := make(chan struct{}, 2)
+	go func() {
+		_, _ = io.Copy(router, client)
+		if tcp, ok := router.(*net.TCPConn); ok {
+			_ = tcp.CloseWrite()
+		}
+		done <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(client, router)
+		if tcp, ok := client.(*net.TCPConn); ok {
+			_ = tcp.CloseWrite()
+		}
+		done <- struct{}{}
+	}()
+	<-done
 }
 
 func (a *Agent) waitForTCP(ctx context.Context, address string) error {

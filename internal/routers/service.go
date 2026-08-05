@@ -6,24 +6,32 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/noblifi/noblifi/backend/internal/config"
+	"github.com/noblifi/noblifi/backend/internal/mikrotik"
 	"github.com/noblifi/noblifi/backend/internal/placeholders"
 	"github.com/noblifi/noblifi/backend/internal/portprofiles"
+	"gorm.io/gorm"
 )
 
 type Service struct {
 	repo                    *Repository
 	cfg                     config.Config
 	cleanup                 WireGuardCleanupQueuer
+	remoteAccess            RemoteAccessQueuer
 	serverPublicKeyResolver WireGuardServerPublicKeyResolver
 }
 
 type WireGuardCleanupQueuer interface {
 	QueuePeerRemoval(router Router) error
+}
+
+type RemoteAccessQueuer interface {
+	QueueRemoteAccess(router Router) error
 }
 
 type WireGuardServerPublicKeyResolver interface {
@@ -38,6 +46,10 @@ func (s *Service) SetWireGuardCleanup(cleanup WireGuardCleanupQueuer) {
 	s.cleanup = cleanup
 }
 
+func (s *Service) SetRemoteAccessQueuer(remoteAccess RemoteAccessQueuer) {
+	s.remoteAccess = remoteAccess
+}
+
 func (s *Service) SetWireGuardServerPublicKeyResolver(resolver WireGuardServerPublicKeyResolver) {
 	s.serverPublicKeyResolver = resolver
 }
@@ -49,7 +61,31 @@ type CreateRouterInput struct {
 	ExpectedModel string `json:"expected_model"`
 }
 
+type AuthUser struct {
+	ID            uuid.UUID
+	Name          string
+	Role          string
+	AccountStatus string
+	RouterLimit   int
+}
+
 func (s *Service) Create(input CreateRouterInput) (Router, error) {
+	return s.CreateForUser(input, AuthUser{})
+}
+
+func (s *Service) CreateForUser(input CreateRouterInput, user AuthUser) (Router, error) {
+	if user.ID != uuid.Nil && user.Role != "superadmin" {
+		if user.AccountStatus != "approved" {
+			return Router{}, errors.New("account is pending superadmin approval")
+		}
+		var count int64
+		if err := s.repo.db.Model(&Router{}).Where("owner_user_id = ? AND deleted_at IS NULL", user.ID).Count(&count).Error; err != nil {
+			return Router{}, err
+		}
+		if count >= int64(user.RouterLimit) {
+			return Router{}, fmt.Errorf("router limit reached (%d). Request an increase from the superadmin", user.RouterLimit)
+		}
+	}
 	expires := time.Now().Add(time.Duration(s.cfg.ProvisioningTokenTTLHour) * time.Hour)
 	var siteName *string
 	if strings.TrimSpace(input.SiteName) != "" {
@@ -66,6 +102,7 @@ func (s *Service) Create(input CreateRouterInput) (Router, error) {
 	}
 	router := Router{
 		Name:                input.Name,
+		OwnerUserID:         userIDPtr(user.ID),
 		SiteName:            siteName,
 		ExpectedModel:       expectedModelPtr,
 		Status:              "pending",
@@ -76,6 +113,13 @@ func (s *Service) Create(input CreateRouterInput) (Router, error) {
 	if err != nil {
 		return router, err
 	}
+	profile := s.defaultNetworkProfile(router.ID, router.Name)
+	if portalName := strings.TrimSpace(user.Name); portalName != "" && user.Role != "superadmin" {
+		profile.HotspotPortalName = portalName
+	}
+	if err := s.repo.CreateNetworkProfile(&profile); err != nil {
+		return router, err
+	}
 	return router, nil
 }
 
@@ -83,14 +127,39 @@ func (s *Service) List() ([]Router, error) {
 	return s.repo.List()
 }
 
+func (s *Service) ListForUser(user AuthUser) ([]Router, error) {
+	if user.Role == "superadmin" {
+		return s.repo.List()
+	}
+	if user.ID == uuid.Nil {
+		return nil, errors.New("missing account")
+	}
+	return s.repo.ListByOwner(user.ID)
+}
+
 func (s *Service) Find(id uuid.UUID) (Router, error) {
 	return s.repo.Find(id)
 }
 
 func (s *Service) RequestDelete(routerID uuid.UUID) (Router, error) {
+	return s.RequestDeleteWithConfirmation(routerID, AuthUser{}, "", "")
+}
+
+func (s *Service) RequestDeleteWithConfirmation(routerID uuid.UUID, user AuthUser, typedName, code string) (Router, error) {
 	router, err := s.repo.Find(routerID)
 	if err != nil {
 		return router, err
+	}
+	if user.ID != uuid.Nil {
+		if user.Role != "superadmin" && (router.OwnerUserID == nil || *router.OwnerUserID != user.ID) {
+			return router, errors.New("router does not belong to this account")
+		}
+		if strings.TrimSpace(typedName) != router.Name {
+			return router, fmt.Errorf("type %q to confirm router deletion", router.Name)
+		}
+		if strings.TrimSpace(code) == "" {
+			return router, errors.New("email confirmation code is required")
+		}
 	}
 	if router.DeletedAt != nil {
 		return router, nil
@@ -116,6 +185,17 @@ func (s *Service) RequestDelete(routerID uuid.UUID) (Router, error) {
 	}
 	err = s.repo.Save(&router)
 	return router, err
+}
+
+func userIDPtr(id uuid.UUID) *uuid.UUID {
+	if id == uuid.Nil {
+		return nil
+	}
+	return &id
+}
+
+func IsNotFound(err error) bool {
+	return errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, ErrNotFound)
 }
 
 func (s *Service) NetworkProfile(routerID uuid.UUID) (RouterNetworkProfile, error) {
@@ -242,6 +322,42 @@ type MethodInput struct {
 	ConfigurationMethod string `json:"configuration_method"`
 }
 
+type RouterTelemetry struct {
+	RouterID           uuid.UUID         `json:"router_id"`
+	Name               string            `json:"name"`
+	Identity           string            `json:"identity"`
+	Model              string            `json:"model"`
+	RouterOSVersion    string            `json:"routeros_version"`
+	Uptime             string            `json:"uptime"`
+	CPULoad            string            `json:"cpu_load"`
+	FreeMemory         string            `json:"free_memory"`
+	TotalMemory        string            `json:"total_memory"`
+	FreeHDD            string            `json:"free_hdd"`
+	TotalHDD           string            `json:"total_hdd"`
+	Architecture       string            `json:"architecture"`
+	BoardName          string            `json:"board_name"`
+	ActiveHotspotUsers int               `json:"active_hotspot_users"`
+	Interfaces         []RouterInterface `json:"interfaces"`
+	LastSeenAt         *time.Time        `json:"last_seen_at"`
+}
+
+type RemoteAccessDetails struct {
+	RouterID        uuid.UUID `json:"router_id"`
+	Address         string    `json:"address"`
+	APIAddress      string    `json:"api_address"`
+	WinboxAddress   string    `json:"winbox_address"`
+	WebURL          string    `json:"web_url"`
+	SecureWebURL    string    `json:"secure_web_url"`
+	Method          string    `json:"method"`
+	WireGuardStatus string    `json:"wireguard_status"`
+	Ready           bool      `json:"ready"`
+}
+
+type ConnectionTestResult struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
 type ConfigPreview struct {
 	Summary portprofiles.Summary `json:"summary"`
 	Script  string               `json:"script"`
@@ -286,7 +402,361 @@ func (s *Service) SaveRemoteAccess(routerID uuid.UUID, input RemoteAccessInput) 
 }
 
 func TestRouterConnection(host string, apiPort int, username, password string) error {
-	return nil
+	client := mikrotik.NewClient(host, username, password).WithPort(apiPort)
+	conn, err := client.DialAndLogin()
+	if err != nil {
+		return err
+	}
+	return conn.Close()
+}
+
+func (s *Service) RemoteAccessDetails(routerID uuid.UUID) (RemoteAccessDetails, error) {
+	router, err := s.repo.Find(routerID)
+	if err != nil {
+		return RemoteAccessDetails{}, err
+	}
+	address := s.managementAddress(router)
+	if address == "" {
+		return RemoteAccessDetails{}, errors.New("router management address is not configured")
+	}
+	method := "direct_api"
+	if router.WireGuardTunnelIP != nil && strings.TrimSpace(*router.WireGuardTunnelIP) != "" {
+		method = "wireguard"
+	}
+	host := publicHostOnly(s.cfg.RemoteAccessHost)
+	if host != "" && router.RemoteWebPort != nil {
+		webURL := fmt.Sprintf("http://%s:%d/webfig/", host, *router.RemoteWebPort)
+		return RemoteAccessDetails{
+			RouterID:        router.ID,
+			Address:         fmt.Sprintf("%s:%d", host, *router.RemoteWebPort),
+			APIAddress:      fmt.Sprintf("%s:8728", address),
+			WinboxAddress:   publicPortAddress(host, router.RemoteWinboxPort),
+			WebURL:          webURL,
+			SecureWebURL:    webURL,
+			Method:          "vpn_forward",
+			WireGuardStatus: router.WireGuardStatus,
+			Ready:           router.RemoteAccessStatus == "ready",
+		}, nil
+	}
+	return RemoteAccessDetails{
+		RouterID:        router.ID,
+		Address:         address,
+		APIAddress:      fmt.Sprintf("%s:8728", address),
+		WinboxAddress:   fmt.Sprintf("%s:8291", address),
+		WebURL:          "http://" + address + "/",
+		SecureWebURL:    "https://" + address + "/",
+		Method:          method,
+		WireGuardStatus: router.WireGuardStatus,
+		Ready:           address != "",
+	}, nil
+}
+
+func (s *Service) EnableVPNRemoteAccess(routerID uuid.UUID) (RemoteAccessDetails, error) {
+	router, err := s.repo.Find(routerID)
+	if err != nil {
+		return RemoteAccessDetails{}, err
+	}
+	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
+		if _, err := s.PrepareWireGuard(routerID); err != nil {
+			return RemoteAccessDetails{}, err
+		}
+		router, err = s.repo.Find(routerID)
+		if err != nil {
+			return RemoteAccessDetails{}, err
+		}
+	}
+	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
+		return RemoteAccessDetails{}, errors.New("WireGuard tunnel IP is required before remote access can be published")
+	}
+	webPort, winboxPort := s.remotePortsForRouter(router)
+	router.RemoteWebPort = &webPort
+	router.RemoteWinboxPort = &winboxPort
+	router.RemoteAccessStatus = "queued"
+	if err := s.repo.Save(&router); err != nil {
+		return RemoteAccessDetails{}, err
+	}
+	if s.remoteAccess != nil {
+		if err := s.remoteAccess.QueueRemoteAccess(router); err != nil {
+			return RemoteAccessDetails{}, err
+		}
+	}
+	return s.RemoteAccessDetails(routerID)
+}
+
+func (s *Service) TestConnection(routerID uuid.UUID) (ConnectionTestResult, error) {
+	router, err := s.repo.Find(routerID)
+	if err != nil {
+		return ConnectionTestResult{}, err
+	}
+	client, err := s.routerClient(router)
+	if err != nil {
+		return ConnectionTestResult{}, err
+	}
+	if _, err := client.Command("/system/resource/print", nil); err != nil {
+		return ConnectionTestResult{Success: false, Message: err.Error()}, err
+	}
+	now := time.Now().UTC()
+	router.LastSeenAt = &now
+	router.Status = "online"
+	_ = s.repo.Save(&router)
+	return ConnectionTestResult{Success: true, Message: "RouterOS API connection succeeded"}, nil
+}
+
+func (s *Service) CollectTelemetry(routerID uuid.UUID) (RouterTelemetry, error) {
+	router, err := s.repo.Find(routerID)
+	if err != nil {
+		return RouterTelemetry{}, err
+	}
+	client, err := s.routerClient(router)
+	if err != nil {
+		return RouterTelemetry{}, err
+	}
+
+	resourceRows, err := client.Command("/system/resource/print", nil)
+	if err != nil {
+		return RouterTelemetry{}, err
+	}
+	identityRows, _ := client.Command("/system/identity/print", nil)
+	interfaceRows, _ := client.Command("/interface/print", nil)
+	activeRows, _ := client.Command("/ip/hotspot/active/print", nil)
+
+	resource := firstRow(resourceRows)
+	identity := firstRow(identityRows)
+	interfaces := make([]RouterInterface, 0, len(interfaceRows))
+	for _, row := range interfaceRows {
+		name := row["=name"]
+		if name == "" {
+			continue
+		}
+		iface := RouterInterface{
+			RouterID:     routerID,
+			Name:         name,
+			Running:      parseRouterOSAPIBool(row["=running"]),
+			Disabled:     parseRouterOSAPIBool(row["=disabled"]),
+			DiscoveredAt: time.Now().UTC(),
+		}
+		if value := row["=type"]; value != "" {
+			iface.Type = &value
+		}
+		if value := row["=mac-address"]; value != "" {
+			iface.MacAddress = &value
+		}
+		interfaces = append(interfaces, iface)
+	}
+	if len(interfaces) > 0 {
+		_ = s.repo.ReplaceInterfaces(routerID, interfaces)
+	}
+
+	now := time.Now().UTC()
+	if value := resource["=version"]; value != "" {
+		router.RouterOSVersion = &value
+	}
+	if value := firstNonEmpty(resource["=board-name"], resource["=platform"]); value != "" {
+		router.Model = &value
+	}
+	router.LastSeenAt = &now
+	router.Status = "online"
+	if err := s.repo.Save(&router); err != nil {
+		return RouterTelemetry{}, err
+	}
+
+	return RouterTelemetry{
+		RouterID:           routerID,
+		Name:               router.Name,
+		Identity:           identity["=name"],
+		Model:              firstNonEmpty(resource["=board-name"], resource["=platform"]),
+		RouterOSVersion:    resource["=version"],
+		Uptime:             resource["=uptime"],
+		CPULoad:            resource["=cpu-load"],
+		FreeMemory:         resource["=free-memory"],
+		TotalMemory:        resource["=total-memory"],
+		FreeHDD:            resource["=free-hdd-space"],
+		TotalHDD:           resource["=total-hdd-space"],
+		Architecture:       resource["=architecture-name"],
+		BoardName:          resource["=board-name"],
+		ActiveHotspotUsers: len(activeRows),
+		Interfaces:         interfaces,
+		LastSeenAt:         &now,
+	}, nil
+}
+
+func (s *Service) RenameRouter(routerID uuid.UUID, name string) (Router, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return Router{}, errors.New("router name is required")
+	}
+	router, err := s.repo.Find(routerID)
+	if err != nil {
+		return router, err
+	}
+	client, err := s.routerClient(router)
+	if err != nil {
+		return router, err
+	}
+	if _, err := client.Command("/system/identity/set", map[string]string{"=name": name}); err != nil {
+		return router, err
+	}
+	router.Name = name
+	if err := s.repo.Save(&router); err != nil {
+		return router, err
+	}
+	return router, nil
+}
+
+func (s *Service) UpdateRouterAdminPassword(routerID uuid.UUID, password string) error {
+	password = strings.TrimSpace(password)
+	if len(password) < 8 {
+		return errors.New("password must be at least 8 characters")
+	}
+	router, err := s.repo.Find(routerID)
+	if err != nil {
+		return err
+	}
+	username := firstNonEmpty(ptrValue(router.APIUsername), s.cfg.RouterAPIUsername)
+	client, err := s.routerClient(router)
+	if err != nil {
+		return err
+	}
+	_, err = client.Command("/user/set", map[string]string{
+		"=numbers":  username,
+		"=password": password,
+	})
+	if err != nil {
+		return err
+	}
+	encrypted := "encrypted-placeholder:" + password
+	router.APIPasswordEncrypted = &encrypted
+	return s.repo.Save(&router)
+}
+
+func (s *Service) RebootRouter(routerID uuid.UUID) error {
+	router, err := s.repo.Find(routerID)
+	if err != nil {
+		return err
+	}
+	client, err := s.routerClient(router)
+	if err != nil {
+		return err
+	}
+	_, err = client.Command("/system/reboot", nil)
+	return err
+}
+
+func (s *Service) routerClient(router Router) (*mikrotik.Client, error) {
+	address := s.managementAddress(router)
+	if address == "" {
+		return nil, errors.New("router management address is not configured")
+	}
+	username := firstNonEmpty(ptrValue(router.APIUsername), s.cfg.RouterAPIUsername)
+	password := s.routerAPIPassword(router)
+	if username == "" || password == "" {
+		return nil, errors.New("router API credentials are not configured")
+	}
+	return mikrotik.NewClient(address, username, password).WithPort(8728), nil
+}
+
+func (s *Service) managementAddress(router Router) string {
+	if router.ManagementIP != nil && strings.TrimSpace(*router.ManagementIP) != "" {
+		return hostOnly(*router.ManagementIP)
+	}
+	if router.WireGuardTunnelIP != nil && strings.TrimSpace(*router.WireGuardTunnelIP) != "" {
+		return hostOnly(*router.WireGuardTunnelIP)
+	}
+	return ""
+}
+
+func (s *Service) routerAPIPassword(router Router) string {
+	if router.APIPasswordEncrypted != nil {
+		value := strings.TrimSpace(*router.APIPasswordEncrypted)
+		if strings.HasPrefix(value, "encrypted-placeholder:") {
+			return strings.TrimPrefix(value, "encrypted-placeholder:")
+		}
+	}
+	return s.cfg.RouterAPIPassword
+}
+
+func (s *Service) remotePortsForRouter(router Router) (int, int) {
+	if router.RemoteWebPort != nil && router.RemoteWinboxPort != nil {
+		return *router.RemoteWebPort, *router.RemoteWinboxPort
+	}
+	offset := 0
+	if router.WireGuardTunnelIP != nil {
+		parts := strings.Split(hostOnly(*router.WireGuardTunnelIP), ".")
+		if len(parts) == 4 {
+			var parsed int
+			_, _ = fmt.Sscanf(parts[3], "%d", &parsed)
+			offset = parsed
+		}
+	}
+	if offset <= 0 {
+		offset = int(router.ID[15]) + 1
+	}
+	return s.cfg.RemoteAccessWebPortBase + offset, s.cfg.RemoteAccessWinboxPortBase + offset
+}
+
+func publicPortAddress(host string, port *int) string {
+	host = publicHostOnly(host)
+	if host == "" || port == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d", host, *port)
+}
+
+func publicHostOnly(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimRight(value, "/")
+	if value == "" {
+		return ""
+	}
+	if parsed, err := url.Parse(value); err == nil && parsed.Hostname() != "" {
+		return parsed.Hostname()
+	}
+	return strings.TrimPrefix(strings.TrimPrefix(value, "https://"), "http://")
+}
+
+func hostOnly(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if parsed, err := url.Parse(value); err == nil && parsed.Hostname() != "" {
+		return parsed.Hostname()
+	}
+	if strings.Contains(value, ":") && !strings.Contains(value, "::") {
+		host, _, found := strings.Cut(value, ":")
+		if found && host != "" {
+			return host
+		}
+	}
+	return strings.Trim(value, "[]")
+}
+
+func firstRow(rows []map[string]string) map[string]string {
+	if len(rows) == 0 {
+		return map[string]string{}
+	}
+	return rows[0]
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func ptrValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func parseRouterOSAPIBool(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return value == "true" || value == "yes" || value == "1"
 }
 
 func (s *Service) SaveMethod(routerID uuid.UUID, input MethodInput) (RouterSetupSession, error) {

@@ -22,6 +22,13 @@ type Service struct {
 	cfg config.Config
 }
 
+type RemoteAccessConfig struct {
+	RouterID   uuid.UUID `json:"router_id"`
+	RouterIP   string    `json:"router_ip"`
+	WebPort    int       `json:"web_port"`
+	WinboxPort int       `json:"winbox_port"`
+}
+
 func NewService(db *gorm.DB, cfg config.Config) *Service {
 	return &Service{db: db, cfg: cfg}
 }
@@ -74,6 +81,40 @@ func (s *Service) QueueRouterConfigure(router routers.Router, _ string) (WireGua
 		return existing, nil
 	}
 	return s.QueueJob(router.ID, OperationConfigureRouter, "", "")
+}
+
+func (s *Service) QueueRemoteAccess(router routers.Router) (WireGuardJob, error) {
+	if router.ID == uuid.Nil {
+		return WireGuardJob{}, errors.New("router ID is required")
+	}
+	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
+		return WireGuardJob{}, errors.New("router WireGuard client IP is required")
+	}
+	return s.QueueJob(router.ID, OperationUpsertRemoteAccess, "", "")
+}
+
+func (s *Service) DesiredRemoteAccess(routerID uuid.UUID) (RemoteAccessConfig, error) {
+	var router routers.Router
+	if err := s.db.First(&router, "id = ?", routerID).Error; err != nil {
+		return RemoteAccessConfig{}, err
+	}
+	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
+		return RemoteAccessConfig{}, errors.New("router WireGuard tunnel IP is missing")
+	}
+	if router.RemoteWebPort == nil && router.RemoteWinboxPort == nil {
+		return RemoteAccessConfig{}, errors.New("router remote access ports are not assigned")
+	}
+	cfg := RemoteAccessConfig{
+		RouterID: router.ID,
+		RouterIP: strings.TrimSpace(*router.WireGuardTunnelIP),
+	}
+	if router.RemoteWebPort != nil {
+		cfg.WebPort = *router.RemoteWebPort
+	}
+	if router.RemoteWinboxPort != nil {
+		cfg.WinboxPort = *router.RemoteWinboxPort
+	}
+	return cfg, nil
 }
 
 func (s *Service) existingConfigureJob(routerID uuid.UUID) (WireGuardJob, bool, error) {
@@ -217,6 +258,11 @@ func (s *Service) CompleteJob(jobID uuid.UUID, agentID string) error {
 		if _, err := s.QueueRouterConfigure(router, ""); err != nil {
 			return fmt.Errorf("queue configure_router job: %w", err)
 		}
+		if router.RemoteWebPort != nil || router.RemoteWinboxPort != nil {
+			if _, err := s.QueueRemoteAccess(router); err != nil {
+				return fmt.Errorf("queue remote access job: %w", err)
+			}
+		}
 	}
 	return nil
 }
@@ -341,6 +387,20 @@ func (s *Service) applyRouterJobStatus(job WireGuardJob, message string) error {
 		} else if job.Status == StatusFailed {
 			updates["provisioning_status"] = "router_config_failed"
 			updates["provisioning_error"] = message
+		}
+	case OperationUpsertRemoteAccess:
+		if job.Status == StatusSucceeded {
+			updates["remote_access_status"] = "ready"
+			updates["wire_guard_last_error"] = nil
+		} else if job.Status == StatusFailed {
+			updates["remote_access_status"] = "failed"
+			updates["wire_guard_last_error"] = message
+		}
+	case OperationRemoveRemoteAccess:
+		if job.Status == StatusSucceeded {
+			updates["remote_access_status"] = "disabled"
+			updates["remote_web_port"] = nil
+			updates["remote_winbox_port"] = nil
 		}
 	case OperationRemovePeer:
 		if job.Status == StatusSucceeded {

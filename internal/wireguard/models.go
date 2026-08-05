@@ -7,12 +7,14 @@ import (
 )
 
 const (
-	OperationUpsertPeer      = "upsert_peer"
-	OperationRemovePeer      = "remove_peer"
-	OperationReconcilePeer   = "reconcile_peer"
-	OperationConfigureRouter = "configure_router"
-	OperationUpsertRadiusNAS = "upsert_radius_nas"
-	OperationRemoveRadiusNAS = "remove_radius_nas"
+	OperationUpsertPeer         = "upsert_peer"
+	OperationRemovePeer         = "remove_peer"
+	OperationReconcilePeer      = "reconcile_peer"
+	OperationConfigureRouter    = "configure_router"
+	OperationUpsertRemoteAccess = "upsert_remote_access"
+	OperationRemoveRemoteAccess = "remove_remote_access"
+	OperationUpsertRadiusNAS    = "upsert_radius_nas"
+	OperationRemoveRadiusNAS    = "remove_radius_nas"
 
 	StatusQueued    = "queued"
 	StatusClaimed   = "claimed"

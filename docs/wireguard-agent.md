@@ -23,6 +23,9 @@ NOBLIFI_WIREGUARD_SERVER_IP=10.77.0.1
 NOBLIFI_WIREGUARD_ENDPOINT=154.65.105.14
 NOBLIFI_WIREGUARD_PORT=51820
 NOBLIFI_WIREGUARD_PUBLIC_KEY=<VPS_INTERFACE_PUBLIC_KEY>
+NOBLIFI_REMOTE_ACCESS_HOST=vpn.your-domain.example
+NOBLIFI_REMOTE_WEB_PORT_BASE=21000
+NOBLIFI_REMOTE_WINBOX_PORT_BASE=22000
 NOBLIFI_AGENT_TOKEN=<long-random-secret>
 NOBLIFI_AGENT_ID=xneelo-wg-agent-01
 ```
@@ -74,6 +77,21 @@ Apply `migrations/002_wireguard_control_plane.sql` to production, or run the Go 
 5. Backend queues `upsert_peer`.
 6. Agent applies and verifies the peer.
 7. Backend stores the RADIUS NAS row for the router tunnel IP.
+
+## Remote Access URLs
+
+When VPN remote access is enabled for a router, the backend assigns public
+ports from `NOBLIFI_REMOTE_WEB_PORT_BASE` and `NOBLIFI_REMOTE_WINBOX_PORT_BASE`.
+The VPS agent listens on those ports and forwards traffic through WireGuard to
+the router:
+
+```text
+http://<NOBLIFI_REMOTE_ACCESS_HOST>:<remote_web_port>/webfig/
+<NOBLIFI_REMOTE_ACCESS_HOST>:<remote_winbox_port>
+```
+
+Only the VPS agent needs public listener ports. The MikroTik stays reachable
+through its private WireGuard tunnel IP.
 
 ## Troubleshooting
 

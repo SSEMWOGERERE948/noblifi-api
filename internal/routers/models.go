@@ -9,6 +9,7 @@ import (
 
 type Router struct {
 	ID                       uuid.UUID              `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	OwnerUserID              *uuid.UUID             `gorm:"type:uuid;index" json:"owner_user_id"`
 	SiteID                   *uuid.UUID             `gorm:"type:uuid" json:"site_id"`
 	Name                     string                 `json:"name"`
 	SiteName                 *string                `json:"site_name"`
@@ -29,6 +30,9 @@ type Router struct {
 	WireGuardPeerUpdatedAt   *time.Time             `json:"wireguard_peer_updated_at"`
 	WireGuardLastHandshakeAt *time.Time             `json:"wireguard_last_handshake_at"`
 	WireGuardLastError       *string                `json:"wireguard_last_error"`
+	RemoteWebPort            *int                   `gorm:"uniqueIndex" json:"remote_web_port"`
+	RemoteWinboxPort         *int                   `gorm:"uniqueIndex" json:"remote_winbox_port"`
+	RemoteAccessStatus       string                 `gorm:"default:disabled;index" json:"remote_access_status"`
 	ProvisioningStatus       string                 `gorm:"default:pending;index" json:"provisioning_status"`
 	ProvisioningError        *string                `json:"provisioning_error"`
 	DeleteRequestedAt        *time.Time             `json:"delete_requested_at"`

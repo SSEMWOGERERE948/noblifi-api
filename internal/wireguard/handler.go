@@ -24,6 +24,7 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	internal.Post("/wireguard/jobs/:id/complete", h.complete)
 	internal.Post("/wireguard/jobs/:id/fail", h.fail)
 	internal.Post("/wireguard/reconcile/report", h.reconcileReport)
+	internal.Get("/routers/:id/remote-access-config", h.remoteAccessConfig)
 }
 
 func (h *Handler) auth(c *fiber.Ctx) error {
@@ -132,6 +133,18 @@ func (h *Handler) reconcileReport(c *fiber.Ctx) error {
 		return err
 	}
 	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+func (h *Handler) remoteAccessConfig(c *fiber.Ctx) error {
+	routerID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
+	}
+	cfg, err := h.service.DesiredRemoteAccess(routerID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, err.Error())
+	}
+	return c.JSON(cfg)
 }
 
 func jobRequest(c *fiber.Ctx) (uuid.UUID, string, error) {

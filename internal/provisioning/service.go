@@ -1001,6 +1001,8 @@ func renderHotspotLoginPage(portalName string, planList []plans.Plan, apiBaseURL
     input { width: 100%; border: 1px solid var(--line); background: #07111d; color: var(--text); border-radius: 9px; padding: 13px; font-size: 16px; }
     button { width: 100%; margin-top: 16px; border: 0; border-radius: 9px; padding: 13px; background: var(--brand); color: #06111f; font-weight: 800; font-size: 16px; }
     .hint { margin: 14px 0 0; font-size: 13px; }
+    .powered { margin: 12px 0 0; font-size: 12px; }
+    .powered strong { color: var(--text); font-weight: 800; }
     .error { margin-top: 14px; color: var(--danger); font-size: 14px; min-height: 18px; }
     @media (max-width: 420px) { form { padding: 22px; } h1 { font-size: 26px; } }
   </style>
@@ -1018,6 +1020,7 @@ func renderHotspotLoginPage(portalName string, planList []plans.Plan, apiBaseURL
       <input id="password" name="password" type="hidden">
       <button type="submit">Connect</button>
       <p class="hint">Your voucher code is used for both username and password.</p>
+      <p class="powered">Powered by <strong>NobliFi</strong></p>
       <div class="error">$(if error)$(error)$(endif)</div>
     </form>
     ` + packageHTML + `

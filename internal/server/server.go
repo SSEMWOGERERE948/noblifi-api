@@ -31,6 +31,35 @@ func (a wireGuardCleanupAdapter) QueuePeerRemoval(router routers.Router) error {
 	return err
 }
 
+func (a wireGuardCleanupAdapter) QueueRemoteAccess(router routers.Router) error {
+	_, err := a.w.QueueRemoteAccess(router)
+	return err
+}
+
+type routerAuthAdapter struct{ auth *auth.Service }
+
+func (a routerAuthAdapter) UserFromToken(rawToken string) (routers.AuthUser, error) {
+	user, err := a.auth.UserFromToken(rawToken)
+	if err != nil {
+		return routers.AuthUser{}, err
+	}
+	return routers.AuthUser{
+		ID:            user.ID,
+		Name:          user.Name,
+		Role:          user.Role,
+		AccountStatus: user.AccountStatus,
+		RouterLimit:   user.RouterLimit,
+	}, nil
+}
+
+func (a routerAuthAdapter) VerifyConfirmationCode(user routers.AuthUser, action, code string) error {
+	dbUser, err := a.auth.UserByID(user.ID)
+	if err != nil {
+		return err
+	}
+	return a.auth.VerifyConfirmationCode(dbUser, action, code)
+}
+
 func Run() {
 	// ---------------------------------------------------------
 	// CONFIGURATION
@@ -66,6 +95,40 @@ func Run() {
 	}))
 
 	api := app.Group("/api/v1")
+
+	api.Get("/dashboard/stats", func(c *fiber.Ctx) error {
+		var routerCount int64
+		var activeRouterCount int64
+		var userCount int64
+		var activeSessionCount int64
+		var dataUsage struct {
+			UploadBytes   int64
+			DownloadBytes int64
+		}
+
+		_ = db.Model(&routers.Router{}).Where("deleted_at IS NULL").Count(&routerCount).Error
+		_ = db.Model(&routers.Router{}).Where("deleted_at IS NULL AND last_seen_at IS NOT NULL").Count(&activeRouterCount).Error
+		_ = db.Model(&database.User{}).Count(&userCount).Error
+		_ = db.Model(&database.Session{}).Where("status = ? AND stopped_at IS NULL", "active").Count(&activeSessionCount).Error
+		_ = db.Model(&database.Session{}).Select("COALESCE(SUM(upload_bytes), 0) AS upload_bytes, COALESCE(SUM(download_bytes), 0) AS download_bytes").Scan(&dataUsage).Error
+
+		return c.JSON(fiber.Map{
+			"routers": fiber.Map{
+				"total":  routerCount,
+				"online": activeRouterCount,
+			},
+			"users": fiber.Map{
+				"total":           userCount,
+				"active_sessions": activeSessionCount,
+			},
+			"data_usage": fiber.Map{
+				"upload_bytes":   dataUsage.UploadBytes,
+				"download_bytes": dataUsage.DownloadBytes,
+				"total_bytes":    dataUsage.UploadBytes + dataUsage.DownloadBytes,
+			},
+			"router_cpu_usage": nil,
+		})
+	})
 
 	// ---------------------------------------------------------
 	// AUTH
@@ -132,10 +195,12 @@ func Run() {
 
 	wireGuardControlPlane := wireguard.NewService(db, cfg)
 	routerService.SetWireGuardCleanup(wireGuardCleanupAdapter{w: wireGuardControlPlane})
+	routerService.SetRemoteAccessQueuer(wireGuardCleanupAdapter{w: wireGuardControlPlane})
 	routerService.SetWireGuardServerPublicKeyResolver(wireGuardControlPlane)
 
 	routers.NewHandler(
 		routerService,
+		routerAuthAdapter{auth: authService},
 	).RegisterRoutes(api)
 
 	// ---------------------------------------------------------
