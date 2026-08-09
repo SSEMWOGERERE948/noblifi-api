@@ -810,8 +810,18 @@ func writeWireGuardManagement(builder *strings.Builder, options RenderOptions) {
 	)
 	writeCritical(
 		builder,
-		fmt.Sprintf(`:local noblifiInputRules [/ip firewall filter find where chain=input]; :if ([:len $noblifiInputRules] = 0) do={ /ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s" comment="NobliFi WireGuard management input" } else={ :local noblifiFirstInputRule [:pick $noblifiInputRules 0]; /ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s" place-before=$noblifiFirstInputRule comment="NobliFi WireGuard management input" }`, escape(iface), escape(serverCIDR), escape(iface), escape(serverCIDR)),
+		fmt.Sprintf(`:local noblifiInputRules [/ip firewall filter find where chain=input]; :if ([:len $noblifiInputRules] = 0) do={ /ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s" protocol=tcp dst-port=8728,8729,8291,80,443 comment="NobliFi WireGuard management input" } else={ :local noblifiFirstInputRule [:pick $noblifiInputRules 0]; /ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s" protocol=tcp dst-port=8728,8729,8291,80,443 place-before=$noblifiFirstInputRule comment="NobliFi WireGuard management input" }`, escape(iface), escape(serverCIDR), escape(iface), escape(serverCIDR)),
 		"allow VPS management traffic over WireGuard",
+	)
+	writeCritical(
+		builder,
+		fmt.Sprintf(`/ip service set api disabled=%s address="%s"`, routerOSDisabled(!options.EnableAPIService), escape(serverCIDR)),
+		"ensure restricted RouterOS API service",
+	)
+	writeSafe(
+		builder,
+		fmt.Sprintf(`/ip service set api-ssl disabled=%s address="%s"`, routerOSDisabled(!options.EnableAPISSLService), escape(serverCIDR)),
+		"ensure restricted RouterOS API SSL service",
 	)
 	writeCritical(
 		builder,
@@ -1220,8 +1230,13 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		)
 		writeCritical(
 			builder,
-			`:if ([:len [/ip firewall filter find where comment="NobliFi WireGuard management input" disabled=no]] = 0) do={ :error "NobliFi WireGuard management firewall rule is missing" }`,
+			fmt.Sprintf(`:if ([:len [/ip firewall filter find where comment="NobliFi WireGuard management input" in-interface="%s" src-address="%s" protocol=tcp disabled=no]] = 0) do={ :error "NobliFi WireGuard management firewall rule is missing" }`, escape(options.WireGuardInterface), escape(serverCIDR)),
 			"final WireGuard firewall verification",
+		)
+		writeCritical(
+			builder,
+			fmt.Sprintf(`:local finalAPIEnabled [/ip service get api disabled]; :local finalAPIAddress [/ip service get api address]; :if (($finalAPIEnabled = true) || ($finalAPIAddress != "%s")) do={ :error ("RouterOS API is not enabled for NobliFi telemetry. address=" . $finalAPIAddress) }`, escape(serverCIDR)),
+			"final RouterOS API service verification",
 		)
 	}
 
