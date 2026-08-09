@@ -54,6 +54,8 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Get("/routers/:id/hotspot-install-command", h.hotspotInstallCommand)
 	router.Post("/routers/:id/deploy", h.deploy)
 	router.Post("/routers/:id/apply-config", h.applyConfig)
+	router.Get("/internal/collect-telemetry", h.collectTelemetryAll)
+	router.Post("/internal/collect-telemetry", h.collectTelemetryAll)
 }
 
 func (h *Handler) create(c *fiber.Ctx) error {
@@ -270,6 +272,14 @@ func (h *Handler) collectTelemetry(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, err.Error())
 	}
 	return c.JSON(telemetry)
+}
+
+func (h *Handler) collectTelemetryAll(c *fiber.Ctx) error {
+	if c.Get("X-Appengine-Cron") != "true" {
+		return fiber.NewError(fiber.StatusForbidden, "internal endpoint")
+	}
+	h.service.CollectTelemetryForAllRouters()
+	return c.JSON(fiber.Map{"status": "ok"})
 }
 
 func (h *Handler) renameRouter(c *fiber.Ctx) error {

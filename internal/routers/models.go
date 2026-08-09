@@ -23,7 +23,7 @@ type Router struct {
 	CPULoad                  *string                `json:"cpu_load"`
 	FreeMemory               *string                `json:"free_memory"`
 	TotalMemory              *string                `json:"total_memory"`
-	ActiveHotspotUsers       int                    `json:"active_hotspot_users"`
+	ActiveHotspotUsers       *int                   `json:"active_hotspot_users"`
 	TelemetryUpdatedAt       *time.Time             `json:"telemetry_updated_at"`
 	TelemetryLastError       *string                `json:"telemetry_last_error"`
 	ManagementIP             *string                `json:"management_ip"`

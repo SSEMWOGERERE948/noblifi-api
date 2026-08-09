@@ -12,18 +12,13 @@ func validRenderOptions() RenderOptions {
 	}
 }
 
-func TestDefaultWalledGardenHostsIncludeMobileCaptivePortalChecks(t *testing.T) {
+func TestDefaultWalledGardenHostsDoNotBypassCaptivePortalChecks(t *testing.T) {
 	hosts := defaultWalledGardenHosts()
-	for _, required := range []string{"captive.apple.com", "connectivitycheck.gstatic.com", "connectivitycheck.android.com", "www.msftconnecttest.com"} {
-		found := false
+	for _, blocked := range []string{"captive.apple.com", "connectivitycheck.gstatic.com", "connectivitycheck.android.com", "www.msftconnecttest.com"} {
 		for _, host := range hosts {
-			if host == required {
-				found = true
-				break
+			if host == blocked {
+				t.Fatalf("default walled garden hosts must not include captive portal check host %q, got %v", blocked, hosts)
 			}
-		}
-		if !found {
-			t.Fatalf("expected default walled garden hosts to include %q, got %v", required, hosts)
 		}
 	}
 }
@@ -40,15 +35,15 @@ func TestRenderRouterOSUsesIdempotentBridgePortAdds(t *testing.T) {
 		t.Fatalf("RenderRouterOSWithOptions returned error: %v", err)
 	}
 
-	if !strings.Contains(script, "/interface bridge port remove [find interface=ether2]") {
+	if !strings.Contains(script, `/interface bridge port remove [find where interface="ether2"]`) {
 		t.Fatalf("expected bridge-port cleanup for ether2, got script:\n%s", script)
 	}
 
-	if !strings.Contains(script, ":if ([:len [/interface bridge port find bridge=br-hotspot interface=ether2]] = 0) do={/interface bridge port add bridge=br-hotspot interface=ether2 comment=\"NobliFi HotSpot port\"}") {
+	if !strings.Contains(script, `:if ([:len [/interface bridge port find where bridge="br-hotspot" interface="ether2"]] = 0) do={ /interface bridge port add bridge="br-hotspot" interface="ether2" comment="NobliFi HotSpot port" }`) {
 		t.Fatalf("expected idempotent bridge-port add guard for ether2, got script:\n%s", script)
 	}
 
-	if strings.Contains(script, "bridge=br-hotspot interface=ether5") {
+	if strings.Contains(script, `bridge="br-hotspot" interface="ether5"`) {
 		t.Fatalf("management port ether5 must not be added to HotSpot bridge, got script:\n%s", script)
 	}
 }
@@ -78,7 +73,7 @@ func TestRenderRouterOSRejectsPlaceholderRadiusServer(t *testing.T) {
 	options := validRenderOptions()
 	options.RadiusServer = "127.0.0.1"
 	_, err := RenderRouterOSWithOptions(assignments, options)
-	if err == nil || !strings.Contains(err.Error(), "NOBLIFI_RADIUS_SERVER") {
+	if err == nil || !strings.Contains(err.Error(), "agent-managed RADIUS server") {
 		t.Fatalf("expected RADIUS server config error, got %v", err)
 	}
 }
@@ -93,22 +88,20 @@ func TestRenderRouterOSRejectsReplaceWithRadiusServer(t *testing.T) {
 	options := validRenderOptions()
 	options.RadiusServer = "REPLACE_WITH_RADIUS_SERVER_PUBLIC_IP_OR_DOMAIN"
 	_, err := RenderRouterOSWithOptions(assignments, options)
-	if err == nil || !strings.Contains(err.Error(), "NOBLIFI_RADIUS_SERVER") {
+	if err == nil || !strings.Contains(err.Error(), "agent-managed RADIUS server") {
 		t.Fatalf("expected RADIUS server config error, got %v", err)
 	}
 }
 
 func TestRenderRouterOSRejectsPlaceholderAPIPassword(t *testing.T) {
-	assignments := []Assignment{
-		{InterfaceName: "ether1", Role: "WAN"},
-		{InterfaceName: "ether2", Role: "HOTSPOT_LAN"},
-		{InterfaceName: "ether5", Role: "STAFF_LAN"},
-	}
-
-	for _, password := range []string{"", "CHANGE_ME_API_PASSWORD", "REPLACE_WITH_STRONG_ROUTER_API_PASSWORD"} {
+	for _, password := range []string{"CHANGE_ME_API_PASSWORD", "REPLACE_WITH_STRONG_ROUTER_API_PASSWORD"} {
 		options := validRenderOptions()
 		options.APIPassword = password
-		_, err := RenderRouterOSWithOptions(assignments, options)
+		options.WireGuardEnabled = true
+		options.WireGuardEndpoint = "vpn.example.com"
+		options.WireGuardPublicKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+		options.WireGuardClientIP = "10.77.0.2"
+		_, err := RenderManagementBootstrap(options)
 		if err == nil || !strings.Contains(err.Error(), "NOBLIFI_ROUTER_API_PASSWORD") {
 			t.Fatalf("expected API password config error for %q, got %v", password, err)
 		}
@@ -162,33 +155,22 @@ func TestRenderRouterOSInstallsHotspotLoginTemplate(t *testing.T) {
 
 	required := []string{
 		"/radius add service=hotspot address=203.0.113.10",
-		`:if ([:len [/file find name="flash" type="directory"]] > 0) do={ :set hotspotHtmlDir "flash/noblifi"; :set hotspotHtmlPath "flash/noblifi" }`,
-		`:if ([:len [/file find name="flash" type="directory"]] > 0) do={ :set hotspotHtmlDir "flash/noblifi" }`,
+		`:if ([:len [/file find where name="flash"]] > 0) do={ :set hotspotHtmlDir "flash/noblifi"; :set hotspotHtmlPath "flash/noblifi" }`,
 		"html-directory=$hotspotHtmlDir",
-		":if ([:len [/file find name=$hotspotHtmlPath]] = 0) do={ /file make-directory $hotspotHtmlPath }",
+		":if ([:len [/file find where name=$hotspotHtmlPath]] = 0) do={ /file make-directory $hotspotHtmlPath }",
 		`:local hotspotLoginFile ($hotspotHtmlPath . "/login.html")`,
 		`:local hotspotIndexFile ($hotspotHtmlPath . "/index.html")`,
-		"/tool fetch url=\"https://api.example.com/api/v1/provisioning/hotspot-login/NOB-1234-5678\" mode=https dst-path=$hotspotLoginFile",
-		"/tool fetch url=\"https://api.example.com/api/v1/provisioning/hotspot-login/NOB-1234-5678\" mode=https dst-path=$hotspotIndexFile",
-		`:if ([:len [/ip hotspot user profile find name=noblifi-voucher-profile]] = 0) do={ /ip hotspot user profile add name=noblifi-voucher-profile }`,
-		"/ip hotspot user profile set [find name=noblifi-voucher-profile] shared-users=1 keepalive-timeout=2m status-autorefresh=1m",
-		`:if ([:len [/ip hotspot profile find name=noblifi-hotspot-profile]] = 0) do={ /ip hotspot profile add name=noblifi-hotspot-profile hotspot-address=10.10.10.1 dns-name=noblifi.login use-radius=yes login-by=http-chap,http-pap }`,
-		`/ip hotspot profile set [find name=noblifi-hotspot-profile] hotspot-address=10.10.10.1 dns-name=noblifi.login use-radius=yes radius-accounting=yes radius-interim-update=5m login-by=http-chap,http-pap`,
-		`/ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=hotspot`,
-		`:if ([:len [/file find name=$hotspotLoginFile]] > 0) do={ /ip hotspot profile set [find name=noblifi-hotspot-profile] html-directory=$hotspotHtmlDir; :put ("NobliFi HotSpot login and index pages installed at " . $hotspotHtmlDir) } else={ :error "NobliFi HotSpot login fetch did not create login.html" }`,
-		`:if ([:len [/ip hotspot find name=noblifi-hotspot]] = 0) do={ /ip hotspot add name=noblifi-hotspot interface=br-hotspot address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no }`,
-		"/ip hotspot set [find name=noblifi-hotspot] interface=br-hotspot address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no",
-		`:if ([:len [/interface bridge port find bridge=br-hotspot]] = 0) do={ :error "No HotSpot LAN ports were added to br-hotspot" }`,
-		`:if ([:len [/ip pool find name=pool-hotspot]] = 0) do={ /ip pool add name=pool-hotspot`,
-		`:if ([:len [/ip dhcp-server find name=dhcp-hotspot]] = 0) do={ /ip dhcp-server add name=dhcp-hotspot interface=br-hotspot`,
-		`:if ([:len [/ip dhcp-server network find address="10.10.10.0/24"]] = 0) do={ /ip dhcp-server network add address="10.10.10.0/24" gateway="10.10.10.1" dns-server="10.10.10.1" } else={ /ip dhcp-server network set [find address="10.10.10.0/24"] gateway="10.10.10.1" dns-server="10.10.10.1" }`,
-		`:if ([:len [/ip dhcp-server find name=dhcp-hotspot interface=br-hotspot disabled=no]] = 0) do={ :error "NobliFi HotSpot DHCP is not enabled on br-hotspot" }`,
-		`:if ([:len [/radius find comment="NobliFi RADIUS"]] = 0) do={ :error "NobliFi RADIUS client is missing" }`,
-		`:if ([:len [/ip firewall nat find comment="NobliFi client NAT"]] = 0) do={ :error "NobliFi client NAT is missing" }`,
-		`:if ([:len [/ip hotspot profile find name=noblifi-hotspot-profile]] = 0) do={ :error "NobliFi HotSpot server profile is missing" }`,
-		`:if ([:len [/ip hotspot find name=noblifi-hotspot interface=br-hotspot disabled=no]] = 0) do={ :error "NobliFi HotSpot server is not enabled on br-hotspot" }`,
-		"/system scheduler add name=noblifi-hotspot-login-refresh interval=10m",
-		`dst-path=\$hotspotIndexFile`,
+		`/tool fetch url="https://api.example.com/api/v1/provisioning/hotspot-login/NOB-1234-5678" mode=https dst-path=$hotspotLoginFile keep-result=yes idle-timeout=30s duration=1m`,
+		`/tool fetch url="https://api.example.com/api/v1/provisioning/hotspot-login/NOB-1234-5678" mode=https dst-path=$hotspotIndexFile keep-result=yes idle-timeout=30s duration=1m`,
+		`:if (!$noblifiPortalFetched) do={ :error "NobliFi custom portal download failed; not activating default MikroTik portal" }`,
+		`:error "NobliFi custom portal incomplete; login.html, rlogin.html, or redirect.html missing from active HTML directory"`,
+		`:if ([:len [/ip hotspot user profile find where name="noblifi-voucher-profile"]] = 0) do={ /ip hotspot user profile add name="noblifi-voucher-profile" }`,
+		`/ip hotspot user profile set [find where name="noblifi-voucher-profile"] shared-users=1 keepalive-timeout=2m status-autorefresh=1m`,
+		`:if ([:len [/ip hotspot find where name="noblifi-hotspot"]] = 0) do={ /ip hotspot add name="noblifi-hotspot" interface="br-hotspot" address-pool=pool-hotspot profile="noblifi-hotspot-profile" disabled=no }`,
+		`/ip hotspot set [find where name="noblifi-hotspot"] interface="br-hotspot" address-pool=pool-hotspot profile="noblifi-hotspot-profile" disabled=no`,
+		`/ip hotspot active remove [find]`,
+		`/ip hotspot host remove [find where authorized=no]`,
+		`/system scheduler add name="noblifi-hotspot-login-refresh" interval=10m`,
 	}
 	for _, item := range required {
 		if !strings.Contains(script, item) {
@@ -199,7 +181,7 @@ func TestRenderRouterOSInstallsHotspotLoginTemplate(t *testing.T) {
 	if strings.Contains(script, "action=allow comment=\"NobliFi captive portal\"") {
 		t.Fatalf("RouterOS 6 compatible walled garden entries must not use action=allow, got:\n%s", script)
 	}
-	if strings.Contains(script, "NobliFi skipped fetch hotspot") || strings.Contains(script, "using default RouterOS login page") {
+	if strings.Contains(script, "custom portal incomplete; safely falling back") || strings.Contains(script, "not activating default MikroTik portal") == false {
 		t.Fatalf("custom login fetch failures must fail the install instead of silently falling back, got:\n%s", script)
 	}
 
@@ -209,7 +191,7 @@ func TestRenderRouterOSInstallsHotspotLoginTemplate(t *testing.T) {
 		t.Fatalf("expected selected staff port setup before critical HotSpot services, got:\n%s", script)
 	}
 
-	serverIndex := strings.Index(script, `/ip hotspot add name=noblifi-hotspot`)
+	serverIndex := strings.Index(script, `/ip hotspot add name="noblifi-hotspot"`)
 	fetchIndex := strings.Index(script, `/tool fetch url="https://api.example.com/api/v1/provisioning/hotspot-login/NOB-1234-5678" mode=https dst-path=$hotspotLoginFile`)
 	if serverIndex == -1 || fetchIndex == -1 || serverIndex > fetchIndex {
 		t.Fatalf("expected HotSpot server to be installed before custom login fetch can fail, got:\n%s", script)

@@ -960,6 +960,7 @@ func writeHotspotSupportFetchFallback(builder *strings.Builder, baseURL, name st
 
 func writeHotspotPortalRefreshScript(builder *strings.Builder, options RenderOptions) {
 	loginURL := escape(options.LoginPageURL)
+	fetchMode := routerOSFetchMode(options.LoginPageURL)
 
 	writeSafe(builder, `/system scheduler remove [find where name="noblifi-hotspot-login-refresh"]`, "cleanup hotspot login refresh scheduler")
 	builder.WriteString(`:do { /system script remove [find where name="noblifi-hotspot-login-refresh-script"]; /system script add name="noblifi-hotspot-login-refresh-script" policy=ftp,read,write,test source={` + "\n")
@@ -967,29 +968,26 @@ func writeHotspotPortalRefreshScript(builder *strings.Builder, options RenderOpt
 	builder.WriteString(`:local hotspotHtmlPath "noblifi"` + "\n")
 	builder.WriteString(`:if ([:len [/file find where name="flash"]] > 0) do={ :set hotspotHtmlDir "flash/noblifi"; :set hotspotHtmlPath "flash/noblifi" }` + "\n")
 	builder.WriteString(`:if ([:len [/file find where name=$hotspotHtmlPath]] = 0) do={ /file make-directory $hotspotHtmlPath }` + "\n")
-	builder.WriteString(`:local portalData ""` + "\n")
 	builder.WriteString(`:local portalFetched false` + "\n")
+	builder.WriteString(`:local loginFile ($hotspotHtmlPath . "/login.html")` + "\n")
+	builder.WriteString(`:local indexFile ($hotspotHtmlPath . "/index.html")` + "\n")
 	builder.WriteString(`:for i from=1 to=3 do={` + "\n")
 	builder.WriteString(`  :if (!$portalFetched) do={` + "\n")
 	builder.WriteString(`    :do {` + "\n")
-	builder.WriteString(fmt.Sprintf(`      :local r [/tool fetch url="%s" output=user as-value idle-timeout=30s duration=1m]`, loginURL) + "\n")
-	builder.WriteString(`      :if (($r->"status") = "finished") do={` + "\n")
-	builder.WriteString(`        :local d ($r->"data")` + "\n")
-	builder.WriteString(`        :if ([:len $d] > 0) do={ :set portalData $d; :set portalFetched true }` + "\n")
-	builder.WriteString(`      }` + "\n")
+	builder.WriteString(fmt.Sprintf(`      /tool fetch url="%s" mode=%s dst-path=$loginFile keep-result=yes idle-timeout=30s duration=1m`, loginURL, fetchMode) + "\n")
+	builder.WriteString(fmt.Sprintf(`      /tool fetch url="%s" mode=%s dst-path=$indexFile keep-result=yes idle-timeout=30s duration=1m`, loginURL, fetchMode) + "\n")
+	builder.WriteString(`      :if (([:len [/file find where name=$loginFile]] > 0) && ([:len [/file find where name=$indexFile]] > 0)) do={ :set portalFetched true }` + "\n")
 	builder.WriteString(`    } on-error={ :log warning ("NobliFi portal refresh fetch attempt " . $i . " failed") }` + "\n")
 	builder.WriteString(`    :if (!$portalFetched) do={ :delay 3s }` + "\n")
 	builder.WriteString(`  }` + "\n")
 	builder.WriteString(`}` + "\n")
 	builder.WriteString(`:if ($portalFetched) do={` + "\n")
-	builder.WriteString(`  :local loginFile ($hotspotHtmlPath . "/login.html")` + "\n")
-	builder.WriteString(`  :local indexFile ($hotspotHtmlPath . "/index.html")` + "\n")
-	builder.WriteString(`  :if ([:len [/file find where name=$loginFile]] > 0) do={ /file set [find where name=$loginFile] contents=$portalData } else={ /file add name=$loginFile contents=$portalData }` + "\n")
-	builder.WriteString(`  :if ([:len [/file find where name=$indexFile]] > 0) do={ /file set [find where name=$indexFile] contents=$portalData } else={ /file add name=$indexFile contents=$portalData }` + "\n")
 	builder.WriteString(`  :local rloginFile ($hotspotHtmlPath . "/rlogin.html")` + "\n")
 	builder.WriteString(`  :local redirectFile ($hotspotHtmlPath . "/redirect.html")` + "\n")
 	builder.WriteString(`  :if (([:len [/file find where name=$rloginFile]] > 0) || ([:len [/file find where name=$redirectFile]] > 0)) do={` + "\n")
 	builder.WriteString(`    /ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=$hotspotHtmlDir html-directory-override=""` + "\n")
+	builder.WriteString(`    /ip hotspot active remove [find]` + "\n")
+	builder.WriteString(`    /ip hotspot host remove [find where authorized=no]` + "\n")
 	builder.WriteString(`  }` + "\n")
 	builder.WriteString(`  :log info ("NobliFi portal refresh succeeded: " . $hotspotHtmlDir)` + "\n")
 	builder.WriteString(`} else={` + "\n")
@@ -1006,14 +1004,17 @@ func writeHotspotPortalRefreshScript(builder *strings.Builder, options RenderOpt
 }
 
 func writeHotspotRestart(builder *strings.Builder) {
-	builder.WriteString("# Ensure HotSpot is enabled without clearing active sessions\n")
+	builder.WriteString("# Ensure HotSpot is enabled and clients request the current portal files\n")
 	writeCritical(builder, `/ip hotspot enable [find where name="noblifi-hotspot"]`, "ensure hotspot enabled")
+	writeSafe(builder, `/ip hotspot active remove [find]`, "clear active hotspot sessions")
+	writeSafe(builder, `/ip hotspot host remove [find where authorized=no]`, "clear unauthenticated hotspot hosts")
 	builder.WriteString("\n")
 }
 
 func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotspotGateway string) {
 	hotspotDNSName := normalizeHotspotDNSName(options.HotspotDNSName)
 	loginPageURL := strings.TrimSpace(options.LoginPageURL)
+	loginFetchMode := routerOSFetchMode(loginPageURL)
 
 	builder.WriteString("# DNS, NAT, RADIUS, and HotSpot service setup\n")
 
@@ -1157,33 +1158,21 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	// 10. Install/refresh the custom portal transactionally.
 	if loginPageURL != "" {
 		builder.WriteString("# Transactional NobliFi portal download\n")
-		builder.WriteString(`:local noblifiPortalData ""` + "\n")
 		builder.WriteString(`:local noblifiPortalFetched false` + "\n")
+		builder.WriteString(`:local hotspotLoginFile ($hotspotHtmlPath . "/login.html")` + "\n")
+		builder.WriteString(`:local hotspotIndexFile ($hotspotHtmlPath . "/index.html")` + "\n")
 		builder.WriteString(`:for i from=1 to=3 do={` + "\n")
 		builder.WriteString(`  :if (!$noblifiPortalFetched) do={` + "\n")
 		builder.WriteString(`    :put ("NobliFi portal download attempt " . $i . " of 3")` + "\n")
 		builder.WriteString(`    :do {` + "\n")
-		builder.WriteString(fmt.Sprintf(`      :local fetchResult [/tool fetch url="%s" output=user as-value idle-timeout=30s duration=1m]`, escape(loginPageURL)) + "\n")
-		builder.WriteString(`      :if (($fetchResult->"status") = "finished") do={` + "\n")
-		builder.WriteString(`        :local fetchedData ($fetchResult->"data")` + "\n")
-		builder.WriteString(`        :if ([:len $fetchedData] > 0) do={ :set noblifiPortalData $fetchedData; :set noblifiPortalFetched true }` + "\n")
-		builder.WriteString(`      }` + "\n")
+		builder.WriteString(fmt.Sprintf(`      /tool fetch url="%s" mode=%s dst-path=$hotspotLoginFile keep-result=yes idle-timeout=30s duration=1m`, escape(loginPageURL), loginFetchMode) + "\n")
+		builder.WriteString(fmt.Sprintf(`      /tool fetch url="%s" mode=%s dst-path=$hotspotIndexFile keep-result=yes idle-timeout=30s duration=1m`, escape(loginPageURL), loginFetchMode) + "\n")
+		builder.WriteString(`      :if (([:len [/file find where name=$hotspotLoginFile]] > 0) && ([:len [/file find where name=$hotspotIndexFile]] > 0)) do={ :set noblifiPortalFetched true }` + "\n")
 		builder.WriteString(`    } on-error={ :put ("NobliFi WARNING: portal download attempt " . $i . " failed") }` + "\n")
 		builder.WriteString(`    :if (!$noblifiPortalFetched) do={ :delay 3s }` + "\n")
 		builder.WriteString(`  }` + "\n")
 		builder.WriteString(`}` + "\n")
-
-		builder.WriteString(`:local hotspotLoginFile ($hotspotHtmlPath . "/login.html")` + "\n")
-		builder.WriteString(`:local hotspotIndexFile ($hotspotHtmlPath . "/index.html")` + "\n")
-
-		// Never touch the live files until the fetch has completed successfully.
-		builder.WriteString(`:if ($noblifiPortalFetched) do={` + "\n")
-		builder.WriteString(`  :if ([:len [/file find where name=$hotspotLoginFile]] > 0) do={ /file set [find where name=$hotspotLoginFile] contents=$noblifiPortalData } else={ /file add name=$hotspotLoginFile contents=$noblifiPortalData }` + "\n")
-		builder.WriteString(`  :if ([:len [/file find where name=$hotspotIndexFile]] > 0) do={ /file set [find where name=$hotspotIndexFile] contents=$noblifiPortalData } else={ /file add name=$hotspotIndexFile contents=$noblifiPortalData }` + "\n")
-		builder.WriteString(`  :put ("NobliFi portal files updated at " . $hotspotHtmlDir)` + "\n")
-		builder.WriteString(`} else={` + "\n")
-		builder.WriteString(`  :put "NobliFi WARNING: new portal download failed; existing live portal was not deleted"` + "\n")
-		builder.WriteString(`}` + "\n")
+		builder.WriteString(`:if (!$noblifiPortalFetched) do={ :error "NobliFi custom portal download failed; not activating default MikroTik portal" }` + "\n")
 
 		// Select custom pages only if the files required to service /login and
 		// initial captive-portal redirect requests actually exist.
@@ -1198,12 +1187,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		builder.WriteString(`  /ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=$hotspotHtmlDir html-directory-override=""` + "\n")
 		builder.WriteString(`  :put ("NobliFi custom HotSpot portal active at " . $hotspotHtmlDir)` + "\n")
 		builder.WriteString(`} else={` + "\n")
-		builder.WriteString(`  :if ([:len [/file find where name="hotspot/login.html"]] > 0) do={` + "\n")
-		builder.WriteString(`    /ip hotspot profile set [find where name="noblifi-hotspot-profile"] html-directory=hotspot html-directory-override=""` + "\n")
-		builder.WriteString(`    :put "NobliFi WARNING: custom portal incomplete; safely falling back to RouterOS default portal"` + "\n")
-		builder.WriteString(`  } else={` + "\n")
-		builder.WriteString(`    :error "Neither NobliFi custom portal nor RouterOS default HotSpot login.html is available"` + "\n")
-		builder.WriteString(`  }` + "\n")
+		builder.WriteString(`  :error "NobliFi custom portal incomplete; login.html, rlogin.html, or redirect.html missing from active HTML directory"` + "\n")
 		builder.WriteString(`}` + "\n")
 
 		// Refresh is also transactional: a timeout leaves the current live page
@@ -1341,6 +1325,13 @@ func defaultWalledGardenHosts() []string {
 		"noblifi.ew.r.appspot.com",
 		"noblifi.uc.r.appspot.com",
 	}
+}
+
+func routerOSFetchMode(rawURL string) string {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(rawURL)), "http://") {
+		return "http"
+	}
+	return "https"
 }
 
 func cleanHosts(hosts []string) []string {

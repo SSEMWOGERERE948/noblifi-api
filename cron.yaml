@@ -1,0 +1,4 @@
+cron:
+- description: "Collect router telemetry"
+  url: /api/v1/internal/collect-telemetry
+  schedule: every 2 minutes

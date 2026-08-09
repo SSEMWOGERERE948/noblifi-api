@@ -509,7 +509,7 @@ func (s *Service) CollectTelemetry(routerID uuid.UUID) (RouterTelemetry, error) 
 	router.Uptime = &uptime
 	router.FreeMemory = &freeMemory
 	router.TotalMemory = &totalMemory
-	router.ActiveHotspotUsers = activeUsers
+	router.ActiveHotspotUsers = &activeUsers
 	router.TelemetryUpdatedAt = &now
 	router.TelemetryLastError = nil
 
@@ -585,9 +585,9 @@ func (s *Service) CollectTelemetryForAllRouters() {
 		select {
 		case <-done:
 		case <-time.After(perRouterTimeout):
-			// The goroutine keeps running in the background and will persist
-			// whatever it eventually gets (or an error); we just don't block
-			// the rest of the batch on a single slow/unreachable router.
+			s.recordTelemetryError(router, fmt.Errorf("telemetry collection timed out after %s", perRouterTimeout))
+			// The goroutine may still finish and persist fresh values later; the
+			// batch does not block the rest of the routers on this one.
 		}
 	}
 }
