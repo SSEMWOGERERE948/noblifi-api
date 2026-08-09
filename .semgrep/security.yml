@@ -1,0 +1,19 @@
+rules:
+  - id: no-public-debug-routes
+    languages: [go]
+    severity: ERROR
+    message: Public debug routes expose API attack-surface metadata; restrict or remove them.
+    patterns:
+      - pattern: $APP.Get("/debug/...", ...)
+  - id: no-insecure-jwt-default
+    languages: [go]
+    severity: ERROR
+    message: JWT secrets must not have a predictable fallback.
+    pattern: getEnv("JWT_SECRET", "change-this-secret")
+  - id: no-insecure-tls-skip-verify
+    languages: [go, javascript, typescript]
+    severity: ERROR
+    message: TLS certificate validation must not be disabled.
+    pattern-either:
+      - pattern: InsecureSkipVerify: true
+      - pattern: rejectUnauthorized: false
