@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/noblifi/noblifi/backend/internal/portprofiles"
 	"gorm.io/datatypes"
 )
 
@@ -18,6 +19,13 @@ type Router struct {
 	SerialNumber             *string                `gorm:"uniqueIndex" json:"serial_number"`
 	MacAddress               *string                `json:"mac_address"`
 	RouterOSVersion          *string                `json:"routeros_version"`
+	Uptime                   *string                `json:"uptime"`
+	CPULoad                  *string                `json:"cpu_load"`
+	FreeMemory               *string                `json:"free_memory"`
+	TotalMemory              *string                `json:"total_memory"`
+	ActiveHotspotUsers       int                    `json:"active_hotspot_users"`
+	TelemetryUpdatedAt       *time.Time             `json:"telemetry_updated_at"`
+	TelemetryLastError       *string                `json:"telemetry_last_error"`
 	ManagementIP             *string                `json:"management_ip"`
 	APIUsername              *string                `json:"api_username"`
 	APIPasswordEncrypted     *string                `json:"api_password_encrypted"`
@@ -109,6 +117,75 @@ type RouterInterface struct {
 	Running      bool      `gorm:"default:false" json:"running"`
 	Disabled     bool      `gorm:"default:false" json:"disabled"`
 	DiscoveredAt time.Time `json:"discovered_at"`
+}
+
+type RouterTelemetry struct {
+	RouterID           uuid.UUID         `json:"router_id"`
+	Name               string            `json:"name"`
+	Identity           string            `json:"identity"`
+	Model              string            `json:"model"`
+	RouterOSVersion    string            `json:"routeros_version"`
+	Uptime             string            `json:"uptime"`
+	CPULoad            string            `json:"cpu_load"`
+	FreeMemory         string            `json:"free_memory"`
+	TotalMemory        string            `json:"total_memory"`
+	FreeHDD            string            `json:"free_hdd"`
+	TotalHDD           string            `json:"total_hdd"`
+	Architecture       string            `json:"architecture"`
+	BoardName          string            `json:"board_name"`
+	ActiveHotspotUsers int               `json:"active_hotspot_users"`
+	Interfaces         []RouterInterface `json:"interfaces"`
+	LastSeenAt         *time.Time        `json:"last_seen_at"`
+}
+
+type CreateRouterInput struct {
+	Name          string `json:"name"`
+	SiteName      string `json:"site_name"`
+	Model         string `json:"model"`
+	ExpectedModel string `json:"expected_model"`
+}
+
+type AuthUser struct {
+	ID            uuid.UUID `json:"id"`
+	Name          string    `json:"name"`
+	PortalName    string    `json:"portal_name"`
+	Role          string    `json:"role"`
+	AccountStatus string    `json:"account_status"`
+	RouterLimit   int       `json:"router_limit"`
+}
+
+type RemoteAccessInput struct {
+	RemoteAccessMethod string `json:"remote_access_method"`
+	Host               string `json:"host"`
+	APIPort            int    `json:"api_port"`
+	Username           string `json:"username"`
+	Password           string `json:"password"`
+}
+
+type MethodInput struct {
+	ConfigurationMethod string `json:"configuration_method"`
+}
+
+type RemoteAccessDetails struct {
+	RouterID        uuid.UUID `json:"router_id"`
+	Address         string    `json:"address"`
+	APIAddress      string    `json:"api_address"`
+	WinboxAddress   string    `json:"winbox_address"`
+	WebURL          string    `json:"web_url"`
+	SecureWebURL    string    `json:"secure_web_url"`
+	Method          string    `json:"method"`
+	WireGuardStatus string    `json:"wireguard_status"`
+	Ready           bool      `json:"ready"`
+}
+
+type ConnectionTestResult struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+type ConfigPreview struct {
+	Summary portprofiles.Summary `json:"summary"`
+	Script  string               `json:"script"`
 }
 
 type RouterPortAssignment struct {

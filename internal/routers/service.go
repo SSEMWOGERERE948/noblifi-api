@@ -54,22 +54,6 @@ func (s *Service) SetWireGuardServerPublicKeyResolver(resolver WireGuardServerPu
 	s.serverPublicKeyResolver = resolver
 }
 
-type CreateRouterInput struct {
-	Name          string `json:"name"`
-	SiteName      string `json:"site_name"`
-	Model         string `json:"model"`
-	ExpectedModel string `json:"expected_model"`
-}
-
-type AuthUser struct {
-	ID            uuid.UUID
-	Name          string
-	PortalName    string
-	Role          string
-	AccountStatus string
-	RouterLimit   int
-}
-
 func (s *Service) Create(input CreateRouterInput) (Router, error) {
 	return s.CreateForUser(input, AuthUser{})
 }
@@ -311,59 +295,6 @@ func interfaceType(iface RouterInterface) string {
 	return *iface.Type
 }
 
-type RemoteAccessInput struct {
-	RemoteAccessMethod string `json:"remote_access_method"`
-	Host               string `json:"host"`
-	APIPort            int    `json:"api_port"`
-	Username           string `json:"username"`
-	Password           string `json:"password"`
-}
-
-type MethodInput struct {
-	ConfigurationMethod string `json:"configuration_method"`
-}
-
-type RouterTelemetry struct {
-	RouterID           uuid.UUID         `json:"router_id"`
-	Name               string            `json:"name"`
-	Identity           string            `json:"identity"`
-	Model              string            `json:"model"`
-	RouterOSVersion    string            `json:"routeros_version"`
-	Uptime             string            `json:"uptime"`
-	CPULoad            string            `json:"cpu_load"`
-	FreeMemory         string            `json:"free_memory"`
-	TotalMemory        string            `json:"total_memory"`
-	FreeHDD            string            `json:"free_hdd"`
-	TotalHDD           string            `json:"total_hdd"`
-	Architecture       string            `json:"architecture"`
-	BoardName          string            `json:"board_name"`
-	ActiveHotspotUsers int               `json:"active_hotspot_users"`
-	Interfaces         []RouterInterface `json:"interfaces"`
-	LastSeenAt         *time.Time        `json:"last_seen_at"`
-}
-
-type RemoteAccessDetails struct {
-	RouterID        uuid.UUID `json:"router_id"`
-	Address         string    `json:"address"`
-	APIAddress      string    `json:"api_address"`
-	WinboxAddress   string    `json:"winbox_address"`
-	WebURL          string    `json:"web_url"`
-	SecureWebURL    string    `json:"secure_web_url"`
-	Method          string    `json:"method"`
-	WireGuardStatus string    `json:"wireguard_status"`
-	Ready           bool      `json:"ready"`
-}
-
-type ConnectionTestResult struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-}
-
-type ConfigPreview struct {
-	Summary portprofiles.Summary `json:"summary"`
-	Script  string               `json:"script"`
-}
-
 func (s *Service) SaveRemoteAccess(routerID uuid.UUID, input RemoteAccessInput) (RouterSetupSession, error) {
 	method := strings.TrimSpace(input.RemoteAccessMethod)
 	if method != "bootstrap" && method != "direct_api" && method != "wireguard" {
@@ -503,6 +434,16 @@ func (s *Service) TestConnection(routerID uuid.UUID) (ConnectionTestResult, erro
 	return ConnectionTestResult{Success: true, Message: "RouterOS API connection succeeded"}, nil
 }
 
+// CollectTelemetry pulls CPU load, uptime, memory, interface state, and
+// active hotspot user count directly from RouterOS over the router's
+// configured management address (WireGuard tunnel IP or direct API host),
+// then persists the values onto the Router row so the dashboard can read a
+// cached snapshot without hitting the router on every page load.
+//
+// On any failure to reach or query the router, the error is recorded on
+// TelemetryLastError (without touching the last-known-good values) so the
+// dashboard can surface "last update failed" instead of silently going
+// stale with no explanation.
 func (s *Service) CollectTelemetry(routerID uuid.UUID) (RouterTelemetry, error) {
 	router, err := s.repo.Find(routerID)
 	if err != nil {
@@ -510,11 +451,13 @@ func (s *Service) CollectTelemetry(routerID uuid.UUID) (RouterTelemetry, error) 
 	}
 	client, err := s.routerClient(router)
 	if err != nil {
+		s.recordTelemetryError(router, err)
 		return RouterTelemetry{}, err
 	}
 
 	resourceRows, err := client.Command("/system/resource/print", nil)
 	if err != nil {
+		s.recordTelemetryError(router, err)
 		return RouterTelemetry{}, err
 	}
 	identityRows, _ := client.Command("/system/identity/print", nil)
@@ -555,6 +498,21 @@ func (s *Service) CollectTelemetry(routerID uuid.UUID) (RouterTelemetry, error) 
 	if value := firstNonEmpty(resource["=board-name"], resource["=platform"]); value != "" {
 		router.Model = &value
 	}
+
+	cpuLoad := resource["=cpu-load"]
+	uptime := resource["=uptime"]
+	freeMemory := resource["=free-memory"]
+	totalMemory := resource["=total-memory"]
+	activeUsers := len(activeRows)
+
+	router.CPULoad = &cpuLoad
+	router.Uptime = &uptime
+	router.FreeMemory = &freeMemory
+	router.TotalMemory = &totalMemory
+	router.ActiveHotspotUsers = activeUsers
+	router.TelemetryUpdatedAt = &now
+	router.TelemetryLastError = nil
+
 	router.LastSeenAt = &now
 	router.Status = "online"
 	if err := s.repo.Save(&router); err != nil {
@@ -567,18 +525,71 @@ func (s *Service) CollectTelemetry(routerID uuid.UUID) (RouterTelemetry, error) 
 		Identity:           identity["=name"],
 		Model:              firstNonEmpty(resource["=board-name"], resource["=platform"]),
 		RouterOSVersion:    resource["=version"],
-		Uptime:             resource["=uptime"],
-		CPULoad:            resource["=cpu-load"],
-		FreeMemory:         resource["=free-memory"],
-		TotalMemory:        resource["=total-memory"],
+		Uptime:             uptime,
+		CPULoad:            cpuLoad,
+		FreeMemory:         freeMemory,
+		TotalMemory:        totalMemory,
 		FreeHDD:            resource["=free-hdd-space"],
 		TotalHDD:           resource["=total-hdd-space"],
 		Architecture:       resource["=architecture-name"],
 		BoardName:          resource["=board-name"],
-		ActiveHotspotUsers: len(activeRows),
+		ActiveHotspotUsers: activeUsers,
 		Interfaces:         interfaces,
 		LastSeenAt:         &now,
 	}, nil
+}
+
+// recordTelemetryError saves the failure reason onto the router row without
+// disturbing the last successfully collected values, so a temporarily
+// unreachable router shows "last update failed X ago" instead of blank or
+// stale-but-unexplained numbers.
+func (s *Service) recordTelemetryError(router Router, err error) {
+	msg := err.Error()
+	router.TelemetryLastError = &msg
+	_ = s.repo.Save(&router)
+}
+
+// CollectTelemetryForAllRouters refreshes telemetry for every non-deleted
+// router that has a reachable management address. It is intended to be
+// called on a fixed interval by App Engine cron (see cron.yaml) rather than
+// by an end user, so the dashboard reflects a recent snapshot without anyone
+// needing to click "Collect".
+//
+// Each router's collection is bounded by perRouterTimeout so a single
+// unreachable or slow router cannot stall the whole batch; a router that
+// times out simply keeps whatever value CollectTelemetry manages to persist
+// (or its previous last-known-good values) and is picked up again next run.
+func (s *Service) CollectTelemetryForAllRouters() {
+	const perRouterTimeout = 8 * time.Second
+
+	routers, err := s.repo.List()
+	if err != nil {
+		return
+	}
+
+	for _, router := range routers {
+		if router.DeletedAt != nil {
+			continue
+		}
+		if s.managementAddress(router) == "" {
+			continue
+		}
+
+		routerID := router.ID
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_, _ = s.CollectTelemetry(routerID)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(perRouterTimeout):
+			// The goroutine keeps running in the background and will persist
+			// whatever it eventually gets (or an error); we just don't block
+			// the rest of the batch on a single slow/unreachable router.
+		}
+	}
 }
 
 func (s *Service) RenameRouter(routerID uuid.UUID, name string) (Router, error) {
