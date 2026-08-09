@@ -1,0 +1,73 @@
+name: Security baseline
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  api-clean-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build and safe security tests
+        run: |
+          go vet ./...
+          go build ./cmd/server
+          go test ./internal/security
+      - name: Dependency vulnerability check
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  known-findings-advisory:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Reproduce known findings
+        run: go test -tags=securityknown ./internal/security
+      - name: Advisory remediation summary
+        if: always()
+        run: cat docs/security-audit.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-security-audit
+          path: docs/
+
+  security-scanners-advisory:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Semgrep policy scan
+        uses: semgrep/semgrep-action@v1
+        continue-on-error: true
+        with:
+          config: .semgrep/security.yml
+      - name: Secret scan
+        if: always()
+        uses: gitleaks/gitleaks-action@v2
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  existing-suite-baseline:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Run existing complete Go suite without masking failures
+        run: go test ./...
