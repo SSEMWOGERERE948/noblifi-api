@@ -1230,7 +1230,8 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		)
 		writeCritical(
 			builder,
-			fmt.Sprintf(`:if ([:len [/ip firewall filter find where comment="NobliFi WireGuard management input" in-interface="%s" src-address="%s" protocol=tcp disabled=no]] = 0) do={ :error "NobliFi WireGuard management firewall rule is missing" }`, escape(options.WireGuardInterface), escape(serverCIDR)),
+			fmt.Sprintf(`:local noblifiFinalWGRule [/ip firewall filter find where comment="NobliFi WireGuard management input" in-interface="%s" protocol=tcp disabled=no]; :if ([:len $noblifiFinalWGRule] = 0) do={ :error "NobliFi WireGuard management firewall rule is missing" }`,
+				escape(options.WireGuardInterface)),
 			"final WireGuard firewall verification",
 		)
 		writeCritical(

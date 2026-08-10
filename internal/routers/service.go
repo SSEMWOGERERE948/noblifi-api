@@ -574,6 +574,12 @@ func (s *Service) CollectTelemetryForAllRouters() {
 		if s.managementAddress(router) == "" {
 			continue
 		}
+		if isWireGuardManagementAddress(s.managementAddress(router)) {
+			// Private WireGuard tunnel routers are collected by the VPS agent.
+			// App Engine cannot route to 10.77.0.x, and recording that here
+			// would overwrite a healthy agent-supplied telemetry snapshot.
+			continue
+		}
 
 		routerID := router.ID
 		done := make(chan struct{})
@@ -590,6 +596,11 @@ func (s *Service) CollectTelemetryForAllRouters() {
 			// batch does not block the rest of the routers on this one.
 		}
 	}
+}
+
+func isWireGuardManagementAddress(address string) bool {
+	address = hostOnly(strings.TrimSpace(address))
+	return strings.HasPrefix(address, "10.77.")
 }
 
 func (s *Service) RenameRouter(routerID uuid.UUID, name string) (Router, error) {

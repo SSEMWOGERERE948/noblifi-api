@@ -24,6 +24,8 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	internal.Post("/wireguard/jobs/:id/complete", h.complete)
 	internal.Post("/wireguard/jobs/:id/fail", h.fail)
 	internal.Post("/wireguard/reconcile/report", h.reconcileReport)
+	internal.Get("/routers/telemetry-targets", h.telemetryTargets)
+	internal.Post("/routers/:id/telemetry", h.reportTelemetry)
 	internal.Get("/routers/:id/remote-access-config", h.remoteAccessConfig)
 }
 
@@ -130,6 +132,29 @@ func (h *Handler) reconcileReport(c *fiber.Ctx) error {
 		input.LastReconciliation = &now
 	}
 	if err := h.service.Heartbeat(input.AgentID, input.Version, input.WireGuardInterface, input.WireGuardPublicKey, input.PeerCount, input.Healthy, input.LastReconciliation); err != nil {
+		return err
+	}
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+func (h *Handler) telemetryTargets(c *fiber.Ctx) error {
+	targets, err := h.service.TelemetryTargets()
+	if err != nil {
+		return err
+	}
+	return c.JSON(fiber.Map{"targets": targets})
+}
+
+func (h *Handler) reportTelemetry(c *fiber.Ctx) error {
+	routerID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
+	}
+	var input AgentTelemetryReport
+	if err := c.BodyParser(&input); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	}
+	if err := h.service.RecordAgentTelemetry(routerID, input); err != nil {
 		return err
 	}
 	return c.JSON(fiber.Map{"status": "ok"})

@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -27,6 +28,28 @@ type RemoteAccessConfig struct {
 	RouterIP   string    `json:"router_ip"`
 	WebPort    int       `json:"web_port"`
 	WinboxPort int       `json:"winbox_port"`
+}
+
+type TelemetryTarget struct {
+	RouterID    uuid.UUID `json:"router_id"`
+	Name        string    `json:"name"`
+	RouterIP    string    `json:"router_ip"`
+	APIPort     int       `json:"api_port"`
+	APIUsername string    `json:"api_username"`
+	APIPassword string    `json:"api_password"`
+}
+
+type AgentTelemetryReport struct {
+	Identity           string                    `json:"identity"`
+	Model              string                    `json:"model"`
+	RouterOSVersion    string                    `json:"routeros_version"`
+	Uptime             string                    `json:"uptime"`
+	CPULoad            string                    `json:"cpu_load"`
+	FreeMemory         string                    `json:"free_memory"`
+	TotalMemory        string                    `json:"total_memory"`
+	ActiveHotspotUsers *int                      `json:"active_hotspot_users"`
+	Interfaces         []routers.RouterInterface `json:"interfaces"`
+	Error              string                    `json:"error"`
 }
 
 func NewService(db *gorm.DB, cfg config.Config) *Service {
@@ -115,6 +138,113 @@ func (s *Service) DesiredRemoteAccess(routerID uuid.UUID) (RemoteAccessConfig, e
 		cfg.WinboxPort = *router.RemoteWinboxPort
 	}
 	return cfg, nil
+}
+
+func (s *Service) TelemetryTargets() ([]TelemetryTarget, error) {
+	var records []routers.Router
+	if err := s.db.
+		Where("deleted_at IS NULL").
+		Where("wire_guard_tunnel_ip IS NOT NULL AND wire_guard_tunnel_ip <> ''").
+		Order("created_at desc").
+		Find(&records).Error; err != nil {
+		return nil, err
+	}
+
+	targets := make([]TelemetryTarget, 0, len(records))
+	for _, router := range records {
+		routerIP := strings.TrimSpace(ptrValue(router.WireGuardTunnelIP))
+		username := firstNonEmpty(ptrValue(router.APIUsername), s.cfg.RouterAPIUsername)
+		password := s.routerAPIPassword(router)
+		if routerIP == "" || username == "" || password == "" {
+			continue
+		}
+		targets = append(targets, TelemetryTarget{
+			RouterID:    router.ID,
+			Name:        router.Name,
+			RouterIP:    hostOnly(routerIP),
+			APIPort:     8728,
+			APIUsername: username,
+			APIPassword: password,
+		})
+	}
+	return targets, nil
+}
+
+func (s *Service) RecordAgentTelemetry(routerID uuid.UUID, input AgentTelemetryReport) error {
+	var router routers.Router
+	if err := s.db.First(&router, "id = ?", routerID).Error; err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	if strings.TrimSpace(input.Error) != "" {
+		msg := safeError(input.Error)
+		return s.db.Model(&routers.Router{}).
+			Where("id = ?", routerID).
+			Updates(map[string]any{
+				"telemetry_last_error": msg,
+				"updated_at":           now,
+			}).Error
+	}
+
+	updates := map[string]any{
+		"telemetry_updated_at": now,
+		"telemetry_last_error": nil,
+		"last_seen_at":         now,
+		"status":               "online",
+		"updated_at":           now,
+	}
+	if value := strings.TrimSpace(input.Model); value != "" {
+		updates["model"] = value
+	}
+	if value := strings.TrimSpace(input.RouterOSVersion); value != "" {
+		updates["router_os_version"] = value
+	}
+	if value := strings.TrimSpace(input.Uptime); value != "" {
+		updates["uptime"] = value
+	}
+	if value := strings.TrimSpace(input.CPULoad); value != "" {
+		updates["cpu_load"] = value
+	}
+	if value := strings.TrimSpace(input.FreeMemory); value != "" {
+		updates["free_memory"] = value
+	}
+	if value := strings.TrimSpace(input.TotalMemory); value != "" {
+		updates["total_memory"] = value
+	}
+	if input.ActiveHotspotUsers != nil {
+		updates["active_hotspot_users"] = *input.ActiveHotspotUsers
+	}
+
+	if err := s.db.Model(&routers.Router{}).Where("id = ?", routerID).Updates(updates).Error; err != nil {
+		return err
+	}
+
+	if len(input.Interfaces) > 0 {
+		interfaces := make([]routers.RouterInterface, 0, len(input.Interfaces))
+		for _, iface := range input.Interfaces {
+			name := strings.TrimSpace(iface.Name)
+			if name == "" {
+				continue
+			}
+			iface.ID = uuid.Nil
+			iface.RouterID = routerID
+			iface.Name = name
+			if iface.DiscoveredAt.IsZero() {
+				iface.DiscoveredAt = now
+			}
+			interfaces = append(interfaces, iface)
+		}
+		if len(interfaces) > 0 {
+			return s.db.Transaction(func(tx *gorm.DB) error {
+				if err := tx.Where("router_id = ?", routerID).Delete(&routers.RouterInterface{}).Error; err != nil {
+					return err
+				}
+				return tx.Create(&interfaces).Error
+			})
+		}
+	}
+	return nil
 }
 
 func (s *Service) existingConfigureJob(routerID uuid.UUID) (WireGuardJob, bool, error) {
@@ -463,4 +593,47 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func hostOnly(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if parsed, err := url.Parse(value); err == nil && parsed.Hostname() != "" {
+		return parsed.Hostname()
+	}
+	if strings.Contains(value, ":") && !strings.Contains(value, "::") {
+		host, _, found := strings.Cut(value, ":")
+		if found && host != "" {
+			return host
+		}
+	}
+	return strings.Trim(value, "[]")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func ptrValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func (s *Service) routerAPIPassword(router routers.Router) string {
+	if router.APIPasswordEncrypted != nil {
+		value := strings.TrimSpace(*router.APIPasswordEncrypted)
+		if strings.HasPrefix(value, "encrypted-placeholder:") {
+			return strings.TrimPrefix(value, "encrypted-placeholder:")
+		}
+	}
+	return s.cfg.RouterAPIPassword
 }

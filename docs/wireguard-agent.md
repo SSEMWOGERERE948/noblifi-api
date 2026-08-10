@@ -4,6 +4,12 @@
 
 Dashboard creates a router, the backend allocates a unique WireGuard client IP, and the MikroTik reports its interface public key to `/api/v1/provisioning/wireguard-key`. The backend queues a WireGuard job. The xneelo agent polls `/api/v1/internal/wireguard/jobs/claim`, updates `wg0`, persists `/etc/wireguard/wg0.conf`, verifies runtime state, and reports completion.
 
+The agent also owns scheduled telemetry for WireGuard-managed routers. App
+Engine and hosted GitHub Actions cannot route to private `10.77.0.x` tunnel
+addresses, so CPU load, uptime, memory, interface state, and active HotSpot
+users must be collected from the VPS side of the tunnel and submitted back to
+the control plane.
+
 ## Key Direction
 
 The MikroTik interface public key from `/interface wireguard print` is stored on the VPS as the peer `PublicKey`.
@@ -62,7 +68,34 @@ NOBLIFI_AGENT_ID=xneelo-wg-agent-01
 NOBLIFI_WIREGUARD_INTERFACE=wg0
 NOBLIFI_WIREGUARD_CONFIG=/etc/wireguard/wg0.conf
 NOBLIFI_WIREGUARD_BACKUP_DIR=/etc/wireguard/backups
+NOBLIFI_AGENT_TELEMETRY_INTERVAL=2m
 ```
+
+## Telemetry Scheduler
+
+The VPS agent should run a fixed-interval scheduler, defaulting to
+`NOBLIFI_AGENT_TELEMETRY_INTERVAL=2m`.
+
+On each run:
+
+1. Fetch targets with `GET /api/v1/internal/routers/telemetry-targets`.
+2. For each target, connect to `router_ip:api_port` with the returned API
+   credentials over WireGuard.
+3. Read:
+   - `/system/resource/print`
+   - `/system/identity/print`
+   - `/interface/print`
+   - `/ip/hotspot/active/print`
+4. Submit the snapshot to `POST /api/v1/internal/routers/:id/telemetry`.
+
+If collection fails for one router, the agent should submit the same endpoint
+with an `error` value. The backend records that error without clearing the last
+good CPU, uptime, or user count.
+
+Hosted GitHub Actions are not suitable for this scheduler because they run
+outside the WireGuard network. A self-hosted GitHub runner on the VPS would
+work, but it is operationally equivalent to running the scheduler in the agent
+and adds another moving part.
 
 ## Database Migration
 
