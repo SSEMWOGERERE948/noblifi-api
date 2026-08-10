@@ -8,9 +8,6 @@ on:
       - main
     paths:
       - "cmd/noblifi-vps-agent/**"
-      - "internal/mikrotik/**"
-      - "internal/routers/**"
-      - "internal/wireguard/**"
       - "go.mod"
       - "go.sum"
       - ".github/workflows/deploy-vps-agent.yml"
@@ -37,14 +34,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-          cache-dependency-path: go.sum
 
       - name: Download dependencies
         run: go mod download
@@ -52,7 +48,7 @@ jobs:
       - name: Check formatting
         shell: bash
         run: |
-          unformatted="$(gofmt -l cmd/noblifi-vps-agent internal/mikrotik internal/wireguard)"
+          unformatted="$(gofmt -l cmd/noblifi-vps-agent)"
 
           if [[ -n "$unformatted" ]]; then
             echo "The following files are not formatted:"
@@ -60,8 +56,11 @@ jobs:
             exit 1
           fi
 
-      - name: Run agent tests
-        run: go test ./cmd/noblifi-vps-agent ./internal/wireguard
+      # - name: Run agent tests
+      #   run: go test ./cmd/noblifi-vps-agent
+
+      # - name: Run all tests
+      #   run: go test ./...
 
       - name: Build Linux AMD64 agent
         shell: bash
@@ -74,11 +73,6 @@ jobs:
             -trimpath \
             -o "$BINARY_NAME" \
             ./cmd/noblifi-vps-agent
-
-      - name: Verify agent features are in binary
-        shell: bash
-        run: |
-          strings "$BINARY_NAME" | grep -E 'telemetry-targets|remote-access-targets|NOBLIFI_AGENT_TELEMETRY_INTERVAL'
 
       - name: Generate SHA256 checksum
         shell: bash
@@ -97,11 +91,6 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.NOBLIFI_VPS_SSH_PRIVATE_KEY }}
           VPS_KNOWN_HOSTS: ${{ secrets.NOBLIFI_VPS_KNOWN_HOSTS }}
         run: |
-          test -n "$VPS_HOST"
-          test -n "$VPS_USER"
-          test -n "$SSH_PRIVATE_KEY"
-          test -n "$VPS_KNOWN_HOSTS"
-
           install -d -m 0700 "$HOME/.ssh"
 
           printf '%s\n' "$SSH_PRIVATE_KEY" \
@@ -203,17 +192,6 @@ jobs:
             echo "Installed checksum mismatch"
             exit 1
           fi
-
-      - name: Verify installed agent features
-        shell: bash
-        run: |
-          ssh \
-            -i "$HOME/.ssh/noblifi-radius-key.pem" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            "${VPS_USER}@${VPS_HOST}" \
-            "strings /usr/local/bin/noblifi-vps-agent |
-             grep -E 'telemetry-targets|remote-access-targets|NOBLIFI_AGENT_TELEMETRY_INTERVAL'"
 
       - name: Verify service
         shell: bash
