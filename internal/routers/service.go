@@ -420,6 +420,32 @@ func (s *Service) TestConnection(routerID uuid.UUID) (ConnectionTestResult, erro
 	if err != nil {
 		return ConnectionTestResult{}, err
 	}
+	address := s.managementAddress(router)
+	if isWireGuardManagementAddress(address) {
+		if router.WireGuardLastHandshakeAt == nil {
+			return ConnectionTestResult{
+				Success: false,
+				Message: "WireGuard tunnel is not connected yet; waiting for the MikroTik to handshake with the VPS agent.",
+			}, nil
+		}
+		age := time.Since(*router.WireGuardLastHandshakeAt)
+		if age > 10*time.Minute {
+			return ConnectionTestResult{
+				Success: false,
+				Message: fmt.Sprintf("WireGuard tunnel last handshook %s ago; the VPS agent must reconnect before RouterOS API checks can run.", age.Round(time.Second)),
+			}, nil
+		}
+		now := time.Now().UTC()
+		router.LastSeenAt = &now
+		if router.Status == "" || router.Status == "pending" || router.Status == "provisioning" {
+			router.Status = "online"
+		}
+		_ = s.repo.Save(&router)
+		return ConnectionTestResult{
+			Success: true,
+			Message: "WireGuard tunnel is connected. RouterOS API checks for this private address run from the VPS agent, not App Engine.",
+		}, nil
+	}
 	client, err := s.routerClient(router)
 	if err != nil {
 		return ConnectionTestResult{}, err

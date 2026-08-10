@@ -30,6 +30,14 @@ type RemoteAccessConfig struct {
 	WinboxPort int       `json:"winbox_port"`
 }
 
+type RemoteAccessTarget struct {
+	RouterID   uuid.UUID `json:"router_id"`
+	Name       string    `json:"name"`
+	RouterIP   string    `json:"router_ip"`
+	WebPort    int       `json:"web_port"`
+	WinboxPort int       `json:"winbox_port"`
+}
+
 type TelemetryTarget struct {
 	RouterID    uuid.UUID `json:"router_id"`
 	Name        string    `json:"name"`
@@ -138,6 +146,66 @@ func (s *Service) DesiredRemoteAccess(routerID uuid.UUID) (RemoteAccessConfig, e
 		cfg.WinboxPort = *router.RemoteWinboxPort
 	}
 	return cfg, nil
+}
+
+func (s *Service) RemoteAccessTargets() ([]RemoteAccessTarget, error) {
+	var records []routers.Router
+	if err := s.db.
+		Where("deleted_at IS NULL").
+		Where("wire_guard_tunnel_ip IS NOT NULL AND wire_guard_tunnel_ip <> ''").
+		Where("remote_access_status IN ?", []string{"queued", "ready"}).
+		Where("remote_web_port IS NOT NULL OR remote_winbox_port IS NOT NULL").
+		Order("created_at desc").
+		Find(&records).Error; err != nil {
+		return nil, err
+	}
+
+	targets := make([]RemoteAccessTarget, 0, len(records))
+	for _, router := range records {
+		routerIP := hostOnly(ptrValue(router.WireGuardTunnelIP))
+		if routerIP == "" {
+			continue
+		}
+		target := RemoteAccessTarget{
+			RouterID: router.ID,
+			Name:     router.Name,
+			RouterIP: routerIP,
+		}
+		if router.RemoteWebPort != nil {
+			target.WebPort = *router.RemoteWebPort
+		}
+		if router.RemoteWinboxPort != nil {
+			target.WinboxPort = *router.RemoteWinboxPort
+		}
+		targets = append(targets, target)
+	}
+	return targets, nil
+}
+
+func (s *Service) RecordRemoteAccessReady(routerID uuid.UUID) error {
+	now := time.Now().UTC()
+	return s.db.Model(&routers.Router{}).
+		Where("id = ?", routerID).
+		Updates(map[string]any{
+			"remote_access_status":  "ready",
+			"wire_guard_last_error": nil,
+			"updated_at":            now,
+		}).Error
+}
+
+func (s *Service) RecordRemoteAccessError(routerID uuid.UUID, message string) error {
+	now := time.Now().UTC()
+	msg := safeError(message)
+	if msg == "" {
+		msg = "remote access forwarder failed"
+	}
+	return s.db.Model(&routers.Router{}).
+		Where("id = ?", routerID).
+		Updates(map[string]any{
+			"remote_access_status":  "failed",
+			"wire_guard_last_error": msg,
+			"updated_at":            now,
+		}).Error
 }
 
 func (s *Service) TelemetryTargets() ([]TelemetryTarget, error) {

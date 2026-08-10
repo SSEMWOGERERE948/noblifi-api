@@ -97,6 +97,20 @@ outside the WireGuard network. A self-hosted GitHub runner on the VPS would
 work, but it is operationally equivalent to running the scheduler in the agent
 and adds another moving part.
 
+## Remote Access Forwarding
+
+The agent reconciles remote access targets on `NOBLIFI_AGENT_POLL_INTERVAL`.
+For each router with VPN remote access enabled, it opens public TCP listeners
+on the VPS:
+
+```text
+0.0.0.0:<remote_web_port>    -> <router_wireguard_ip>:80
+0.0.0.0:<remote_winbox_port> -> <router_wireguard_ip>:8291
+```
+
+The dashboard should show users the VPS public host and assigned public port,
+not the private `10.77.0.x` tunnel IP.
+
 ## Database Migration
 
 Apply `migrations/002_wireguard_control_plane.sql` to production, or run the Go service AutoMigrate during deployment.

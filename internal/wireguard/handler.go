@@ -26,6 +26,9 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	internal.Post("/wireguard/reconcile/report", h.reconcileReport)
 	internal.Get("/routers/telemetry-targets", h.telemetryTargets)
 	internal.Post("/routers/:id/telemetry", h.reportTelemetry)
+	internal.Get("/routers/remote-access-targets", h.remoteAccessTargets)
+	internal.Post("/routers/:id/remote-access-ready", h.remoteAccessReady)
+	internal.Post("/routers/:id/remote-access-error", h.remoteAccessError)
 	internal.Get("/routers/:id/remote-access-config", h.remoteAccessConfig)
 }
 
@@ -155,6 +158,40 @@ func (h *Handler) reportTelemetry(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
 	}
 	if err := h.service.RecordAgentTelemetry(routerID, input); err != nil {
+		return err
+	}
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+func (h *Handler) remoteAccessTargets(c *fiber.Ctx) error {
+	targets, err := h.service.RemoteAccessTargets()
+	if err != nil {
+		return err
+	}
+	return c.JSON(fiber.Map{"targets": targets})
+}
+
+func (h *Handler) remoteAccessReady(c *fiber.Ctx) error {
+	routerID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
+	}
+	if err := h.service.RecordRemoteAccessReady(routerID); err != nil {
+		return err
+	}
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+func (h *Handler) remoteAccessError(c *fiber.Ctx) error {
+	routerID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
+	}
+	var input struct {
+		Error string `json:"error"`
+	}
+	_ = c.BodyParser(&input)
+	if err := h.service.RecordRemoteAccessError(routerID, input.Error); err != nil {
 		return err
 	}
 	return c.JSON(fiber.Map{"status": "ok"})
