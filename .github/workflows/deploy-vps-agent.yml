@@ -8,6 +8,7 @@ on:
       - main
     paths:
       - "cmd/noblifi-vps-agent/**"
+      - "deploy/systemd/deploy-noblifi-agent"
       - "go.mod"
       - "go.sum"
       - ".github/workflows/deploy-vps-agent.yml"
@@ -130,6 +131,13 @@ jobs:
             "${BINARY_NAME}.sha256" \
             "${VPS_USER}@${VPS_HOST}:${REMOTE_CHECKSUM}"
 
+          scp \
+            -i "$HOME/.ssh/noblifi-radius-key.pem" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            deploy/systemd/deploy-noblifi-agent \
+            "${VPS_USER}@${VPS_HOST}:/tmp/deploy-noblifi-agent.new"
+
       - name: Compare local and uploaded SHA256
         shell: bash
         run: |
@@ -163,7 +171,8 @@ jobs:
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             "${VPS_USER}@${VPS_HOST}" \
-            "sudo /usr/local/sbin/deploy-noblifi-agent \
+            "sudo install -m 0755 /tmp/deploy-noblifi-agent.new /usr/local/sbin/deploy-noblifi-agent && \
+             sudo /usr/local/sbin/deploy-noblifi-agent \
               '${REMOTE_BINARY}' \
               '${REMOTE_CHECKSUM}'"
 
@@ -193,7 +202,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verify service
+      - name: Verify deployed agent
         shell: bash
         run: |
           ssh \
@@ -201,7 +210,32 @@ jobs:
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             "${VPS_USER}@${VPS_HOST}" \
-            "sudo systemctl is-active --quiet noblifi-vps-agent"
+            '
+              set -e
+
+              sleep 5
+
+              sudo systemctl is-active --quiet noblifi-vps-agent
+
+              PID="$(sudo systemctl show noblifi-vps-agent -p MainPID --value)"
+
+              if [[ -z "$PID" || "$PID" == "0" ]]; then
+                echo "Agent has no MainPID"
+                exit 1
+              fi
+
+              echo "noblifi-vps-agent healthy"
+              echo "PID=$PID"
+              echo "Executable=$(readlink -f "/proc/$PID/exe")"
+              echo "Running executable SHA256:"
+              sha256sum "/proc/$PID/exe"
+              echo "Installed executable SHA256:"
+              sha256sum /usr/local/bin/noblifi-vps-agent
+
+              sudo systemctl status noblifi-vps-agent \
+                --no-pager \
+                -l
+            '
 
       - name: Show recent service logs
         if: always()

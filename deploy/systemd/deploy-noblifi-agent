@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+log() {
+  printf '[%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"
+}
+
+fail() {
+  log "ERROR: $*"
+  exit 1
+}
+
+if [[ $# -ne 2 ]]; then
+  fail "usage: deploy-noblifi-agent <uploaded-binary> <uploaded-sha256>"
+fi
+
+DEPLOY_STARTED="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+REMOTE_BINARY="$1"
+REMOTE_CHECKSUM="$2"
+INSTALLED_BINARY="/usr/local/bin/noblifi-vps-agent"
+SERVICE_NAME="noblifi-vps-agent"
+BACKUP_DIR="/usr/local/lib/noblifi-agent-backups"
+
+[[ -f "$REMOTE_BINARY" ]] || fail "uploaded binary not found: $REMOTE_BINARY"
+[[ -f "$REMOTE_CHECKSUM" ]] || fail "uploaded checksum not found: $REMOTE_CHECKSUM"
+
+EXPECTED_SHA="$(awk '{ print tolower($1) }' "$REMOTE_CHECKSUM")"
+[[ -n "$EXPECTED_SHA" ]] || fail "uploaded checksum file is empty"
+
+UPLOADED_SHA="$(sha256sum "$REMOTE_BINARY" | awk '{ print tolower($1) }')"
+log "Expected SHA256: $EXPECTED_SHA"
+log "Uploaded SHA256: $UPLOADED_SHA"
+
+if [[ "$EXPECTED_SHA" != "$UPLOADED_SHA" ]]; then
+  fail "uploaded binary checksum mismatch"
+fi
+
+log "Uploaded binary checksum verified"
+
+mkdir -p "$BACKUP_DIR"
+if [[ -f "$INSTALLED_BINARY" ]]; then
+  backup="${BACKUP_DIR}/noblifi-vps-agent-$(date -u '+%Y%m%dT%H%M%SZ')"
+  log "Backing up current binary to $backup"
+  cp -a "$INSTALLED_BINARY" "$backup"
+fi
+
+if systemctl is-active --quiet "$SERVICE_NAME"; then
+  log "Stopping $SERVICE_NAME"
+  systemctl stop "$SERVICE_NAME"
+fi
+
+log "Installing new binary"
+install -m 0755 "$REMOTE_BINARY" "$INSTALLED_BINARY"
+
+INSTALLED_SHA="$(sha256sum "$INSTALLED_BINARY" | awk '{ print tolower($1) }')"
+log "Installed SHA256: $INSTALLED_SHA"
+if [[ "$EXPECTED_SHA" != "$INSTALLED_SHA" ]]; then
+  fail "installed checksum mismatch"
+fi
+
+systemctl daemon-reload
+log "Starting $SERVICE_NAME"
+systemctl start "$SERVICE_NAME"
+
+sleep 5
+
+if ! systemctl is-active --quiet "$SERVICE_NAME"; then
+  log "ERROR: $SERVICE_NAME is not active"
+  systemctl status "$SERVICE_NAME" --no-pager -l || true
+  journalctl -u "$SERVICE_NAME" --since "$DEPLOY_STARTED" --no-pager -o cat || true
+  exit 1
+fi
+
+PID="$(systemctl show "$SERVICE_NAME" -p MainPID --value)"
+if [[ -z "$PID" || "$PID" == "0" ]]; then
+  fail "$SERVICE_NAME has no running MainPID"
+fi
+
+log "Service is running with PID $PID"
+
+sleep 5
+
+if ! kill -0 "$PID" 2>/dev/null; then
+  log "ERROR: $SERVICE_NAME process exited during startup"
+  journalctl -u "$SERVICE_NAME" --since "$DEPLOY_STARTED" --no-pager -o cat || true
+  exit 1
+fi
+
+RECENT_LOGS="$(
+  journalctl \
+    -u "$SERVICE_NAME" \
+    --since "$DEPLOY_STARTED" \
+    --no-pager \
+    -o cat
+)"
+
+printf '%s\n' "$RECENT_LOGS"
+
+if printf '%s\n' "$RECENT_LOGS" | grep -Eqi '(^|[[:space:]])panic:|fatal error:|runtime: out of memory'; then
+  log "ERROR: Agent crashed during startup"
+  exit 1
+fi
+
+RUNNING_EXE="$(readlink -f "/proc/${PID}/exe")"
+log "Running executable: $RUNNING_EXE"
+if [[ "$RUNNING_EXE" != "$INSTALLED_BINARY" ]]; then
+  fail "systemd is running $RUNNING_EXE instead of $INSTALLED_BINARY"
+fi
+
+RUNNING_SHA="$(sha256sum "/proc/${PID}/exe" | awk '{ print tolower($1) }')"
+log "Running executable SHA256: $RUNNING_SHA"
+if [[ "$RUNNING_SHA" != "$EXPECTED_SHA" ]]; then
+  fail "running executable checksum mismatch"
+fi
+
+log "Agent startup verified successfully"
