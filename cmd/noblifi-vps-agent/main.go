@@ -24,7 +24,6 @@ type config struct {
 	BaseURL           string
 	AgentToken        string
 	AgentID           string
-	PollInterval      time.Duration
 	TelemetryInterval time.Duration
 	HTTPTimeout       time.Duration
 }
@@ -65,104 +64,21 @@ func main() {
 	defer stop()
 
 	client := &http.Client{Timeout: cfg.HTTPTimeout}
-	proxies := newProxyManager()
-	log.Printf("noblifi VPS agent started agent_id=%s poll_interval=%s telemetry_interval=%s", cfg.AgentID, cfg.PollInterval, cfg.TelemetryInterval)
+	log.Printf("noblifi telemetry agent started agent_id=%s interval=%s", cfg.AgentID, cfg.TelemetryInterval)
 
-	runRemoteAccess(ctx, client, cfg, proxies)
 	runTelemetry(ctx, client, cfg)
 
-	pollTicker := time.NewTicker(cfg.PollInterval)
-	defer pollTicker.Stop()
 	telemetryTicker := time.NewTicker(cfg.TelemetryInterval)
 	defer telemetryTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("noblifi VPS agent stopped")
+			log.Printf("noblifi telemetry agent stopped")
 			return
-		case <-pollTicker.C:
-			runRemoteAccess(ctx, client, cfg, proxies)
 		case <-telemetryTicker.C:
 			runTelemetry(ctx, client, cfg)
 		}
 	}
-}
-
-func runRemoteAccess(ctx context.Context, client *http.Client, cfg config, proxies *proxyManager) {
-	targets, err := fetchRemoteAccessTargets(ctx, client, cfg)
-	if err != nil {
-		log.Printf("remote access target fetch failed: %v", err)
-		return
-	}
-	failures := proxies.Reconcile(ctx, targets)
-	for _, target := range targets {
-		if err := failures[target.RouterID]; err != nil {
-			if reportErr := reportRemoteAccessError(ctx, client, cfg, target.RouterID, err); reportErr != nil {
-				log.Printf("remote access error report failed router_id=%s name=%q error=%v", target.RouterID, target.Name, reportErr)
-			}
-			continue
-		}
-		if err := reportRemoteAccessReady(ctx, client, cfg, target.RouterID); err != nil {
-			log.Printf("remote access ready report failed router_id=%s name=%q error=%v", target.RouterID, target.Name, err)
-		}
-	}
-}
-
-func fetchRemoteAccessTargets(ctx context.Context, client *http.Client, cfg config) ([]remoteAccessTarget, error) {
-	req, err := authedRequest(ctx, cfg, http.MethodGet, "/internal/routers/remote-access-targets", nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, responseError(resp)
-	}
-	var out remoteAccessTargetsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	return out.Targets, nil
-}
-
-func reportRemoteAccessReady(ctx context.Context, client *http.Client, cfg config, routerID string) error {
-	req, err := authedRequest(ctx, cfg, http.MethodPost, "/internal/routers/"+routerID+"/remote-access-ready", nil)
-	if err != nil {
-		return err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return responseError(resp)
-	}
-	return nil
-}
-
-func reportRemoteAccessError(ctx context.Context, client *http.Client, cfg config, routerID string, err error) error {
-	body, marshalErr := json.Marshal(map[string]string{"error": err.Error()})
-	if marshalErr != nil {
-		return marshalErr
-	}
-	req, reqErr := authedRequest(ctx, cfg, http.MethodPost, "/internal/routers/"+routerID+"/remote-access-error", bytes.NewReader(body))
-	if reqErr != nil {
-		return reqErr
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, doErr := client.Do(req)
-	if doErr != nil {
-		return doErr
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return responseError(resp)
-	}
-	return nil
 }
 
 func runTelemetry(ctx context.Context, client *http.Client, cfg config) {
@@ -311,7 +227,6 @@ func loadConfig() (config, error) {
 		BaseURL:           strings.TrimRight(strings.TrimSpace(os.Getenv("NOBLIFI_CONTROL_PLANE_URL")), "/"),
 		AgentToken:        strings.TrimSpace(os.Getenv("NOBLIFI_AGENT_TOKEN")),
 		AgentID:           firstNonEmpty(os.Getenv("NOBLIFI_AGENT_ID"), "xneelo-wg-agent-01"),
-		PollInterval:      durationEnv("NOBLIFI_AGENT_POLL_INTERVAL", 5*time.Second),
 		TelemetryInterval: durationEnv("NOBLIFI_AGENT_TELEMETRY_INTERVAL", 2*time.Minute),
 		HTTPTimeout:       durationEnv("NOBLIFI_AGENT_HTTP_TIMEOUT", 15*time.Second),
 	}
