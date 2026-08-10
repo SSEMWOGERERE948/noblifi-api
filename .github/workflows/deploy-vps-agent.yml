@@ -226,9 +226,9 @@ jobs:
 
               echo "noblifi-vps-agent healthy"
               echo "PID=$PID"
-              echo "Executable=$(readlink -f "/proc/$PID/exe")"
+              echo "Executable=$(sudo readlink -f "/proc/$PID/exe")"
               echo "Running executable SHA256:"
-              sha256sum "/proc/$PID/exe"
+              sudo sha256sum "/proc/$PID/exe"
               echo "Installed executable SHA256:"
               sha256sum /usr/local/bin/noblifi-vps-agent
 
