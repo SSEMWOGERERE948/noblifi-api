@@ -153,8 +153,8 @@ func (s *Service) RemoteAccessTargets() ([]RemoteAccessTarget, error) {
 	if err := s.db.
 		Where("deleted_at IS NULL").
 		Where("wire_guard_tunnel_ip IS NOT NULL AND wire_guard_tunnel_ip <> ''").
-		Where("remote_access_status IN ?", []string{"queued", "ready"}).
-		Where("remote_web_port IS NOT NULL OR remote_winbox_port IS NOT NULL").
+		Where("remote_access_status IN ?", []string{"queued", "ready", "failed"}).
+		Where("remote_winbox_port IS NOT NULL").
 		Order("created_at desc").
 		Find(&records).Error; err != nil {
 		return nil, err
@@ -170,9 +170,6 @@ func (s *Service) RemoteAccessTargets() ([]RemoteAccessTarget, error) {
 			RouterID: router.ID,
 			Name:     router.Name,
 			RouterIP: routerIP,
-		}
-		if router.RemoteWebPort != nil {
-			target.WebPort = *router.RemoteWebPort
 		}
 		if router.RemoteWinboxPort != nil {
 			target.WinboxPort = *router.RemoteWinboxPort
