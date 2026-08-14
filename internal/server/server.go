@@ -47,17 +47,17 @@ func Run() {
 	routerService := routers.NewService(routerRepo, cfg)
 	planRepo := plans.NewRepository(db)
 	planService := plans.NewService(planRepo)
+	voucherRepo := vouchers.NewRepository(db)
+	voucherService := vouchers.NewService(voucherRepo)
+	voucherService.SetRadiusSyncer(radiusService)
 	protected := api.Group("", authHandler.RequireAuth)
 	routers.NewHandler(routerService).RegisterRoutes(protected)
 	provisioning.NewHandler(provisioning.NewService(routerRepo, cfg, radiusService)).RegisterRoutes(api)
 
-	plans.NewHandler(planService).RegisterRoutes(api)
+	plans.NewHandler(planService, voucherService).RegisterRoutes(api)
 
 	radius.NewHandler(radiusService).RegisterRoutes(api)
 
-	voucherRepo := vouchers.NewRepository(db)
-	voucherService := vouchers.NewService(voucherRepo)
-	voucherService.SetRadiusSyncer(radiusService)
 	vouchers.NewHandler(voucherService).RegisterRoutes(api)
 
 	app.Get("/", func(c *fiber.Ctx) error {

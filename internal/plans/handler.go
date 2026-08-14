@@ -6,11 +6,16 @@ import (
 )
 
 type Handler struct {
-	service *Service
+	service          *Service
+	voucherGenerator OnlineVoucherGenerator
 }
 
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+type OnlineVoucherGenerator interface {
+	GenerateOnlineVoucherCount(planID uuid.UUID) (int, error)
+}
+
+func NewHandler(service *Service, voucherGenerator OnlineVoucherGenerator) *Handler {
+	return &Handler{service: service, voucherGenerator: voucherGenerator}
 }
 
 func (h *Handler) RegisterRoutes(router fiber.Router) {
@@ -28,6 +33,13 @@ func (h *Handler) create(c *fiber.Ctx) error {
 	created, err := h.service.Create(plan)
 	if err != nil {
 		return err
+	}
+	if h.voucherGenerator != nil {
+		count, err := h.voucherGenerator.GenerateOnlineVoucherCount(created.ID)
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "plan created but mobile money online vouchers could not be generated: "+err.Error())
+		}
+		created.OnlineVouchersCreated = count
 	}
 	return c.Status(fiber.StatusCreated).JSON(created)
 }

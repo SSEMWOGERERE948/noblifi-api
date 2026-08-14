@@ -22,6 +22,8 @@ func (h *Handler) generate(c *fiber.Ctx) error {
 	var input struct {
 		PlanID   string `json:"plan_id"`
 		Quantity int    `json:"quantity"`
+		Template string `json:"template"`
+		Pattern  string `json:"pattern"`
 	}
 	if err := c.BodyParser(&input); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
@@ -30,9 +32,14 @@ func (h *Handler) generate(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid plan id")
 	}
-	generated, err := h.service.Generate(planID, input.Quantity)
+	generated, err := h.service.GeneratePhysical(GenerateInput{
+		PlanID:   planID,
+		Quantity: input.Quantity,
+		Template: input.Template,
+		Pattern:  input.Pattern,
+	})
 	if err != nil {
-		return err
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 	return c.Status(fiber.StatusCreated).JSON(generated)
 }
