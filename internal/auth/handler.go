@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/noblifi/noblifi/backend/internal/database"
 )
 
 type Handler struct {
@@ -18,6 +19,7 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Post("/auth/signup", h.signup)
 	router.Post("/auth/login", h.login)
 	router.Get("/auth/me", h.me)
+	router.Get("/users", h.RequireAuth, h.requireSuperadmin, h.users)
 }
 
 func (h *Handler) RequireAuth(c *fiber.Ctx) error {
@@ -42,6 +44,17 @@ func (h *Handler) RequireAuth(c *fiber.Ctx) error {
 	}
 
 	c.Locals("user", user)
+	return c.Next()
+}
+
+func (h *Handler) requireSuperadmin(c *fiber.Ctx) error {
+	user, ok := c.Locals("user").(database.User)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing authenticated user"})
+	}
+	if user.Role != "superadmin" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "superadmin role required"})
+	}
 	return c.Next()
 }
 
@@ -87,4 +100,12 @@ func (h *Handler) me(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"user": user})
+}
+
+func (h *Handler) users(c *fiber.Ctx) error {
+	users, err := h.service.ListUsers()
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "could not list users")
+	}
+	return c.JSON(users)
 }

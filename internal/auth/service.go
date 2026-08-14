@@ -124,12 +124,15 @@ func (s *Service) tokenFor(user database.User) (string, error) {
 }
 
 func (s *Service) SeedAdmin() error {
-	var count int64
-	if err := s.db.Model(&database.User{}).Where("email = ?", "admin@noblifi.local").Count(&count).Error; err != nil {
-		return err
-	}
-	if count > 0 {
+	var user database.User
+	if err := s.db.Where("email = ?", "admin@noblifi.local").First(&user).Error; err == nil {
+		if user.Role != "superadmin" {
+			user.Role = "superadmin"
+			return s.db.Save(&user).Error
+		}
 		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
 	if err != nil {
@@ -139,6 +142,12 @@ func (s *Service) SeedAdmin() error {
 		Name:         "NobliFi Admin",
 		Email:        "admin@noblifi.local",
 		PasswordHash: string(hash),
-		Role:         "admin",
+		Role:         "superadmin",
 	}).Error
+}
+
+func (s *Service) ListUsers() ([]database.User, error) {
+	var users []database.User
+	err := s.db.Order("created_at desc").Find(&users).Error
+	return users, err
 }
