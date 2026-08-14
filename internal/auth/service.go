@@ -90,6 +90,9 @@ func (s *Service) UserFromToken(rawToken string) (database.User, error) {
 		}
 		return []byte(s.jwtSecret), nil
 	})
+	if errors.Is(err, jwt.ErrTokenExpired) {
+		return database.User{}, errors.New("expired token")
+	}
 	if err != nil || !parsed.Valid {
 		return database.User{}, errors.New("invalid token")
 	}

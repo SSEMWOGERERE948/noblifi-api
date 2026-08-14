@@ -20,6 +20,31 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Get("/auth/me", h.me)
 }
 
+func (h *Handler) RequireAuth(c *fiber.Ctx) error {
+	authHeader := c.Get(fiber.HeaderAuthorization)
+	if authHeader == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing authorization header"})
+	}
+
+	const prefix = "Bearer "
+	if !strings.HasPrefix(authHeader, prefix) {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid authorization header"})
+	}
+
+	token := strings.TrimSpace(strings.TrimPrefix(authHeader, prefix))
+	if token == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing bearer token"})
+	}
+
+	user, err := h.service.UserFromToken(token)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	c.Locals("user", user)
+	return c.Next()
+}
+
 func (h *Handler) signup(c *fiber.Ctx) error {
 	var input SignupInput
 	if err := c.BodyParser(&input); err != nil {
@@ -48,13 +73,18 @@ func (h *Handler) login(c *fiber.Ctx) error {
 }
 
 func (h *Handler) me(c *fiber.Ctx) error {
-	token := strings.TrimPrefix(c.Get(fiber.HeaderAuthorization), "Bearer ")
-	if token == "" {
-		return fiber.NewError(fiber.StatusUnauthorized, "missing bearer token")
+	authHeader := c.Get(fiber.HeaderAuthorization)
+	if authHeader == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing authorization header"})
 	}
+	const prefix = "Bearer "
+	if !strings.HasPrefix(authHeader, prefix) {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid authorization header"})
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(authHeader, prefix))
 	user, err := h.service.UserFromToken(token)
 	if err != nil {
-		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"user": user})
 }

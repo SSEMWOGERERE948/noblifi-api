@@ -27,7 +27,7 @@ func Run() {
 
 	app := fiber.New(fiber.Config{AppName: "NobliFi API"})
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "*",
+		AllowOrigins: "https://noblifi-frontend.vercel.app,http://localhost:3000,http://localhost:3001,http://localhost:3002",
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
 		AllowMethods: "GET,POST,PUT,PATCH,DELETE,OPTIONS",
 	}))
@@ -38,7 +38,8 @@ func Run() {
 	if err := authService.SeedAdmin(); err != nil {
 		log.Printf("seed admin failed: %v", err)
 	}
-	auth.NewHandler(authService).RegisterRoutes(api)
+	authHandler := auth.NewHandler(authService)
+	authHandler.RegisterRoutes(api)
 
 	routerRepo := routers.NewRepository(db)
 	radiusService := radius.NewService(db)
@@ -46,7 +47,8 @@ func Run() {
 	routerService := routers.NewService(routerRepo, cfg)
 	planRepo := plans.NewRepository(db)
 	planService := plans.NewService(planRepo)
-	routers.NewHandler(routerService).RegisterRoutes(api)
+	protected := api.Group("", authHandler.RequireAuth)
+	routers.NewHandler(routerService).RegisterRoutes(protected)
 	provisioning.NewHandler(provisioning.NewService(routerRepo, cfg, radiusService)).RegisterRoutes(api)
 
 	plans.NewHandler(planService).RegisterRoutes(api)
