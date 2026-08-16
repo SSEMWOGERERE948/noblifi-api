@@ -10,26 +10,35 @@ func NewService(repo *Repository) *Service {
 	return &Service{repo: repo}
 }
 
-func (s *Service) Create(plan Plan) (Plan, error) {
+func (s *Service) Create(plan Plan, userID *uuid.UUID, isSuperadmin bool) (Plan, error) {
 	plan.IsActive = true
+	if !isSuperadmin && userID != nil {
+		plan.UserID = userID
+	}
 	err := s.repo.Create(&plan)
 	return plan, err
 }
 
-func (s *Service) List() ([]Plan, error) {
-	return s.repo.List()
+func (s *Service) List(userID *uuid.UUID, isSuperadmin bool) ([]Plan, error) {
+	if isSuperadmin || userID == nil {
+		return s.repo.List()
+	}
+	return s.repo.ListForUser(*userID)
 }
 
 func (s *Service) ActiveList() ([]Plan, error) {
 	return s.repo.ActiveList()
 }
 
-func (s *Service) Find(id uuid.UUID) (Plan, error) {
-	return s.repo.Find(id)
+func (s *Service) Find(id uuid.UUID, userID *uuid.UUID, isSuperadmin bool) (Plan, error) {
+	if isSuperadmin || userID == nil {
+		return s.repo.Find(id)
+	}
+	return s.repo.FindForUser(id, *userID)
 }
 
-func (s *Service) Patch(id uuid.UUID, input Plan) (Plan, error) {
-	plan, err := s.repo.Find(id)
+func (s *Service) Patch(id uuid.UUID, input Plan, userID *uuid.UUID, isSuperadmin bool) (Plan, error) {
+	plan, err := s.Find(id, userID, isSuperadmin)
 	if err != nil {
 		return plan, err
 	}

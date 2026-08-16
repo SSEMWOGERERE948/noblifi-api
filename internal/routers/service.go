@@ -1,4 +1,4 @@
-package routers
+﻿package routers
 
 import (
 	"crypto/rand"
@@ -31,7 +31,7 @@ type CreateRouterInput struct {
 	ExpectedModel string `json:"expected_model"`
 }
 
-func (s *Service) Create(input CreateRouterInput) (Router, error) {
+func (s *Service) Create(input CreateRouterInput, userID *uuid.UUID, isSuperadmin bool) (Router, error) {
 	expires := time.Now().Add(time.Duration(s.cfg.ProvisioningTokenTTLHour) * time.Hour)
 	var siteName *string
 	if strings.TrimSpace(input.SiteName) != "" {
@@ -54,6 +54,9 @@ func (s *Service) Create(input CreateRouterInput) (Router, error) {
 		ClaimToken:          randomToken(),
 		ClaimTokenExpiresAt: &expires,
 	}
+	if !isSuperadmin && userID != nil {
+		router.UserID = userID
+	}
 	err := s.repo.Create(&router)
 	if err != nil {
 		return router, err
@@ -61,15 +64,26 @@ func (s *Service) Create(input CreateRouterInput) (Router, error) {
 	return router, nil
 }
 
-func (s *Service) List() ([]Router, error) {
-	return s.repo.List()
+func (s *Service) List(userID *uuid.UUID, isSuperadmin bool) ([]Router, error) {
+	if isSuperadmin || userID == nil {
+		return s.repo.List()
+	}
+	return s.repo.ListForUser(*userID)
 }
 
-func (s *Service) Find(id uuid.UUID) (Router, error) {
-	return s.repo.Find(id)
+func (s *Service) Find(id uuid.UUID, userID *uuid.UUID, isSuperadmin bool) (Router, error) {
+	if isSuperadmin || userID == nil {
+		return s.repo.Find(id)
+	}
+	return s.repo.FindForUser(id, *userID)
 }
 
-func (s *Service) NetworkProfile(routerID uuid.UUID) (RouterNetworkProfile, error) {
+func (s *Service) NetworkProfile(routerID uuid.UUID, userID *uuid.UUID, isSuperadmin bool) (RouterNetworkProfile, error) {
+	if !isSuperadmin && userID != nil {
+		if _, err := s.repo.FindForUser(routerID, *userID); err != nil {
+			return RouterNetworkProfile{}, err
+		}
+	}
 	profile, err := s.repo.NetworkProfile(routerID)
 	if err == nil {
 		s.normalizeNetworkProfile(&profile)
@@ -83,8 +97,8 @@ func (s *Service) NetworkProfile(routerID uuid.UUID) (RouterNetworkProfile, erro
 	return profile, s.repo.CreateNetworkProfile(&profile)
 }
 
-func (s *Service) UpdateNetworkProfile(routerID uuid.UUID, input RouterNetworkProfile) (RouterNetworkProfile, error) {
-	profile, err := s.NetworkProfile(routerID)
+func (s *Service) UpdateNetworkProfile(routerID uuid.UUID, input RouterNetworkProfile, userID *uuid.UUID, isSuperadmin bool) (RouterNetworkProfile, error) {
+	profile, err := s.NetworkProfile(routerID, userID, isSuperadmin)
 	if err != nil {
 		return profile, err
 	}
@@ -93,8 +107,8 @@ func (s *Service) UpdateNetworkProfile(routerID uuid.UUID, input RouterNetworkPr
 	return profile, err
 }
 
-func (s *Service) RegenerateClaimToken(id uuid.UUID) (Router, error) {
-	router, err := s.repo.Find(id)
+func (s *Service) RegenerateClaimToken(id uuid.UUID, userID *uuid.UUID, isSuperadmin bool) (Router, error) {
+	router, err := s.Find(id, userID, isSuperadmin)
 	if err != nil {
 		return router, err
 	}
@@ -105,7 +119,12 @@ func (s *Service) RegenerateClaimToken(id uuid.UUID) (Router, error) {
 	return router, err
 }
 
-func (s *Service) SavePortAssignments(routerID uuid.UUID, inputs []portprofiles.Assignment) error {
+func (s *Service) SavePortAssignments(routerID uuid.UUID, inputs []portprofiles.Assignment, userID *uuid.UUID, isSuperadmin bool) error {
+	if !isSuperadmin && userID != nil {
+		if _, err := s.repo.FindForUser(routerID, *userID); err != nil {
+			return err
+		}
+	}
 	if err := portprofiles.Validate(inputs); err != nil {
 		return err
 	}
@@ -189,12 +208,17 @@ type ConfigPreview struct {
 	Script  string               `json:"script"`
 }
 
-func (s *Service) SaveRemoteAccess(routerID uuid.UUID, input RemoteAccessInput) (RouterSetupSession, error) {
+func (s *Service) SaveRemoteAccess(routerID uuid.UUID, input RemoteAccessInput, userID *uuid.UUID, isSuperadmin bool) (RouterSetupSession, error) {
+	if !isSuperadmin && userID != nil {
+		if _, err := s.repo.FindForUser(routerID, *userID); err != nil {
+			return RouterSetupSession{}, err
+		}
+	}
 	method := strings.TrimSpace(input.RemoteAccessMethod)
 	if method != "bootstrap" && method != "direct_api" {
 		return RouterSetupSession{}, errors.New("remote_access_method must be bootstrap or direct_api")
 	}
-	router, err := s.repo.Find(routerID)
+	router, err := s.repo.FindForUser(routerID, *userID)
 	if err != nil {
 		return RouterSetupSession{}, err
 	}
@@ -436,7 +460,7 @@ func renderOptions(cfg config.Config) portprofiles.RenderOptions {
 }
 
 func (s *Service) renderOptionsForRouter(routerID uuid.UUID) (portprofiles.RenderOptions, error) {
-	profile, err := s.NetworkProfile(routerID)
+	profile, err := s.NetworkProfile(routerID, nil, true)
 	if err != nil {
 		return portprofiles.RenderOptions{}, err
 	}

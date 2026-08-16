@@ -8,6 +8,7 @@ import (
 
 type Voucher struct {
 	ID        uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	UserID    *uuid.UUID `gorm:"type:uuid;index" json:"user_id,omitempty"`
 	Code      string     `gorm:"uniqueIndex" json:"code"`
 	PlanID    uuid.UUID  `gorm:"type:uuid;index" json:"plan_id"`
 	Channel   string     `gorm:"default:physical;index" json:"channel"`

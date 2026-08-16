@@ -54,25 +54,25 @@ type GenerateInput struct {
 	Pattern  string
 }
 
-func (s *Service) Generate(planID uuid.UUID, quantity int) ([]Voucher, error) {
-	return s.GeneratePhysical(GenerateInput{PlanID: planID, Quantity: quantity, Template: "compact", Pattern: "alphanumeric"})
+func (s *Service) Generate(planID uuid.UUID, quantity int, userID *uuid.UUID, isSuperadmin bool) ([]Voucher, error) {
+	return s.GeneratePhysical(GenerateInput{PlanID: planID, Quantity: quantity, Template: "compact", Pattern: "alphanumeric"}, userID, isSuperadmin)
 }
 
-func (s *Service) GenerateOnlineVouchers(planID uuid.UUID) ([]Voucher, error) {
+func (s *Service) GenerateOnlineVouchers(planID uuid.UUID, userID *uuid.UUID, isSuperadmin bool) ([]Voucher, error) {
 	return s.generate(GenerateInput{
 		PlanID:   planID,
 		Quantity: DefaultOnlinePoolSize,
 		Channel:  ChannelMobileMoneyOnline,
 		Pattern:  "alphanumeric",
-	})
+	}, userID, isSuperadmin)
 }
 
-func (s *Service) GenerateOnlineVoucherCount(planID uuid.UUID) (int, error) {
-	items, err := s.GenerateOnlineVouchers(planID)
+func (s *Service) GenerateOnlineVoucherCount(planID uuid.UUID, userID *uuid.UUID, isSuperadmin bool) (int, error) {
+	items, err := s.GenerateOnlineVouchers(planID, userID, isSuperadmin)
 	return len(items), err
 }
 
-func (s *Service) GeneratePhysical(input GenerateInput) ([]Voucher, error) {
+func (s *Service) GeneratePhysical(input GenerateInput, userID *uuid.UUID, isSuperadmin bool) ([]Voucher, error) {
 	if input.Template == "" {
 		input.Template = "compact"
 	}
@@ -86,10 +86,10 @@ func (s *Service) GeneratePhysical(input GenerateInput) ([]Voucher, error) {
 		return nil, fmt.Errorf("unknown voucher code pattern: %s", input.Pattern)
 	}
 	input.Channel = ChannelPhysical
-	return s.generate(input)
+	return s.generate(input, userID, isSuperadmin)
 }
 
-func (s *Service) generate(input GenerateInput) ([]Voucher, error) {
+func (s *Service) generate(input GenerateInput, userID *uuid.UUID, isSuperadmin bool) ([]Voucher, error) {
 	quantity := input.Quantity
 	if quantity < 1 {
 		quantity = 1
@@ -116,6 +116,9 @@ func (s *Service) generate(input GenerateInput) ([]Voucher, error) {
 			Pattern: &pattern,
 			Status:  "unused",
 		}
+		if !isSuperadmin && userID != nil {
+			item.UserID = userID
+		}
 		if channel == ChannelPhysical {
 			template := input.Template
 			item.Template = &template
@@ -136,8 +139,11 @@ func (s *Service) generate(input GenerateInput) ([]Voucher, error) {
 	return items, err
 }
 
-func (s *Service) List() ([]Voucher, error) {
-	return s.repo.List()
+func (s *Service) List(userID *uuid.UUID, isSuperadmin bool) ([]Voucher, error) {
+	if isSuperadmin || userID == nil {
+		return s.repo.List()
+	}
+	return s.repo.ListForUser(*userID)
 }
 
 func code(pattern string) string {

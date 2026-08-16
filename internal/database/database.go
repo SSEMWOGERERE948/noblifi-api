@@ -16,6 +16,7 @@ func Connect(databaseURL string) (*gorm.DB, error) {
 func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&User{},
+		&AuthCode{},
 		&Site{},
 		&routers.Router{},
 		&routers.RouterSetupSession{},

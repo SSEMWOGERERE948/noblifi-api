@@ -19,6 +19,10 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 }
 
 func (h *Handler) generate(c *fiber.Ctx) error {
+	if user, ok := c.Locals("user").(interface{ TrialExpired() bool }); ok && user.TrialExpired() {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "your free trial has expired. Please subscribe to continue."})
+	}
+
 	var input struct {
 		PlanID   string `json:"plan_id"`
 		Quantity int    `json:"quantity"`
@@ -32,12 +36,13 @@ func (h *Handler) generate(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid plan id")
 	}
+	userID, isSuperadmin := currentUserScope(c)
 	generated, err := h.service.GeneratePhysical(GenerateInput{
 		PlanID:   planID,
 		Quantity: input.Quantity,
 		Template: input.Template,
 		Pattern:  input.Pattern,
-	})
+	}, userID, isSuperadmin)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
@@ -45,9 +50,22 @@ func (h *Handler) generate(c *fiber.Ctx) error {
 }
 
 func (h *Handler) list(c *fiber.Ctx) error {
-	vouchers, err := h.service.List()
+	userID, isSuperadmin := currentUserScope(c)
+	vouchers, err := h.service.List(userID, isSuperadmin)
 	if err != nil {
 		return err
 	}
 	return c.JSON(vouchers)
+}
+
+func currentUserScope(c *fiber.Ctx) (*uuid.UUID, bool) {
+	user, ok := c.Locals("user").(interface {
+		GetID() uuid.UUID
+		GetRole() string
+	})
+	if !ok {
+		return nil, false
+	}
+	id := user.GetID()
+	return &id, user.GetRole() == "superadmin"
 }

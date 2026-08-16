@@ -62,7 +62,7 @@ func (s *Service) PrepareWireGuard(routerID uuid.UUID) (WireGuardSetupResponse, 
 		return WireGuardSetupResponse{}, err
 	}
 
-	profile, err := s.NetworkProfile(routerID)
+	profile, err := s.NetworkProfile(routerID, nil, true)
 	if err != nil {
 		return WireGuardSetupResponse{}, err
 	}

@@ -40,7 +40,8 @@ func (h *Handler) create(c *fiber.Ctx) error {
 	if input.Name == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "router name is required")
 	}
-	router, err := h.service.Create(input)
+	userID, isSuperadmin := currentUserScope(c)
+	router, err := h.service.Create(input, userID, isSuperadmin)
 	if err != nil {
 		return err
 	}
@@ -48,7 +49,8 @@ func (h *Handler) create(c *fiber.Ctx) error {
 }
 
 func (h *Handler) list(c *fiber.Ctx) error {
-	routers, err := h.service.List()
+	userID, isSuperadmin := currentUserScope(c)
+	routers, err := h.service.List(userID, isSuperadmin)
 	if err != nil {
 		return err
 	}
@@ -68,7 +70,8 @@ func (h *Handler) regenerateClaimToken(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
 	}
-	router, err := h.service.RegenerateClaimToken(id)
+	userID, isSuperadmin := currentUserScope(c)
+	router, err := h.service.RegenerateClaimToken(id, userID, isSuperadmin)
 	if err != nil {
 		return err
 	}
@@ -98,7 +101,8 @@ func (h *Handler) portAssignments(c *fiber.Ctx) error {
 	if err := c.BodyParser(&input); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
 	}
-	if err := h.service.SavePortAssignments(id, input.Assignments); err != nil {
+	userID, isSuperadmin := currentUserScope(c)
+	if err := h.service.SavePortAssignments(id, input.Assignments, userID, isSuperadmin); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 	return c.JSON(fiber.Map{"status": "saved", "assignments": input.Assignments})
@@ -113,7 +117,8 @@ func (h *Handler) remoteAccess(c *fiber.Ctx) error {
 	if err := c.BodyParser(&input); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
 	}
-	session, err := h.service.SaveRemoteAccess(id, input)
+	userID, isSuperadmin := currentUserScope(c)
+	session, err := h.service.SaveRemoteAccess(id, input, userID, isSuperadmin)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
@@ -141,7 +146,8 @@ func (h *Handler) networkProfile(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
 	}
-	profile, err := h.service.NetworkProfile(id)
+	userID, isSuperadmin := currentUserScope(c)
+	profile, err := h.service.NetworkProfile(id, userID, isSuperadmin)
 	if err != nil {
 		return err
 	}
@@ -157,7 +163,8 @@ func (h *Handler) updateNetworkProfile(c *fiber.Ctx) error {
 	if err := c.BodyParser(&input); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
 	}
-	profile, err := h.service.UpdateNetworkProfile(id, input)
+	userID, isSuperadmin := currentUserScope(c)
+	profile, err := h.service.UpdateNetworkProfile(id, input, userID, isSuperadmin)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
@@ -228,5 +235,18 @@ func (h *Handler) find(c *fiber.Ctx) (Router, error) {
 	if err != nil {
 		return Router{}, fiber.NewError(fiber.StatusBadRequest, "invalid router id")
 	}
-	return h.service.Find(id)
+	userID, isSuperadmin := currentUserScope(c)
+	return h.service.Find(id, userID, isSuperadmin)
+}
+
+func currentUserScope(c *fiber.Ctx) (*uuid.UUID, bool) {
+	user, ok := c.Locals("user").(interface {
+		GetID() uuid.UUID
+		GetRole() string
+	})
+	if !ok {
+		return nil, false
+	}
+	id := user.GetID()
+	return &id, user.GetRole() == "superadmin"
 }

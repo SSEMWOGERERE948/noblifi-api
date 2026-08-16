@@ -54,11 +54,11 @@ func Run() {
 	routers.NewHandler(routerService).RegisterRoutes(protected)
 	provisioning.NewHandler(provisioning.NewService(routerRepo, cfg, radiusService)).RegisterRoutes(api)
 
-	plans.NewHandler(planService, voucherService).RegisterRoutes(api)
+	plans.NewHandler(planService, voucherService).RegisterRoutes(protected)
 
 	radius.NewHandler(radiusService).RegisterRoutes(api)
 
-	vouchers.NewHandler(voucherService).RegisterRoutes(api)
+	vouchers.NewHandler(voucherService).RegisterRoutes(protected)
 
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{

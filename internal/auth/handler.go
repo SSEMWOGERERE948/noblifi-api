@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -17,7 +18,11 @@ func NewHandler(service *Service) *Handler {
 
 func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Post("/auth/signup", h.signup)
+	router.Post("/auth/verify-email", h.verifyEmail)
+	router.Post("/auth/resend-verification", h.resendVerification)
 	router.Post("/auth/login", h.login)
+	router.Post("/auth/request-password-reset", h.requestPasswordReset)
+	router.Post("/auth/reset-password", h.resetPassword)
 	router.Get("/auth/me", h.me)
 	router.Get("/users", h.RequireAuth, h.requireSuperadmin, h.users)
 }
@@ -63,11 +68,47 @@ func (h *Handler) signup(c *fiber.Ctx) error {
 	if err := c.BodyParser(&input); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
 	}
-	token, user, err := h.service.Signup(input)
+	user, delivery, err := h.service.Signup(input)
+	if err != nil {
+		if errors.Is(err, ErrEmailAlreadyRegistered) {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "email is already registered"})
+		}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"message":  verificationMessage(delivery),
+		"user":     user,
+		"delivery": delivery,
+	})
+}
+
+func (h *Handler) verifyEmail(c *fiber.Ctx) error {
+	var input struct {
+		Email string `json:"email"`
+		Code  string `json:"code"`
+	}
+	if err := c.BodyParser(&input); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	}
+	token, user, err := h.service.VerifyEmail(input.Email, input.Code)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"token": token, "user": user})
+	return c.JSON(fiber.Map{"token": token, "user": user})
+}
+
+func (h *Handler) resendVerification(c *fiber.Ctx) error {
+	var input struct {
+		Email string `json:"email"`
+	}
+	if err := c.BodyParser(&input); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	}
+	delivery, err := h.service.ResendVerification(input.Email)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	return c.JSON(fiber.Map{"message": verificationMessage(delivery), "delivery": delivery})
 }
 
 func (h *Handler) login(c *fiber.Ctx) error {
@@ -83,6 +124,34 @@ func (h *Handler) login(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
 	}
 	return c.JSON(fiber.Map{"token": token, "user": user})
+}
+
+func (h *Handler) requestPasswordReset(c *fiber.Ctx) error {
+	var input struct {
+		Email string `json:"email"`
+	}
+	if err := c.BodyParser(&input); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	}
+	if err := h.service.RequestPasswordReset(input.Email); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "could not start password reset")
+	}
+	return c.JSON(fiber.Map{"message": "if the email exists, a reset code has been sent"})
+}
+
+func (h *Handler) resetPassword(c *fiber.Ctx) error {
+	var input struct {
+		Email    string `json:"email"`
+		Code     string `json:"code"`
+		Password string `json:"password"`
+	}
+	if err := c.BodyParser(&input); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	}
+	if err := h.service.ResetPassword(input.Email, input.Code, input.Password); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	return c.JSON(fiber.Map{"message": "password changed"})
 }
 
 func (h *Handler) me(c *fiber.Ctx) error {
@@ -108,4 +177,14 @@ func (h *Handler) users(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "could not list users")
 	}
 	return c.JSON(users)
+}
+
+func verificationMessage(delivery CodeDelivery) string {
+	if delivery.Message != "" {
+		return delivery.Message
+	}
+	if delivery.Sent {
+		return "verification code sent"
+	}
+	return "verification code created"
 }

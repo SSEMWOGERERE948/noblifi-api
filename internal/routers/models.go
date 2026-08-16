@@ -9,6 +9,7 @@ import (
 
 type Router struct {
 	ID                    uuid.UUID              `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	UserID                *uuid.UUID             `gorm:"type:uuid;index" json:"user_id,omitempty"`
 	SiteID                *uuid.UUID             `gorm:"type:uuid" json:"site_id"`
 	Name                  string                 `json:"name"`
 	SiteName              *string                `json:"site_name"`
