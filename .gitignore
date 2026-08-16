@@ -30,3 +30,5 @@ coverage.out
 Thumbs.db
 .idea/
 .vscode/
+.env 
+app.yaml 
