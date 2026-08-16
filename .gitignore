@@ -34,3 +34,8 @@ Thumbs.db
 app.yaml 
 .env
 app.yaml
+.env
+.env.local
+.env.development
+.env.production
+.env.*.local
