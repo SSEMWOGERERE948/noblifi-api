@@ -2,9 +2,13 @@ node_modules/
 
 # Environment files
 .env
+.env.*
 .env.local
 .env.*.local
 !.env.example
+
+# App deployment config with secrets
+app.yaml
 
 # Logs
 *.log
