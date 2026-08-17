@@ -35,12 +35,12 @@ func Run() {
 
 	api := app.Group("/api/v1")
 
+	// --- Services (no routes registered yet) ---
 	authService := auth.NewService(db, cfg.JWTSecret)
 	if err := authService.SeedAdmin(); err != nil {
 		log.Printf("seed admin failed: %v", err)
 	}
 	authHandler := auth.NewHandler(authService)
-	authHandler.RegisterRoutes(api)
 
 	routerRepo := routers.NewRepository(db)
 	radiusService := radius.NewService(db)
@@ -52,16 +52,24 @@ func Run() {
 	voucherService := vouchers.NewService(voucherRepo)
 	voucherService.SetRadiusSyncer(radiusService)
 	paymentsService := payments.NewService(db, cfg, radiusService)
+	provisioningService := provisioning.NewService(routerRepo, cfg, radiusService)
+
+	// --- Register every PUBLIC route BEFORE the protected group exists. ---
+	// IMPORTANT: In Fiber v2, api.Group("", authHandler.RequireAuth) attaches
+	// RequireAuth as prefix middleware on "/api/v1" itself. Any route registered
+	// on `api` (or any group sharing that prefix) AFTER that call also inherits
+	// RequireAuth, even though it was never passed the `protected` variable.
+	// Registering all public routes first avoids that trap.
+	authHandler.RegisterRoutes(api)
 	payments.NewHandler(paymentsService).RegisterRoutes(api)
 	plans.NewHandler(planService, voucherService).RegisterPublicRoutes(api)
-	protected := api.Group("", authHandler.RequireAuth)
-	routers.NewHandler(routerService).RegisterRoutes(protected)
-	provisioning.NewHandler(provisioning.NewService(routerRepo, cfg, radiusService)).RegisterRoutes(api)
-
-	plans.NewHandler(planService, voucherService).RegisterRoutes(protected)
-
+	provisioning.NewHandler(provisioningService).RegisterRoutes(api)
 	radius.NewHandler(radiusService).RegisterRoutes(api)
 
+	// --- NOW create the protected group and register everything requiring auth. ---
+	protected := api.Group("", authHandler.RequireAuth)
+	routers.NewHandler(routerService).RegisterRoutes(protected)
+	plans.NewHandler(planService, voucherService).RegisterRoutes(protected)
 	vouchers.NewHandler(voucherService).RegisterRoutes(protected)
 	paymentsProtected := protected.Group("")
 	payments.NewHandler(paymentsService).RegisterProtectedRoutes(paymentsProtected)

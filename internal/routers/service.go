@@ -208,42 +208,130 @@ type ConfigPreview struct {
 	Script  string               `json:"script"`
 }
 
-func (s *Service) SaveRemoteAccess(routerID uuid.UUID, input RemoteAccessInput, userID *uuid.UUID, isSuperadmin bool) (RouterSetupSession, error) {
-	if !isSuperadmin && userID != nil {
-		if _, err := s.repo.FindForUser(routerID, *userID); err != nil {
+func (s *Service) SaveRemoteAccess(
+	routerID uuid.UUID,
+	input RemoteAccessInput,
+	userID *uuid.UUID,
+	isSuperadmin bool,
+) (RouterSetupSession, error) {
+	// Require a valid scoped user for ordinary accounts.
+	// Superadmin is permitted to have userID == nil.
+	if !isSuperadmin {
+		if userID == nil {
+			return RouterSetupSession{},
+				errors.New(
+					"authenticated user is required",
+				)
+		}
+
+		if _, err := s.repo.FindForUser(
+			routerID,
+			*userID,
+		); err != nil {
 			return RouterSetupSession{}, err
 		}
 	}
-	method := strings.TrimSpace(input.RemoteAccessMethod)
-	if method != "bootstrap" && method != "direct_api" {
-		return RouterSetupSession{}, errors.New("remote_access_method must be bootstrap or direct_api")
+
+	method := strings.TrimSpace(
+		input.RemoteAccessMethod,
+	)
+
+	if method != "wireguard" &&
+		method != "bootstrap" &&
+		method != "direct_api" {
+		return RouterSetupSession{},
+			errors.New(
+				"remote_access_method must be wireguard, bootstrap, or direct_api",
+			)
 	}
-	router, err := s.repo.FindForUser(routerID, *userID)
+
+	// This avoids the previous unconditional *userID dereference,
+	// which could fail for superadmin.
+	router, err := s.Find(
+		routerID,
+		userID,
+		isSuperadmin,
+	)
+
 	if err != nil {
 		return RouterSetupSession{}, err
 	}
-	if method == "direct_api" {
-		if input.Host == "" || input.APIPort == 0 || input.Username == "" || input.Password == "" {
-			return RouterSetupSession{}, errors.New("host, api_port, username, and password are required for direct API access")
-		}
-		if err := TestRouterConnection(input.Host, input.APIPort, input.Username, input.Password); err != nil {
+
+	switch method {
+	case "wireguard":
+		// Restore the completed WireGuard orchestration.
+		//
+		// PrepareWireGuard:
+		// 1. validates the configured VPS WireGuard environment;
+		// 2. allocates the router's tunnel IP;
+		// 3. stores the tunnel IP as ManagementIP;
+		// 4. prepares the router WireGuard state;
+		// 5. updates the router NetworkProfile so RADIUS uses the
+		//    WireGuard VPS/server IP.
+		if _, err := s.PrepareWireGuard(
+			routerID,
+		); err != nil {
 			return RouterSetupSession{}, err
 		}
+
+	case "direct_api":
+		if input.Host == "" ||
+			input.APIPort == 0 ||
+			input.Username == "" ||
+			input.Password == "" {
+			return RouterSetupSession{},
+				errors.New(
+					"host, api_port, username, and password are required for direct API access",
+				)
+		}
+
+		if err := TestRouterConnection(
+			input.Host,
+			input.APIPort,
+			input.Username,
+			input.Password,
+		); err != nil {
+			return RouterSetupSession{}, err
+		}
+
 		router.ManagementIP = &input.Host
 		router.APIUsername = &input.Username
-		encrypted := "encrypted-placeholder:" + input.Password
-		router.APIPasswordEncrypted = &encrypted
-		if err := s.repo.Save(&router); err != nil {
+
+		encrypted :=
+			"encrypted-placeholder:" +
+				input.Password
+
+		router.APIPasswordEncrypted =
+			&encrypted
+
+		if err := s.repo.Save(
+			&router,
+		); err != nil {
 			return RouterSetupSession{}, err
 		}
+
+	case "bootstrap":
+		// Bootstrap uses the claim-token provisioning flow and
+		// does not need to overwrite ManagementIP here.
 	}
-	session, err := s.repo.EnsureSetupSession(routerID)
+
+	session, err :=
+		s.repo.EnsureSetupSession(routerID)
+
 	if err != nil {
 		return session, err
 	}
+
 	session.RemoteAccessMethod = &method
-	session.CurrentStep = "method"
-	return session, s.repo.SaveSetupSession(&session)
+
+	if method == "wireguard" {
+		session.CurrentStep = "wireguard"
+	} else {
+		session.CurrentStep = "method"
+	}
+
+	return session,
+		s.repo.SaveSetupSession(&session)
 }
 
 func TestRouterConnection(host string, apiPort int, username, password string) error {
