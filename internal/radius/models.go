@@ -124,3 +124,59 @@ type RadPostAuth struct {
 func (RadPostAuth) TableName() string {
 	return "radpostauth"
 }
+
+// ---------------------------------------------------------
+// NAS / RADIUS accounting records
+// ---------------------------------------------------------
+
+type NAS struct {
+	ID          int64  `gorm:"column:id;primaryKey;autoIncrement"`
+	NASName     string `gorm:"column:nasname;uniqueIndex;not null"`
+	ShortName   string `gorm:"column:shortname;not null"`
+	Type        string `gorm:"column:type;not null;default:'other'"`
+	Ports       *int   `gorm:"column:ports"`
+	Secret      string `gorm:"column:secret;not null"`
+	Server      string `gorm:"column:server"`
+	Community   string `gorm:"column:community"`
+	Description string `gorm:"column:description"`
+}
+
+func (NAS) TableName() string {
+	return "nas"
+}
+
+type RadAcct struct {
+	ID                  int64      `gorm:"column:radacctid;primaryKey;autoIncrement"`
+	AcctSessionID       string     `gorm:"column:acctsessionid;not null"`
+	AcctUniqueID        string     `gorm:"column:acctuniqueid;uniqueIndex;not null"`
+	Username            string     `gorm:"column:username;not null"`
+	GroupName           string     `gorm:"column:groupname;not null;default:''"`
+	Realm               string     `gorm:"column:realm"`
+	NASIPAddress        string     `gorm:"column:nasipaddress"`
+	NASPortID           string     `gorm:"column:nasportid"`
+	NASPortType         string     `gorm:"column:nasporttype"`
+	AcctStartTime       *time.Time `gorm:"column:acctstarttime"`
+	AcctUpdateTime      *time.Time `gorm:"column:acctupdatetime"`
+	AcctStopTime        *time.Time `gorm:"column:acctstoptime"`
+	AcctInterval        *int       `gorm:"column:acctinterval"`
+	AcctSessionTime     *int       `gorm:"column:acctsessiontime"`
+	AcctAuthentic       string     `gorm:"column:acctauthentic"`
+	ConnectInfoStart    string     `gorm:"column:connectinfo_start"`
+	ConnectInfoStop     string     `gorm:"column:connectinfo_stop"`
+	AcctInputOctets     int64      `gorm:"column:acctinputoctets;default:0"`
+	AcctOutputOctets    int64      `gorm:"column:acctoutputoctets;default:0"`
+	CalledStationID     string     `gorm:"column:calledstationid"`
+	CallingStationID    string     `gorm:"column:callingstationid"`
+	AcctTerminateCause  string     `gorm:"column:acctterminatecause"`
+	ServiceType         string     `gorm:"column:servicetype"`
+	FramedProtocol      string     `gorm:"column:framedprotocol"`
+	FramedIPAddress     string     `gorm:"column:framedipaddress"`
+	FramedIPv6Address   string     `gorm:"column:framedipv6address"`
+	FramedIPv6Prefix    string     `gorm:"column:framedipv6prefix"`
+	FramedInterfaceID   string     `gorm:"column:framedinterfaceid"`
+	DelegatedIPv6Prefix string     `gorm:"column:delegatedipv6prefix"`
+}
+
+func (RadAcct) TableName() string {
+	return "radacct"
+}

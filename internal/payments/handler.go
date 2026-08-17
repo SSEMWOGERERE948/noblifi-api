@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/noblifi/noblifi/backend/internal/database"
 )
 
 type Handler struct {
@@ -16,14 +17,43 @@ func NewHandler(service *Service) *Handler {
 
 func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Get("/payments/config", h.config)
-	router.Post("/payments/orders", h.startOrder)
 	router.Get("/payments/orders/:id/status", h.status)
 	router.Get("/payments/iotec/callback", h.callback)
 	router.Post("/payments/iotec/callback", h.callback)
 }
 
+func (h *Handler) RegisterProtectedRoutes(router fiber.Router) {
+	router.Post("/payments/orders", h.startOrderProtected)
+}
+
 func (h *Handler) config(c *fiber.Ctx) error {
 	return c.JSON(h.service.PublicConfig())
+}
+
+func (h *Handler) startOrderProtected(c *fiber.Ctx) error {
+	var input StartOrderInput
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "message": "invalid request body"})
+	}
+
+	// Get authenticated user from context
+	user, ok := c.Locals("user").(database.User)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"success": false, "message": "unauthorized"})
+	}
+
+	// Use authenticated user's ID and email
+	input.UserID = user.ID.String()
+	if input.Email == "" {
+		input.Email = user.Email
+	}
+
+	result, err := h.service.StartOrder(input)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "message": err.Error()})
+	}
+
+	return c.JSON(result)
 }
 
 func (h *Handler) startOrder(c *fiber.Ctx) error {

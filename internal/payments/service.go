@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/noblifi/noblifi/backend/internal/config"
+	"github.com/noblifi/noblifi/backend/internal/database"
 	"github.com/noblifi/noblifi/backend/internal/plans"
 	"github.com/noblifi/noblifi/backend/internal/vouchers"
 	"gorm.io/datatypes"
@@ -33,6 +34,7 @@ type Service struct {
 }
 
 type StartOrderInput struct {
+	UserID string `json:"user_id"`
 	PlanID string `json:"plan_id"`
 	Phone  string `json:"phone"`
 	Email  string `json:"email"`
@@ -78,20 +80,32 @@ func (s *Service) StartOrder(input StartOrderInput) (StartOrderResult, error) {
 		return StartOrderResult{}, err
 	}
 
-	planID, err := uuid.Parse(strings.TrimSpace(input.PlanID))
-	if err != nil {
-		return StartOrderResult{}, errors.New("invalid plan_id")
+	plan := plans.Plan{
+		ID:              uuid.Nil,
+		Name:            "NobliFi Monthly",
+		Price:           database.SubscriptionPriceUGX(s.db),
+		DurationMinutes: 30 * 24 * 60,
+		IsActive:        true,
 	}
 
-	var plan plans.Plan
-	if err := s.db.First(&plan, "id = ? AND is_active = ?", planID, true).Error; err != nil {
-		return StartOrderResult{}, errors.New("package not found")
+	if trimmed := strings.TrimSpace(input.PlanID); trimmed != "" && !strings.EqualFold(trimmed, "subscription") {
+		planID, err := uuid.Parse(trimmed)
+		if err != nil {
+			return StartOrderResult{}, errors.New("invalid plan_id")
+		}
+
+		if err := s.db.First(&plan, "id = ? AND is_active = ?", planID, true).Error; err != nil {
+			return StartOrderResult{}, errors.New("package not found")
+		}
 	}
 	if plan.Price <= 0 {
 		return StartOrderResult{}, errors.New("package price must be greater than zero")
 	}
 	if strings.TrimSpace(input.Phone) == "" {
 		return StartOrderResult{}, errors.New("phone is required for ioTec mobile money collection")
+	}
+	if strings.TrimSpace(input.UserID) == "" {
+		return StartOrderResult{}, errors.New("user_id is required")
 	}
 
 	merchantReference := "NOBLIFI-" + strings.ToUpper(randomHex(8))
@@ -116,12 +130,18 @@ func (s *Service) StartOrder(input StartOrderInput) (StartOrderResult, error) {
 	}
 
 	payload, _ := json.Marshal(response.raw)
+	// Store user_id in the email field if it's a UUID (authenticated payment)
+	// This will be used during subscription activation
+	updateData := map[string]any{
+		"order_tracking_id": response.OrderTrackingID,
+		"provider_payload":  datatypes.JSON(payload),
+	}
+	if strings.TrimSpace(input.UserID) != "" {
+		updateData["email"] = input.UserID
+	}
 	if err := s.db.Model(&PaymentOrder{}).
 		Where("merchant_reference = ?", merchantReference).
-		Updates(map[string]any{
-			"order_tracking_id": response.OrderTrackingID,
-			"provider_payload":  datatypes.JSON(payload),
-		}).Error; err != nil {
+		Updates(updateData).Error; err != nil {
 		return StartOrderResult{}, err
 	}
 
@@ -181,11 +201,17 @@ func (s *Service) applyStatus(order PaymentOrder, status iotecStatusResponse) (O
 
 	var voucherCode string
 	if normalized == "paid" {
-		voucher, err := s.ensureVoucher(&order)
-		if err != nil {
+		if order.PlanID != uuid.Nil {
+			voucher, err := s.ensureVoucher(&order)
+			if err != nil {
+				return OrderStatusResult{}, err
+			}
+			voucherCode = voucher.Code
+		}
+
+		if err := s.activatePlanSubscriptionByUserID(order); err != nil {
 			return OrderStatusResult{}, err
 		}
-		voucherCode = voucher.Code
 	}
 
 	if err := s.db.Save(&order).Error; err != nil {
@@ -202,6 +228,109 @@ func (s *Service) applyStatus(order PaymentOrder, status iotecStatusResponse) (O
 		Voucher:           voucherCode,
 		Payload:           json.RawMessage(payload),
 	}, nil
+}
+
+func (s *Service) activatePlanSubscription(order PaymentOrder) error {
+	return s.activatePlanSubscriptionByEmail(order)
+}
+
+func (s *Service) activatePlanSubscriptionByEmail(order PaymentOrder) error {
+	planName := "NobliFi Monthly"
+	planPrice := database.SubscriptionPriceUGX(s.db)
+
+	if order.PlanID != uuid.Nil {
+		var plan plans.Plan
+		if err := s.db.First(&plan, "id = ?", order.PlanID).Error; err != nil {
+			return fmt.Errorf("plan for subscription not found: %w", err)
+		}
+		planName = plan.Name
+		planPrice = plan.Price
+	}
+
+	var user database.User
+	if err := s.db.Where("email = ?", strings.TrimSpace(order.Email)).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return fmt.Errorf("load subscription user: %w", err)
+	}
+
+	return s.updateUserSubscription(user.ID, planName, planPrice)
+}
+
+func (s *Service) activatePlanSubscriptionByUserID(order PaymentOrder) error {
+	userID, err := uuid.Parse(strings.TrimSpace(order.Email))
+	if err != nil {
+		// Fall back to email lookup if UserID is not provided
+		userIDStr := strings.TrimSpace(order.Email)
+		if userIDStr == "" {
+			return nil
+		}
+		return s.activatePlanSubscriptionByEmail(order)
+	}
+
+	planName := "NobliFi Monthly"
+	planPrice := database.SubscriptionPriceUGX(s.db)
+
+	if order.PlanID != uuid.Nil {
+		var plan plans.Plan
+		if err := s.db.First(&plan, "id = ?", order.PlanID).Error; err != nil {
+			return fmt.Errorf("plan for subscription not found: %w", err)
+		}
+		planName = plan.Name
+		planPrice = plan.Price
+	}
+
+	return s.updateUserSubscription(userID, planName, planPrice)
+}
+
+func (s *Service) updateUserSubscription(
+	userID uuid.UUID,
+	planName string,
+	planPrice int,
+) error {
+	now := time.Now()
+
+	// One calendar month from successful payment.
+	subscriptionEndsAt := now.AddDate(0, 1, 0)
+
+	updates := map[string]any{
+		"billing_plan":      planName,
+		"monthly_price_ugx": planPrice,
+
+		// User has successfully paid.
+		"subscription_status": database.SubscriptionStatusSubscribed,
+
+		// Paid subscription period.
+		"subscription_starts_at": &now,
+		"subscription_ends_at":   &subscriptionEndsAt,
+
+		// Trial no longer applies after successful payment.
+		"trial_ends_at": nil,
+
+		"updated_at": now,
+	}
+
+	result := s.db.
+		Model(&database.User{}).
+		Where("id = ?", userID).
+		Updates(updates)
+
+	if result.Error != nil {
+		return fmt.Errorf(
+			"activate subscription: %w",
+			result.Error,
+		)
+	}
+
+	if result.RowsAffected == 0 {
+		return fmt.Errorf(
+			"activate subscription: user %s not found",
+			userID,
+		)
+	}
+
+	return nil
 }
 
 func (s *Service) ensureVoucher(order *PaymentOrder) (vouchers.Voucher, error) {

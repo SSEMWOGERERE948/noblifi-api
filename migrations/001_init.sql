@@ -6,9 +6,27 @@ CREATE TABLE IF NOT EXISTS users (
   email text UNIQUE NOT NULL,
   password_hash text NOT NULL,
   role text NOT NULL,
+  hotspot_name text NOT NULL DEFAULT '',
+  billing_plan text NOT NULL DEFAULT '',
+  monthly_price_ugx integer NOT NULL DEFAULT 0,
+  trial_ends_at timestamp NULL,
+  email_verified_at timestamp NULL,
   created_at timestamp NOT NULL DEFAULT now(),
   updated_at timestamp NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS auth_codes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  email text NOT NULL,
+  purpose text NOT NULL,
+  code_hash text NOT NULL,
+  expires_at timestamp NOT NULL,
+  used_at timestamp NULL,
+  created_at timestamp NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS auth_codes_email_idx ON auth_codes(email);
+CREATE INDEX IF NOT EXISTS auth_codes_purpose_idx ON auth_codes(purpose);
 
 CREATE TABLE IF NOT EXISTS sites (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -149,6 +167,10 @@ CREATE TABLE IF NOT EXISTS vouchers (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   code text UNIQUE NOT NULL,
   plan_id uuid NOT NULL REFERENCES plans(id),
+  channel text NOT NULL DEFAULT 'physical',
+  batch_id text NULL,
+  template text NULL,
+  pattern text NULL,
   status text NOT NULL DEFAULT 'unused',
   starts_at timestamp NULL,
   expires_at timestamp NULL,

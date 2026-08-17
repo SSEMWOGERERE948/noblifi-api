@@ -1,37 +1,21 @@
 package provisioning
 
-import (
-	"errors"
-
-	"github.com/gofiber/fiber/v2"
-	"github.com/noblifi/noblifi/backend/internal/routers"
-)
+import "github.com/gofiber/fiber/v2"
 
 type Handler struct {
-	service   *Service
-	agentAuth AgentAuthenticator
+	service *Service
 }
 
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-type AgentAuthenticator interface {
-	AuthenticateAgent(token string) bool
-}
-
-func (h *Handler) SetAgentAuthenticator(auth AgentAuthenticator) {
-	h.agentAuth = auth
-}
-
 func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Post("/provisioning/check-in", h.checkIn)
 	router.Get("/provisioning/check-in", h.checkIn)
 	router.Get("/provisioning/bootstrap/:token", h.bootstrap)
-	router.Get("/provisioning/install/:token", h.install)
 	router.Get("/provisioning/wireguard/:token", h.wireGuard)
 	router.Get("/provisioning/hotspot-login/:token", h.hotspotLogin)
-	router.Get("/provisioning/hotspot-support/:token/:file", h.hotspotSupport)
 	router.Get("/provisioning/interface", h.interfaceCheckIn)
 	router.Post("/provisioning/interface", h.interfaceCheckIn)
 	router.Get("/provisioning/config.rsc", h.config)
@@ -40,24 +24,6 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Post("/provisioning/wireguard-status", h.wireGuardStatus)
 	router.Post("/provisioning/status", h.status)
 	router.Get("/provisioning/status", h.status)
-
-	internal := router.Group("/internal", h.authAgent)
-	internal.Get("/routers/:id/desired-config", h.desiredConfig)
-}
-
-func (h *Handler) authAgent(c *fiber.Ctx) error {
-	if h.agentAuth == nil || !h.agentAuth.AuthenticateAgent(c.Get(fiber.HeaderAuthorization)) {
-		return fiber.NewError(fiber.StatusUnauthorized, "unauthorized")
-	}
-	return c.Next()
-}
-
-func (h *Handler) desiredConfig(c *fiber.Ctx) error {
-	result, err := h.service.DesiredRouterConfig(c.Params("id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusNotFound, err.Error())
-	}
-	return c.JSON(result)
 }
 
 func (h *Handler) wireGuardKey(c *fiber.Ctx) error {
@@ -65,11 +31,10 @@ func (h *Handler) wireGuardKey(c *fiber.Ctx) error {
 	if err := c.BodyParser(&input); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
 	}
-	result, err := h.service.WireGuardKey(input)
-	if err != nil {
+	if err := h.service.WireGuardKey(input); err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, err.Error())
 	}
-	return c.JSON(result)
+	return c.JSON(fiber.Map{"status": "ok"})
 }
 
 func (h *Handler) wireGuardStatus(c *fiber.Ctx) error {
@@ -93,19 +58,6 @@ func (h *Handler) bootstrap(c *fiber.Ctx) error {
 	return c.SendString(script)
 }
 
-func (h *Handler) install(c *fiber.Ctx) error {
-	script, err := h.service.InstallScript(c.Params("token"), clientIP(c))
-	if err != nil {
-		if errors.Is(err, routers.ErrClaimTokenUsed) {
-			return fiber.NewError(fiber.StatusGone, err.Error())
-		}
-		return fiber.NewError(fiber.StatusNotFound, err.Error())
-	}
-	c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
-	c.Set(fiber.HeaderContentDisposition, `attachment; filename="noblifi-install.rsc"`)
-	return c.SendString(script)
-}
-
 func (h *Handler) wireGuard(c *fiber.Ctx) error {
 	script, err := h.service.WireGuardScript(c.Params("token"))
 	if err != nil {
@@ -118,15 +70,6 @@ func (h *Handler) wireGuard(c *fiber.Ctx) error {
 
 func (h *Handler) hotspotLogin(c *fiber.Ctx) error {
 	html, err := h.service.HotspotLoginPage(c.Params("token"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusNotFound, err.Error())
-	}
-	c.Set(fiber.HeaderContentType, fiber.MIMETextHTMLCharsetUTF8)
-	return c.SendString(html)
-}
-
-func (h *Handler) hotspotSupport(c *fiber.Ctx) error {
-	html, err := h.service.HotspotSupportFile(c.Params("token"), c.Params("file"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, err.Error())
 	}

@@ -11,137 +11,112 @@ import (
 const defaultRadiusServer = "154.65.105.14"
 
 type Config struct {
-	Port                       string
-	DatabaseURL                string
-	JWTSecret                  string
-	AppEnv                     string
-	PublicAPIBaseURL           string
-	FrontendURL                string
-	ProvisioningBaseURL        string
-	IotecClientID              string
-	IotecClientSecret          string
-	IotecTokenURL              string
-	IotecBaseURL               string
-	IotecWalletID              string
-	IotecCurrency              string
-	RadiusServer               string
-	RadiusSecret               string
-	RouterIdentityPrefix       string
-	RouterAPIUsername          string
-	RouterAPIPassword          string
-	HotspotBridgeName          string
-	StaffBridgeName            string
-	POSBridgeName              string
-	CCTVBridgeName             string
-	HotspotSubnetCIDR          string
-	HotspotGatewayCIDR         string
-	HotspotPoolRange           string
-	StaffSubnetCIDR            string
-	StaffGatewayCIDR           string
-	StaffPoolRange             string
-	POSSubnetCIDR              string
-	POSGatewayCIDR             string
-	POSPoolRange               string
-	CCTVSubnetCIDR             string
-	CCTVGatewayCIDR            string
-	CCTVPoolRange              string
-	HotspotDNSName             string
-	HotspotPortalName          string
-	HotspotWalledGardenHosts   []string
-	DisableWWWService          bool
-	EnableAPIService           bool
-	EnableAPISSLService        bool
-	RadiusAuthPort             int
-	RadiusAcctPort             int
-	WireGuardEnabled           bool
-	WireGuardEndpoint          string
-	WireGuardPort              int
-	WireGuardPublicKey         string
-	WireGuardInterface         string
-	WireGuardServerIP          string
-	WireGuardSubnetCIDR        string
-	WireGuardKeepalive         int
-	RemoteAccessHost           string
-	RemoteAccessWebPortBase    int
-	RemoteAccessWinboxPortBase int
-	AgentToken                 string
-	AgentID                    string
-	ProvisioningTokenTTLHour   int
+	Port                     string
+	DatabaseURL              string
+	JWTSecret                string
+	AppEnv                   string
+	PublicAPIBaseURL         string
+	ProvisioningBaseURL      string
+	AgentToken               string
+	RadiusServer             string
+	RadiusSecret             string
+	RouterIdentityPrefix     string
+	RouterAPIUsername        string
+	RouterAPIPassword        string
+	WireGuardEnabled         bool
+	WireGuardInterface       string
+	WireGuardEndpoint        string
+	WireGuardPublicKey       string
+	WireGuardServerIP        string
+	WireGuardPort            int
+	WireGuardSubnetCIDR      string
+	WireGuardKeepalive       int
+	HotspotBridgeName        string
+	StaffBridgeName          string
+	POSBridgeName            string
+	CCTVBridgeName           string
+	HotspotSubnetCIDR        string
+	HotspotGatewayCIDR       string
+	HotspotPoolRange         string
+	StaffSubnetCIDR          string
+	StaffGatewayCIDR         string
+	StaffPoolRange           string
+	POSSubnetCIDR            string
+	POSGatewayCIDR           string
+	POSPoolRange             string
+	CCTVSubnetCIDR           string
+	CCTVGatewayCIDR          string
+	CCTVPoolRange            string
+	HotspotDNSName           string
+	HotspotPortalName        string
+	HotspotWalledGardenHosts []string
+	DisableWWWService        bool
+	EnableAPIService         bool
+	EnableAPISSLService      bool
+	RadiusAuthPort           int
+	RadiusAcctPort           int
+	ProvisioningTokenTTLHour int
+	IotecBaseURL             string
+	IotecTokenURL            string
+	IotecClientID            string
+	IotecClientSecret        string
+	IotecWalletID            string
+	IotecCurrency            string
 }
 
 func Load() Config {
 	loadDotEnv(".env")
 
 	return Config{
-		Port:                       getEnv("PORT", "8080"),
-		DatabaseURL:                getEnv("DATABASE_URL", "postgres://noblifi:noblifi@localhost:5432/noblifi?sslmode=disable"),
-		JWTSecret:                  getEnv("JWT_SECRET", "change-this-secret"),
-		AppEnv:                     getEnv("APP_ENV", "development"),
-		PublicAPIBaseURL:           getEnv("PUBLIC_API_BASE_URL", "http://localhost:8080"),
-		FrontendURL:                getEnv("NEXT_PUBLIC_BASE_URL", strings.TrimSpace(getEnv("FRONTEND_URL", "http://localhost:3000"))),
-		ProvisioningBaseURL:        getEnv("NOBLIFI_PROVISIONING_BASE_URL", "http://localhost:8080/api/v1/provisioning"),
-		IotecClientID:              strings.TrimSpace(getEnv("IOTEC_CLIENT_ID", "")),
-		IotecClientSecret:          strings.TrimSpace(getEnv("IOTEC_CLIENT_SECRET", "")),
-		IotecTokenURL:              strings.TrimSpace(getEnv("IOTEC_TOKEN_URL", "https://id.iotec.io/connect/token")),
-		IotecBaseURL:               strings.TrimRight(strings.TrimSpace(getEnv("IOTEC_BASE_URL", "https://pay.iotec.io")), "/"),
-		IotecWalletID:              strings.TrimSpace(getEnv("IOTEC_WALLET_ID", "")),
-		IotecCurrency:              strings.TrimSpace(getEnv("IOTEC_CURRENCY", "UGX")),
-		RadiusServer:               getEnv("NOBLIFI_RADIUS_SERVER", defaultRadiusServer),
-		RadiusSecret:               normalizeRadiusSecret(getEnv("NOBLIFI_RADIUS_SECRET", "noblifi")),
-		RouterIdentityPrefix:       getEnv("NOBLIFI_ROUTER_IDENTITY_PREFIX", "NobliFi"),
-		RouterAPIUsername:          getEnv("NOBLIFI_ROUTER_API_USERNAME", "noblifi-api"),
-		RouterAPIPassword:          getEnv("NOBLIFI_ROUTER_API_PASSWORD", "CHANGE_ME_API_PASSWORD"),
-		HotspotBridgeName:          getEnv("NOBLIFI_HOTSPOT_BRIDGE", "br-hotspot"),
-		StaffBridgeName:            getEnv("NOBLIFI_STAFF_BRIDGE", "br-staff"),
-		POSBridgeName:              getEnv("NOBLIFI_POS_BRIDGE", "br-pos"),
-		CCTVBridgeName:             getEnv("NOBLIFI_CCTV_BRIDGE", "br-cctv"),
-		HotspotSubnetCIDR:          getEnv("NOBLIFI_HOTSPOT_SUBNET", "10.10.10.0/24"),
-		HotspotGatewayCIDR:         getEnv("NOBLIFI_HOTSPOT_GATEWAY", "10.10.10.1/24"),
-		HotspotPoolRange:           getEnv("NOBLIFI_HOTSPOT_POOL", "10.10.10.10-10.10.10.254"),
-		StaffSubnetCIDR:            getEnv("NOBLIFI_STAFF_SUBNET", "10.20.20.0/24"),
-		StaffGatewayCIDR:           getEnv("NOBLIFI_STAFF_GATEWAY", "10.20.20.1/24"),
-		StaffPoolRange:             getEnv("NOBLIFI_STAFF_POOL", "10.20.20.10-10.20.20.254"),
-		POSSubnetCIDR:              getEnv("NOBLIFI_POS_SUBNET", "10.30.30.0/24"),
-		POSGatewayCIDR:             getEnv("NOBLIFI_POS_GATEWAY", "10.30.30.1/24"),
-		POSPoolRange:               getEnv("NOBLIFI_POS_POOL", "10.30.30.10-10.30.30.254"),
-		CCTVSubnetCIDR:             getEnv("NOBLIFI_CCTV_SUBNET", "10.40.40.0/24"),
-		CCTVGatewayCIDR:            getEnv("NOBLIFI_CCTV_GATEWAY", "10.40.40.1/24"),
-		CCTVPoolRange:              getEnv("NOBLIFI_CCTV_POOL", "10.40.40.10-10.40.40.254"),
-		HotspotDNSName:             getEnv("NOBLIFI_HOTSPOT_DNS_NAME", "noblifi"),
-		HotspotPortalName:          getEnv("NOBLIFI_HOTSPOT_PORTAL_NAME", "NobliFi WiFi"),
-		HotspotWalledGardenHosts:   getListEnv("NOBLIFI_HOTSPOT_WALLED_GARDEN_HOSTS", "noblifi-frontend.vercel.app,noblifi.ew.r.appspot.com,noblifi.uc.r.appspot.com"),
-		DisableWWWService:          getBoolEnv("NOBLIFI_DISABLE_WWW_SERVICE", true),
-		EnableAPIService:           getBoolEnv("NOBLIFI_ENABLE_API_SERVICE", true),
-		EnableAPISSLService:        getBoolEnv("NOBLIFI_ENABLE_API_SSL_SERVICE", true),
-		RadiusAuthPort:             getIntEnv("NOBLIFI_RADIUS_AUTH_PORT", 1812),
-		RadiusAcctPort:             getIntEnv("NOBLIFI_RADIUS_ACCT_PORT", 1813),
-		WireGuardEnabled:           getBoolEnv("NOBLIFI_WIREGUARD_ENABLED", false),
-		WireGuardEndpoint:          strings.TrimSpace(getEnv("NOBLIFI_WIREGUARD_ENDPOINT", "")),
-		WireGuardPort:              getIntEnv("NOBLIFI_WIREGUARD_PORT", 51820),
-		WireGuardPublicKey:         strings.TrimSpace(getEnv("NOBLIFI_WIREGUARD_PUBLIC_KEY", "")),
-		WireGuardInterface:         getEnv("NOBLIFI_WIREGUARD_INTERFACE", "wg0"),
-		WireGuardServerIP:          getEnv("NOBLIFI_WIREGUARD_SERVER_IP", "10.77.0.1"),
-		WireGuardSubnetCIDR:        getEnv("NOBLIFI_WIREGUARD_SUBNET", "10.77.0.0/24"),
-		WireGuardKeepalive:         getIntEnv("NOBLIFI_WIREGUARD_KEEPALIVE", 25),
-		RemoteAccessHost:           strings.TrimSpace(getEnv("NOBLIFI_REMOTE_ACCESS_HOST", getEnv("NOBLIFI_WIREGUARD_ENDPOINT", ""))),
-		RemoteAccessWebPortBase:    getIntEnv("NOBLIFI_REMOTE_WEB_PORT_BASE", 21000),
-		RemoteAccessWinboxPortBase: getIntEnv("NOBLIFI_REMOTE_WINBOX_PORT_BASE", 22000),
-		AgentToken:                 normalizeAgentToken(getEnv("NOBLIFI_AGENT_TOKEN", "")),
-		AgentID:                    strings.TrimSpace(getEnv("NOBLIFI_AGENT_ID", "xneelo-wg-agent-01")),
-		ProvisioningTokenTTLHour:   24,
+		Port:                     getEnv("PORT", "8080"),
+		DatabaseURL:              getEnv("DATABASE_URL", "postgres://noblifi:noblifi@localhost:5432/noblifi?sslmode=disable"),
+		JWTSecret:                getEnv("JWT_SECRET", "change-this-secret"),
+		AppEnv:                   getEnv("APP_ENV", "development"),
+		PublicAPIBaseURL:         getEnv("PUBLIC_API_BASE_URL", "http://localhost:8080"),
+		ProvisioningBaseURL:      getEnv("NOBLIFI_PROVISIONING_BASE_URL", "http://localhost:8080/api/v1/provisioning"),
+		AgentToken:               getEnv("NOBLIFI_AGENT_TOKEN", ""),
+		RadiusServer:             getEnv("NOBLIFI_RADIUS_SERVER", defaultRadiusServer),
+		RadiusSecret:             normalizeRadiusSecret(getEnv("NOBLIFI_RADIUS_SECRET", "noblifi")),
+		RouterIdentityPrefix:     getEnv("NOBLIFI_ROUTER_IDENTITY_PREFIX", "NobliFi"),
+		RouterAPIUsername:        getEnv("NOBLIFI_ROUTER_API_USERNAME", "noblifi-api"),
+		RouterAPIPassword:        getEnv("NOBLIFI_ROUTER_API_PASSWORD", "CHANGE_ME_API_PASSWORD"),
+		HotspotBridgeName:        getEnv("NOBLIFI_HOTSPOT_BRIDGE", "br-hotspot"),
+		StaffBridgeName:          getEnv("NOBLIFI_STAFF_BRIDGE", "br-staff"),
+		POSBridgeName:            getEnv("NOBLIFI_POS_BRIDGE", "br-pos"),
+		CCTVBridgeName:           getEnv("NOBLIFI_CCTV_BRIDGE", "br-cctv"),
+		HotspotSubnetCIDR:        getEnv("NOBLIFI_HOTSPOT_SUBNET", "10.10.10.0/24"),
+		HotspotGatewayCIDR:       getEnv("NOBLIFI_HOTSPOT_GATEWAY", "10.10.10.1/24"),
+		HotspotPoolRange:         getEnv("NOBLIFI_HOTSPOT_POOL", "10.10.10.10-10.10.10.254"),
+		StaffSubnetCIDR:          getEnv("NOBLIFI_STAFF_SUBNET", "10.20.20.0/24"),
+		StaffGatewayCIDR:         getEnv("NOBLIFI_STAFF_GATEWAY", "10.20.20.1/24"),
+		StaffPoolRange:           getEnv("NOBLIFI_STAFF_POOL", "10.20.20.10-10.20.20.254"),
+		POSSubnetCIDR:            getEnv("NOBLIFI_POS_SUBNET", "10.30.30.0/24"),
+		POSGatewayCIDR:           getEnv("NOBLIFI_POS_GATEWAY", "10.30.30.1/24"),
+		POSPoolRange:             getEnv("NOBLIFI_POS_POOL", "10.30.30.10-10.30.30.254"),
+		CCTVSubnetCIDR:           getEnv("NOBLIFI_CCTV_SUBNET", "10.40.40.0/24"),
+		CCTVGatewayCIDR:          getEnv("NOBLIFI_CCTV_GATEWAY", "10.40.40.1/24"),
+		CCTVPoolRange:            getEnv("NOBLIFI_CCTV_POOL", "10.40.40.10-10.40.40.254"),
+		HotspotDNSName:           getEnv("NOBLIFI_HOTSPOT_DNS_NAME", "login.noblifi.local"),
+		HotspotPortalName:        getEnv("NOBLIFI_HOTSPOT_PORTAL_NAME", "NobliFi WiFi"),
+		HotspotWalledGardenHosts: getListEnv("NOBLIFI_HOTSPOT_WALLED_GARDEN_HOSTS", "noblifi-frontend.vercel.app,noblifi.ew.r.appspot.com,noblifi.uc.r.appspot.com"),
+		DisableWWWService:        getBoolEnv("NOBLIFI_DISABLE_WWW_SERVICE", true),
+		EnableAPIService:         getBoolEnv("NOBLIFI_ENABLE_API_SERVICE", true),
+		EnableAPISSLService:      getBoolEnv("NOBLIFI_ENABLE_API_SSL_SERVICE", true),
+		RadiusAuthPort:           getIntEnv("NOBLIFI_RADIUS_AUTH_PORT", 1812),
+		RadiusAcctPort:           getIntEnv("NOBLIFI_RADIUS_ACCT_PORT", 1813),
+		ProvisioningTokenTTLHour: 24,
+		IotecBaseURL:             getEnv("IOTEC_BASE_URL", ""),
+		IotecTokenURL:            getEnv("IOTEC_TOKEN_URL", ""),
+		IotecClientID:            getEnv("IOTEC_CLIENT_ID", ""),
+		IotecClientSecret:        getEnv("IOTEC_CLIENT_SECRET", ""),
+		IotecWalletID:            getEnv("IOTEC_WALLET_ID", ""),
+		IotecCurrency:            getEnv("IOTEC_CURRENCY", "UGX"),
 	}
 }
 
 func normalizeRadiusSecret(value string) string {
 	if placeholders.Is(value) {
 		return "noblifi"
-	}
-	return strings.TrimSpace(value)
-}
-
-func normalizeAgentToken(value string) string {
-	if placeholders.Is(value) {
-		return ""
 	}
 	return strings.TrimSpace(value)
 }

@@ -2,9 +2,13 @@ node_modules/
 
 # Environment files
 .env
+.env.*
 .env.local
 .env.*.local
 !.env.example
+
+# App deployment config with secrets
+app.yaml
 
 # Logs
 *.log
@@ -26,35 +30,14 @@ coverage.out
 Thumbs.db
 .idea/
 .vscode/
-
-# Go build and test caches
-.gocache
-.gocache/**
-.gotestcache
-.gotestcache/**
-
-
-# Build output
-bin
-dist
-build
-tmp
-temp
-
-# Windows files
-Thumbs.db
-Desktop.ini*.pem
-*.key
-noblifi-vps-agent
-noblifi-vps-agent.new
-noblifi-vps-agent-linux-amd64
-*.pem
-*.key
-noblifi-vps-agent
-noblifi-vps-agent.new
-noblifi-vps-agent-linux-amd64
-*.pem
-*.key
-noblifi-vps-agent
-noblifi-vps-agent.new
-noblifi-vps-agent-linux-amd64
+.env 
+app.yaml 
+.env
+app.yaml
+.env
+.env.local
+.env.development
+.env.production
+.env.*.local
+app.yaml
+.env

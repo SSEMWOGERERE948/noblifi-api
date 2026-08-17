@@ -3,8 +3,6 @@ package radius
 import (
 	"errors"
 	"fmt"
-	"log"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,140 +17,34 @@ type Service struct {
 	db *gorm.DB
 }
 
-// RadAcct represents a minimal subset of the radacct table used by the
-// accounting summary queries in this service.
-type RadAcct struct {
-	AcctStopTime     *time.Time `gorm:"column:acctstoptime"`
-	AcctInputOctets  int64      `gorm:"column:acctinputoctets"`
-	AcctOutputOctets int64      `gorm:"column:acctoutputoctets"`
-}
-
 type VoucherRadiusState struct {
 	Username       string `json:"username"`
 	Status         string `json:"status"`
-	Authorized     bool   `json:"authorized"`
 	SessionTimeout int    `json:"session_timeout"`
 	RateLimit      string `json:"rate_limit"`
 	MaxDevices     int    `json:"max_devices"`
-	RadiusGroup    string `json:"radius_group"`
-}
-
-type NAS struct {
-	NASName     string
-	ShortName   string
-	Type        string
-	Secret      string
-	Description string
 }
 
 func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
 }
 
-func (s *Service) EnsureVoucherConsumptionHooks() error {
-	statements := []string{
-		`
-CREATE OR REPLACE FUNCTION noblifi_consume_voucher_on_radius_accept()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  IF NEW.reply ILIKE 'Access-Accept%' THEN
-    UPDATE vouchers
-       SET status = 'used',
-           used_at = COALESCE(used_at, now()),
-           updated_at = now()
-     WHERE code = NEW.username
-       AND status IN ('unused', 'active');
-
-    DELETE FROM radcheck WHERE username = NEW.username;
-    DELETE FROM radreply WHERE username = NEW.username;
-    DELETE FROM radusergroup WHERE username = NEW.username;
-  END IF;
-
-  RETURN NEW;
-END;
-$$;
-`,
-		`DROP TRIGGER IF EXISTS consume_voucher_on_radius_accept ON radpostauth;`,
-		`
-CREATE TRIGGER consume_voucher_on_radius_accept
-AFTER INSERT ON radpostauth
-FOR EACH ROW
-EXECUTE FUNCTION noblifi_consume_voucher_on_radius_accept();
-`,
-		`
-UPDATE vouchers
-   SET status = 'used',
-       used_at = COALESCE(used_at, accepted.authdate),
-       updated_at = now()
-  FROM (
-    SELECT username, MIN(authdate) AS authdate
-      FROM radpostauth
-     WHERE reply ILIKE 'Access-Accept%'
-     GROUP BY username
-  ) AS accepted
- WHERE vouchers.code = accepted.username
-   AND vouchers.status IN ('unused', 'active');
-`,
-		`
-DELETE FROM radcheck
- WHERE username IN (
-   SELECT username FROM radpostauth WHERE reply ILIKE 'Access-Accept%'
- );
-`,
-		`
-DELETE FROM radreply
- WHERE username IN (
-   SELECT username FROM radpostauth WHERE reply ILIKE 'Access-Accept%'
- );
-`,
-		`
-DELETE FROM radusergroup
- WHERE username IN (
-   SELECT username FROM radpostauth WHERE reply ILIKE 'Access-Accept%'
- );
-`,
-	}
-
-	for _, statement := range statements {
-		if err := s.db.Exec(statement).Error; err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// ---------------------------------------------------------
-// NAS
-// ---------------------------------------------------------
-
-func (s *Service) RegisterNAS(
-	nasName string,
-	shortName string,
-	secret string,
-	description string,
-) error {
+func (s *Service) RegisterNAS(nasName, shortName, secret, description string) error {
 	nasName = strings.TrimSpace(nasName)
 	if nasName == "" {
 		return nil
 	}
-
 	shortName = strings.TrimSpace(shortName)
 	if shortName == "" {
 		shortName = nasName
 	}
-
 	secret = strings.TrimSpace(secret)
-	if secret == "" || placeholders.Is(secret) {
+	if placeholders.Is(secret) {
 		secret = "noblifi"
 	}
 
 	var nas NAS
-
 	err := s.db.First(&nas, "nasname = ?", nasName).Error
-
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		nas = NAS{
 			NASName:     nasName,
@@ -161,10 +53,8 @@ func (s *Service) RegisterNAS(
 			Secret:      secret,
 			Description: description,
 		}
-
 		return s.db.Create(&nas).Error
 	}
-
 	if err != nil {
 		return err
 	}
@@ -173,350 +63,170 @@ func (s *Service) RegisterNAS(
 	nas.Type = "mikrotik"
 	nas.Secret = secret
 	nas.Description = description
-
 	return s.db.Save(&nas).Error
 }
 
-func (s *Service) RemoveNAS(nasName string) error {
-	nasName = strings.TrimSpace(nasName)
-	if nasName == "" {
-		return nil
-	}
-	return s.db.Where("nasname = ?", nasName).Delete(&NAS{}).Error
-}
-
-// ---------------------------------------------------------
-// PLAN / PACKAGE RADIUS POLICY
-// ---------------------------------------------------------
-
-func (s *Service) SyncPlanForRadius(plan plans.Plan) error {
-	if plan.ID == uuid.Nil {
-		return errors.New("cannot sync RADIUS plan without plan ID")
-	}
-
-	groupName := radiusGroupName(plan.ID)
-
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		// Rebuild the policy every time so package updates do not leave
-		// stale RADIUS attributes behind.
-		if err := tx.
-			Where("groupname = ?", groupName).
-			Delete(&RadGroupCheck{}).Error; err != nil {
-			return err
-		}
-
-		if err := tx.
-			Where("groupname = ?", groupName).
-			Delete(&RadGroupReply{}).Error; err != nil {
-			return err
-		}
-
-		// An inactive plan should no longer have an active RADIUS policy.
-		if !plan.IsActive {
-			return nil
-		}
-
-		if plan.DurationMinutes <= 0 {
-			return fmt.Errorf(
-				"plan %s has invalid duration_minutes=%d",
-				plan.ID,
-				plan.DurationMinutes,
-			)
-		}
-
-		maxDevices := plan.MaxDevices
-		if maxDevices <= 0 {
-			maxDevices = 1
-		}
-
-		sessionSeconds := plan.DurationMinutes * 60
-
-		replies := []RadGroupReply{
-			{
-				GroupName: groupName,
-				Attribute: "Session-Timeout",
-				Op:        ":=",
-				Value:     strconv.Itoa(sessionSeconds),
-			},
-			{
-				GroupName: groupName,
-				Attribute: "Mikrotik-Rate-Limit",
-				Op:        ":=",
-				Value: mikrotikRateLimit(
-					plan.UploadSpeed,
-					plan.DownloadSpeed,
-				),
-			},
-			{
-				GroupName: groupName,
-				Attribute: "Port-Limit",
-				Op:        ":=",
-				Value:     strconv.Itoa(maxDevices),
-			},
-		}
-
-		// Optional total data allowance.
-		//
-		// MikroTik Total-Limit consists of a low 32-bit value plus an
-		// optional Gigawords value for the upper 32 bits.
-		if plan.DataLimitMB != nil && *plan.DataLimitMB > 0 {
-			totalBytes := uint64(*plan.DataLimitMB) * 1024 * 1024
-
-			low := uint32(totalBytes & 0xffffffff)
-			high := uint32(totalBytes >> 32)
-
-			replies = append(replies, RadGroupReply{
-				GroupName: groupName,
-				Attribute: "Mikrotik-Total-Limit",
-				Op:        ":=",
-				Value:     strconv.FormatUint(uint64(low), 10),
-			})
-
-			if high > 0 {
-				replies = append(replies, RadGroupReply{
-					GroupName: groupName,
-					Attribute: "Mikrotik-Total-Limit-Gigawords",
-					Op:        ":=",
-					Value:     strconv.FormatUint(uint64(high), 10),
-				})
-			}
-		}
-
-		return tx.Create(&replies).Error
-	})
-}
-
-func (s *Service) SyncAllPlans() (int, error) {
-	var items []plans.Plan
-
-	if err := s.db.Find(&items).Error; err != nil {
-		return 0, err
-	}
-
-	count := 0
-
-	for _, plan := range items {
-		if err := s.SyncPlanForRadius(plan); err != nil {
-			return count, fmt.Errorf(
-				"sync plan %s: %w",
-				plan.ID,
-				err,
-			)
-		}
-
-		count++
-	}
-
-	return count, nil
-}
-
-// ---------------------------------------------------------
-// VOUCHERS
-// ---------------------------------------------------------
-
 func (s *Service) AuthorizeVoucher(code string) (bool, error) {
-	voucher, plan, err := s.voucherPlan(strings.TrimSpace(code))
-	if err != nil {
+	var voucher vouchers.Voucher
+	if err := s.db.First(&voucher, "code = ?", strings.TrimSpace(code)).Error; err != nil {
 		return false, err
 	}
-
-	if !plan.IsActive {
+	if voucher.Status != "unused" && voucher.Status != "active" {
 		return false, nil
 	}
-
-	return voucherUsable(voucher), nil
+	now := time.Now()
+	if voucher.ExpiresAt != nil && voucher.ExpiresAt.Before(now) {
+		return false, nil
+	}
+	return true, nil
 }
 
 func (s *Service) SyncVoucher(code string) (VoucherRadiusState, error) {
-	code = strings.TrimSpace(code)
-
-	if code == "" {
-		return VoucherRadiusState{}, errors.New("voucher code is required")
-	}
-
 	var voucher vouchers.Voucher
-
-	if err := s.db.
-		First(&voucher, "code = ?", code).
-		Error; err != nil {
+	if err := s.db.First(&voucher, "code = ?", strings.TrimSpace(code)).Error; err != nil {
 		return VoucherRadiusState{}, err
 	}
 
 	var plan plans.Plan
-
-	if err := s.db.
-		First(&plan, "id = ?", voucher.PlanID).
-		Error; err != nil {
+	if err := s.db.First(&plan, "id = ?", voucher.PlanID).Error; err != nil {
 		return VoucherRadiusState{}, err
 	}
-
-	groupName := radiusGroupName(plan.ID)
+	if !plan.IsActive {
+		return VoucherRadiusState{}, errors.New("plan is inactive")
+	}
 
 	state := VoucherRadiusState{
 		Username:       voucher.Code,
 		Status:         voucher.Status,
-		Authorized:     voucherUsable(voucher) && plan.IsActive,
 		SessionTimeout: plan.DurationMinutes * 60,
-		RateLimit: mikrotikRateLimit(
-			plan.UploadSpeed,
-			plan.DownloadSpeed,
-		),
-		MaxDevices:  maxInt(plan.MaxDevices, 1),
-		RadiusGroup: groupName,
-	}
-
-	// Always ensure the package policy exists before associating
-	// a voucher with the package.
-	if err := s.SyncPlanForRadius(plan); err != nil {
-		return state, fmt.Errorf(
-			"sync RADIUS package %s: %w",
-			plan.ID,
-			err,
-		)
+		RateLimit:      mikrotikRateLimit(plan.UploadSpeed, plan.DownloadSpeed),
+		MaxDevices:     plan.MaxDevices,
 	}
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// Remove all previous authentication and group information.
-		if err := deleteVoucherRadiusRows(tx, voucher.Code); err != nil {
+		if err := tx.Where("username = ?", voucher.Code).Delete(&RadCheck{}).Error; err != nil {
 			return err
 		}
-
-		// Expired, used, cancelled, etc. vouchers are deliberately left
-		// without a radcheck password. FreeRADIUS therefore cannot
-		// authenticate them.
-		//
-		// This is a normal, expected outcome for unusable/inactive
-		// vouchers - but it used to be completely silent, which made it
-		// indistinguishable from a real bug when someone found a voucher
-		// missing from radcheck. Log it so that distinction is obvious
-		// immediately instead of requiring a manual DB investigation.
-		if !state.Authorized {
-			log.Printf(
-				"radius sync skipped for voucher %s: not authorized (voucher_status=%s, plan_active=%t, plan_id=%s)",
-				voucher.Code,
-				voucher.Status,
-				plan.IsActive,
-				plan.ID,
-			)
-
-			return nil
-		}
-
-		// NobliFi is a single-code voucher system:
-		//
-		// username = NF-xxxxxxxx
-		// password = NF-xxxxxxxx
-		//
-		// MikroTik sends the same value for both fields.
-		if err := tx.Create(&RadCheck{
-			Username:  voucher.Code,
-			Attribute: "Cleartext-Password",
-			Op:        ":=",
-			Value:     voucher.Code,
-		}).Error; err != nil {
+		if err := tx.Where("username = ?", voucher.Code).Delete(&RadReply{}).Error; err != nil {
 			return err
 		}
-
-		// Ensure SQL group processing continues after the password
-		// check so the package attributes are applied.
-		if err := tx.Create(&RadReply{
-			Username:  voucher.Code,
-			Attribute: "Fall-Through",
-			Op:        "=",
-			Value:     "Yes",
-		}).Error; err != nil {
+		checks := []RadCheck{
+			{Username: voucher.Code, Attribute: "Cleartext-Password", Op: ":=", Value: voucher.Code},
+			{Username: voucher.Code, Attribute: "Simultaneous-Use", Op: ":=", Value: fmt.Sprintf("%d", max(plan.MaxDevices, 1))},
+		}
+		replies := []RadReply{
+			{Username: voucher.Code, Attribute: "Session-Timeout", Op: ":=", Value: fmt.Sprintf("%d", state.SessionTimeout)},
+			{Username: voucher.Code, Attribute: "Mikrotik-Rate-Limit", Op: ":=", Value: state.RateLimit},
+		}
+		if plan.DataLimitMB != nil && *plan.DataLimitMB > 0 {
+			replies = append(replies, RadReply{
+				Username:  voucher.Code,
+				Attribute: "Mikrotik-Total-Limit",
+				Op:        ":=",
+				Value:     fmt.Sprintf("%d", int64(*plan.DataLimitMB)*1024*1024),
+			})
+		}
+		if err := tx.Create(&checks).Error; err != nil {
 			return err
 		}
-
-		// Attach this voucher to its RADIUS package.
-		if err := tx.Create(&RadUserGroup{
-			Username:  voucher.Code,
-			GroupName: groupName,
-			Priority:  1,
-		}).Error; err != nil {
-			return err
-		}
-
-		return nil
+		return tx.Create(&replies).Error
 	})
-
-	if err != nil {
-		log.Printf(
-			"radius sync failed for voucher %s: %v",
-			voucher.Code,
-			err,
-		)
-	}
-
 	return state, err
 }
 
-// Keep this signature because your vouchers.Service already expects it.
 func (s *Service) SyncVoucherForVoucher(code string) error {
 	_, err := s.SyncVoucher(code)
 	return err
 }
 
 func (s *Service) SyncAllVouchers() (int, error) {
-	// Package/group policies must exist first.
-	if _, err := s.SyncAllPlans(); err != nil {
-		return 0, err
-	}
-
 	var items []vouchers.Voucher
-
 	if err := s.db.Find(&items).Error; err != nil {
 		return 0, err
 	}
-
 	count := 0
-
 	for _, voucher := range items {
 		if _, err := s.SyncVoucher(voucher.Code); err != nil {
-			return count, fmt.Errorf(
-				"sync voucher %s: %w",
-				voucher.Code,
-				err,
-			)
+			return count, err
 		}
-
 		count++
 	}
-
 	return count, nil
 }
 
-// ---------------------------------------------------------
-// ACCOUNTING
-// ---------------------------------------------------------
+func (s *Service) SyncAllPlans() (int, error) {
+	var items []plans.Plan
+	if err := s.db.Find(&items).Error; err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, plan := range items {
+		if err := s.syncPlan(plan); err != nil {
+			return count, err
+		}
+		count++
+	}
+	return count, nil
+}
+
+func (s *Service) syncPlan(plan plans.Plan) error {
+	if plan.ID == uuid.Nil {
+		return nil
+	}
+	updates := []RadGroupReply{
+		{GroupName: plan.ID.String(), Attribute: "Session-Timeout", Op: ":=", Value: fmt.Sprintf("%d", max(plan.DurationMinutes, 1)*60)},
+		{GroupName: plan.ID.String(), Attribute: "Mikrotik-Rate-Limit", Op: ":=", Value: mikrotikRateLimit(plan.UploadSpeed, plan.DownloadSpeed)},
+	}
+	if plan.DataLimitMB != nil && *plan.DataLimitMB > 0 {
+		updates = append(updates, RadGroupReply{
+			GroupName: plan.ID.String(),
+			Attribute: "Mikrotik-Total-Limit",
+			Op:        ":=",
+			Value:     fmt.Sprintf("%d", int64(*plan.DataLimitMB)*1024*1024),
+		})
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("groupname = ?", plan.ID.String()).Delete(&RadGroupReply{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("groupname = ?", plan.ID.String()).Delete(&RadGroupCheck{}).Error; err != nil {
+			return err
+		}
+		check := RadGroupCheck{
+			GroupName: plan.ID.String(),
+			Attribute: "Simultaneous-Use",
+			Op:        ":=",
+			Value:     fmt.Sprintf("%d", max(plan.MaxDevices, 1)),
+		}
+		if err := tx.Create(&check).Error; err != nil {
+			return err
+		}
+		return tx.Create(&updates).Error
+	})
+}
+
+func voucherUsageState(status string, usedAt *time.Time, now time.Time) (string, *time.Time) {
+	if strings.TrimSpace(status) == "unused" {
+		if usedAt == nil {
+			usedAt = &now
+		}
+		return "used", usedAt
+	}
+	return status, usedAt
+}
 
 func (s *Service) AccountingSummary() (map[string]any, error) {
 	var active int64
-
-	if err := s.db.
-		Model(&RadAcct{}).
-		Where("acctstoptime IS NULL").
-		Count(&active).
-		Error; err != nil {
+	if err := s.db.Model(&RadAcct{}).Where("acctstoptime IS NULL").Count(&active).Error; err != nil {
 		return nil, err
 	}
-
 	var totals struct {
 		Input  int64
 		Output int64
 	}
-
-	if err := s.db.
-		Model(&RadAcct{}).
-		Select(`
-			COALESCE(SUM(acctinputoctets), 0) AS input,
-			COALESCE(SUM(acctoutputoctets), 0) AS output
-		`).
-		Scan(&totals).
-		Error; err != nil {
+	if err := s.db.Model(&RadAcct{}).Select("COALESCE(SUM(acctinputoctets),0) as input, COALESCE(SUM(acctoutputoctets),0) as output").Scan(&totals).Error; err != nil {
 		return nil, err
 	}
-
 	return map[string]any{
 		"active_sessions": active,
 		"upload_bytes":    totals.Input,
@@ -524,138 +234,19 @@ func (s *Service) AccountingSummary() (map[string]any, error) {
 	}, nil
 }
 
-// ---------------------------------------------------------
-// HELPERS
-// ---------------------------------------------------------
-
-func (s *Service) voucherPlan(
-	code string,
-) (vouchers.Voucher, plans.Plan, error) {
-	var voucher vouchers.Voucher
-
-	if err := s.db.
-		First(&voucher, "code = ?", code).
-		Error; err != nil {
-		return voucher, plans.Plan{}, err
+func mikrotikRateLimit(uploadSpeed, downloadSpeed string) string {
+	upload := strings.TrimSpace(uploadSpeed)
+	download := strings.TrimSpace(downloadSpeed)
+	if upload == "" {
+		upload = "2M"
 	}
-
-	var plan plans.Plan
-
-	if err := s.db.
-		First(&plan, "id = ?", voucher.PlanID).
-		Error; err != nil {
-		return voucher, plan, err
+	if download == "" {
+		download = "5M"
 	}
-
-	return voucher, plan, nil
-}
-
-func voucherUsable(voucher vouchers.Voucher) bool {
-	switch voucher.Status {
-	case "unused", "active":
-	default:
-		return false
-	}
-
-	if voucher.ExpiresAt != nil &&
-		!voucher.ExpiresAt.After(time.Now()) {
-		return false
-	}
-
-	return true
-}
-
-func (s *Service) consumeVoucher(code string, status string, usedAt *time.Time) error {
-	code = strings.TrimSpace(code)
-	if code == "" {
-		return nil
-	}
-
-	now := time.Now().UTC()
-	newStatus, newUsedAt := voucherUsageState(status, usedAt, now)
-
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		if !strings.EqualFold(newStatus, status) ||
-			!(usedAt != nil && newUsedAt != nil && newUsedAt.Equal(*usedAt)) {
-			if err := tx.Model(&vouchers.Voucher{}).
-				Where("code = ?", code).
-				Updates(map[string]any{
-					"status":  newStatus,
-					"used_at": newUsedAt,
-				}).Error; err != nil {
-				return err
-			}
-		}
-
-		return deleteVoucherRadiusRows(tx, code)
-	})
-}
-
-func deleteVoucherRadiusRows(tx *gorm.DB, code string) error {
-	if err := tx.
-		Where("username = ?", code).
-		Delete(&RadCheck{}).Error; err != nil {
-		return err
-	}
-
-	if err := tx.
-		Where("username = ?", code).
-		Delete(&RadReply{}).Error; err != nil {
-		return err
-	}
-
-	if err := tx.
-		Where("username = ?", code).
-		Delete(&RadUserGroup{}).Error; err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func voucherUsageState(status string, usedAt *time.Time, now time.Time) (string, *time.Time) {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "used":
-		return "used", usedAt
-	case "", "unused", "active":
-		if usedAt != nil {
-			return "used", usedAt
-		}
-		return "used", &now
-	default:
-		return status, usedAt
-	}
-}
-
-func radiusGroupName(planID uuid.UUID) string {
-	return "plan-" + planID.String()
-}
-
-func mikrotikRateLimit(
-	uploadSpeed string,
-	downloadSpeed string,
-) string {
-	upload := normalizeRate(uploadSpeed, "2M")
-	download := normalizeRate(downloadSpeed, "5M")
-
-	// MikroTik defines the first value as router RX,
-	// i.e. client upload, and the second as router TX,
-	// i.e. client download.
 	return upload + "/" + download
 }
 
-func normalizeRate(value, fallback string) string {
-	value = strings.TrimSpace(value)
-	value = strings.ReplaceAll(value, " ", "")
-
-	if value == "" {
-		return fallback
-	}
-
-	return value
-}
-
-func maxInt(a, b int) int {
+func max(a, b int) int {
 	if a > b {
 		return a
 	}

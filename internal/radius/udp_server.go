@@ -9,6 +9,10 @@ import (
 	"log"
 	"net"
 	"strings"
+	"time"
+
+	"github.com/noblifi/noblifi/backend/internal/plans"
+	"github.com/noblifi/noblifi/backend/internal/vouchers"
 )
 
 const (
@@ -94,10 +98,6 @@ func (s *Service) handleAccessPacket(packet radiusPacket, remote *net.UDPAddr, s
 		return encodeRadiusResponse(packet, radiusAccessReject, secret, replyMessage("Invalid or expired voucher code.")), nil
 	}
 
-	if err := s.consumeVoucher(username, voucher.Status, voucher.UsedAt); err != nil {
-		log.Printf("radius: could not mark voucher %s as used: %v", username, err)
-	}
-
 	attrs := [][]byte{
 		uint32Attribute(attrSessionTimeout, uint32(max(plan.DurationMinutes, 1)*60)),
 		mikrotikRateLimitAttribute(mikrotikRateLimit(plan.UploadSpeed, plan.DownloadSpeed)),
@@ -123,6 +123,28 @@ func (s *Service) secretForNAS(nasName, fallback string) string {
 		return "noblifi"
 	}
 	return strings.TrimSpace(fallback)
+}
+
+func (s *Service) voucherPlan(code string) (vouchers.Voucher, plans.Plan, error) {
+	var voucher vouchers.Voucher
+	if err := s.db.First(&voucher, "code = ?", code).Error; err != nil {
+		return voucher, plans.Plan{}, err
+	}
+	var plan plans.Plan
+	if err := s.db.First(&plan, "id = ?", voucher.PlanID).Error; err != nil {
+		return voucher, plan, err
+	}
+	if !plan.IsActive {
+		return voucher, plan, errors.New("plan is inactive")
+	}
+	return voucher, plan, nil
+}
+
+func voucherUsable(voucher vouchers.Voucher) bool {
+	if voucher.Status != "unused" && voucher.Status != "active" {
+		return false
+	}
+	return voucher.ExpiresAt == nil || voucher.ExpiresAt.After(time.Now())
 }
 
 func (s *Service) passwordMatches(packet radiusPacket, secret, expected string) bool {
