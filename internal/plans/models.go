@@ -7,7 +7,7 @@ import (
 )
 
 type Plan struct {
-	ID                    uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID                    uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
 	UserID                *uuid.UUID `gorm:"type:uuid;index" json:"user_id,omitempty"`
 	Name                  string     `json:"name"`
 	Price                 int        `json:"price"`
