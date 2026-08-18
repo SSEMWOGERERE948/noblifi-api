@@ -24,11 +24,32 @@ const (
 	DefaultTrialDuration = 14 * 24 * time.Hour
 )
 
+// ============================================================
+// UUID HELPERS
+// ============================================================
+
+// ensureUUID generates a UUID in Go instead of relying on
+// PostgreSQL's gen_random_uuid().
+//
+// This keeps the models compatible with:
+// - PostgreSQL in production
+// - SQLite in unit tests
+func ensureUUID(id *uuid.UUID) {
+	if id != nil && *id == uuid.Nil {
+		*id = uuid.New()
+	}
+}
+
+// ============================================================
+// USER
+// ============================================================
+
 type User struct {
-	ID           uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	Name         string    `json:"name"`
-	Email        string    `gorm:"uniqueIndex" json:"email"`
-	PasswordHash string    `json:"-"`
+	ID uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+
+	Name         string `json:"name"`
+	Email        string `gorm:"uniqueIndex" json:"email"`
+	PasswordHash string `json:"-"`
 
 	Role        string `json:"role"`
 	HotspotName string `json:"hotspot_name"`
@@ -60,30 +81,9 @@ type User struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-type AppSetting struct {
-	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-
-	Key   string `gorm:"uniqueIndex;not null" json:"key"`
-	Value string `gorm:"not null" json:"value"`
-
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-func (a AppSetting) ValueInt() int {
-	value := strings.TrimSpace(a.Value)
-
-	if value == "" {
-		return DefaultSubscriptionPriceUGX
-	}
-
-	parsed, err := strconv.Atoi(value)
-
-	if err != nil || parsed <= 0 {
-		return DefaultSubscriptionPriceUGX
-	}
-
-	return parsed
+func (u *User) BeforeCreate(_ *gorm.DB) error {
+	ensureUUID(&u.ID)
+	return nil
 }
 
 func (u User) GetID() uuid.UUID {
@@ -163,11 +163,41 @@ func (u User) HasAccess() bool {
 		return time.Now().Before(*u.TrialEndsAt)
 	}
 
-	if u.HasActiveSubscription() {
-		return true
+	return u.HasActiveSubscription()
+}
+
+// ============================================================
+// APP SETTINGS
+// ============================================================
+
+type AppSetting struct {
+	ID uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+
+	Key   string `gorm:"uniqueIndex;not null" json:"key"`
+	Value string `gorm:"not null" json:"value"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (a *AppSetting) BeforeCreate(_ *gorm.DB) error {
+	ensureUUID(&a.ID)
+	return nil
+}
+
+func (a AppSetting) ValueInt() int {
+	value := strings.TrimSpace(a.Value)
+
+	if value == "" {
+		return DefaultSubscriptionPriceUGX
 	}
 
-	return false
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return DefaultSubscriptionPriceUGX
+	}
+
+	return parsed
 }
 
 // SubscriptionPriceUGX returns the configured NobliFi
@@ -226,8 +256,12 @@ func SetSubscriptionPriceUGX(
 	return value, nil
 }
 
+// ============================================================
+// AUTH CODE
+// ============================================================
+
 type AuthCode struct {
-	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 
 	Email   string `gorm:"index" json:"email"`
 	Purpose string `gorm:"index" json:"purpose"`
@@ -242,8 +276,17 @@ type AuthCode struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+func (a *AuthCode) BeforeCreate(_ *gorm.DB) error {
+	ensureUUID(&a.ID)
+	return nil
+}
+
+// ============================================================
+// SITE
+// ============================================================
+
 type Site struct {
-	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 
 	Name     string  `json:"name"`
 	Location *string `json:"location"`
@@ -252,8 +295,17 @@ type Site struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+func (s *Site) BeforeCreate(_ *gorm.DB) error {
+	ensureUUID(&s.ID)
+	return nil
+}
+
+// ============================================================
+// SESSION
+// ============================================================
+
 type Session struct {
-	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 
 	VoucherID *uuid.UUID `gorm:"type:uuid" json:"voucher_id"`
 	RouterID  *uuid.UUID `gorm:"type:uuid" json:"router_id"`
@@ -269,4 +321,9 @@ type Session struct {
 	DownloadBytes int64 `gorm:"default:0" json:"download_bytes"`
 
 	Status string `gorm:"default:active" json:"status"`
+}
+
+func (s *Session) BeforeCreate(_ *gorm.DB) error {
+	ensureUUID(&s.ID)
+	return nil
 }
