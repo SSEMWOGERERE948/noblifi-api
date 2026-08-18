@@ -5,10 +5,11 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
 
 type PaymentOrder struct {
-	ID                uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ID                uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
 	MerchantReference string         `gorm:"uniqueIndex;not null" json:"merchant_reference"`
 	OrderTrackingID   string         `gorm:"index" json:"order_tracking_id"`
 	Provider          string         `gorm:"default:iotec;not null" json:"provider"`
@@ -23,4 +24,14 @@ type PaymentOrder struct {
 	ProviderPayload   datatypes.JSON `json:"provider_payload"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
+}
+
+// BeforeCreate generates the UUID in Go instead of relying on
+// PostgreSQL's gen_random_uuid(), allowing SQLite tests to work.
+func (p *PaymentOrder) BeforeCreate(_ *gorm.DB) error {
+	if p.ID == uuid.Nil {
+		p.ID = uuid.New()
+	}
+
+	return nil
 }
