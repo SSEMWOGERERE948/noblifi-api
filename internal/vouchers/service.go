@@ -88,8 +88,8 @@ type GenerateInput struct {
 }
 
 /*
-	Generate creates physical vouchers using the standard
-	default settings.
+Generate creates physical vouchers using the standard
+default settings.
 */
 func (s *Service) Generate(
 	planID uuid.UUID,
@@ -111,11 +111,11 @@ func (s *Service) Generate(
 }
 
 /*
-	GenerateOnlineVouchers creates the voucher pool used
-	by online/mobile-money packages.
+GenerateOnlineVouchers creates the voucher pool used
+by online/mobile-money packages.
 
-	Online vouchers use the default secure 8-character
-	alphanumeric format.
+Online vouchers use the default secure 8-character
+alphanumeric format.
 */
 func (s *Service) GenerateOnlineVouchers(
 	planID uuid.UUID,
@@ -150,8 +150,8 @@ func (s *Service) GenerateOnlineVoucherCount(
 }
 
 /*
-	GeneratePhysical validates the printable voucher
-	configuration before generating the batch.
+GeneratePhysical validates the printable voucher
+configuration before generating the batch.
 */
 func (s *Service) GeneratePhysical(
 	input GenerateInput,
@@ -203,7 +203,7 @@ func (s *Service) GeneratePhysical(
 }
 
 /*
-	generate creates the actual voucher records.
+generate creates the actual voucher records.
 */
 func (s *Service) generate(
 	input GenerateInput,
@@ -347,12 +347,12 @@ func (s *Service) generate(
 }
 
 /*
-	generateUniqueCode creates a code that:
+generateUniqueCode creates a code that:
 
-	1. follows the selected character type;
-	2. has exactly the selected length;
-	3. is not duplicated in the current batch;
-	4. does not already exist in the database.
+1. follows the selected character type;
+2. has exactly the selected length;
+3. is not duplicated in the current batch;
+4. does not already exist in the database.
 */
 func (s *Service) generateUniqueCode(
 	pattern string,
@@ -423,8 +423,8 @@ func (s *Service) List(
 }
 
 /*
-	normalizeCodeLength applies the default when the frontend
-	does not provide a length and otherwise requires 4–9.
+normalizeCodeLength applies the default when the frontend
+does not provide a length and otherwise requires 4–9.
 */
 func normalizeCodeLength(
 	length int,
@@ -446,12 +446,12 @@ func normalizeCodeLength(
 }
 
 /*
-	generateCode creates the actual voucher token.
+generateCode creates the actual voucher token.
 
-	There is intentionally NO "NF-" prefix.
+There is intentionally NO "NF-" prefix.
 
-	If length = 8, the generated code contains exactly
-	8 characters.
+If length = 8, the generated code contains exactly
+8 characters.
 */
 func generateCode(
 	pattern string,
@@ -493,8 +493,8 @@ func generateCode(
 }
 
 /*
-	randomString uses crypto/rand so voucher codes are not
-	predictable.
+randomString uses crypto/rand so voucher codes are not
+predictable.
 */
 func randomString(
 	alphabet string,
