@@ -1,6 +1,7 @@
 package wireguard
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/noblifi/noblifi/backend/internal/config"
+	"github.com/noblifi/noblifi/backend/internal/portprofiles"
 	"github.com/noblifi/noblifi/backend/internal/radius"
 	"github.com/noblifi/noblifi/backend/internal/routers"
 	"gorm.io/gorm"
@@ -45,6 +47,17 @@ type TelemetryTarget struct {
 	APIPort     int       `json:"api_port"`
 	APIUsername string    `json:"api_username"`
 	APIPassword string    `json:"api_password"`
+}
+
+type DesiredRouterConfig struct {
+	RouterID       string `json:"router_id"`
+	ManagementIP   string `json:"management_ip"`
+	ConfigRevision string `json:"config_revision"`
+	APIUsername    string `json:"api_username"`
+	APIPassword    string `json:"api_password"`
+	APIPort        int    `json:"api_port"`
+	APITLS         bool   `json:"api_tls"`
+	RouterOSScript string `json:"routeros_script"`
 }
 
 type AgentTelemetryReport struct {
@@ -310,6 +323,87 @@ func (s *Service) RecordAgentTelemetry(routerID uuid.UUID, input AgentTelemetryR
 		}
 	}
 	return nil
+}
+
+func (s *Service) DesiredRouterConfig(routerID uuid.UUID) (DesiredRouterConfig, error) {
+	var router routers.Router
+	if err := s.db.Preload("PortAssignments").Preload("NetworkProfile").First(&router, "id = ?", routerID).Error; err != nil {
+		return DesiredRouterConfig{}, err
+	}
+	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
+		return DesiredRouterConfig{}, errors.New("router management tunnel IP is missing")
+	}
+
+	assignments := make([]portprofiles.Assignment, 0, len(router.PortAssignments))
+	for _, assignment := range router.PortAssignments {
+		assignments = append(assignments, portprofiles.Assignment{
+			InterfaceName: assignment.InterfaceName,
+			Role:          assignment.Role,
+		})
+	}
+	if len(assignments) == 0 {
+		assignments = portprofiles.DefaultAssignments()
+	}
+
+	options := renderOptionsForRouter(router, s.cfg)
+	options.RadiusServer = s.cfg.WireGuardServerIP
+	options.LoginPageURL = normalizeProvisioningBaseURL(s.cfg.ProvisioningBaseURL) + "/hotspot-login/" + router.ClaimToken
+
+	script, err := portprofiles.RenderRouterOSWithOptions(assignments, options)
+	if err != nil {
+		return DesiredRouterConfig{}, err
+	}
+	sum := sha256.Sum256([]byte(script))
+
+	return DesiredRouterConfig{
+		RouterID:       router.ID.String(),
+		ManagementIP:   hostOnly(strings.TrimSpace(*router.WireGuardTunnelIP)),
+		ConfigRevision: fmt.Sprintf("%x", sum[:]),
+		APIUsername:    options.APIUsername,
+		APIPassword:    options.APIPassword,
+		APIPort:        8728,
+		APITLS:         false,
+		RouterOSScript: script,
+	}, nil
+}
+
+func renderOptionsForRouter(router routers.Router, cfg config.Config) portprofiles.RenderOptions {
+	if router.NetworkProfile != nil {
+		profile := *router.NetworkProfile
+		routers.NormalizeNetworkProfile(&profile, cfg)
+		options := profile.RenderOptions()
+		options.WalledGardenHosts = cfg.HotspotWalledGardenHosts
+		return options
+	}
+	return portprofiles.RenderOptions{
+		RadiusServer:        cfg.RadiusServer,
+		RadiusSecret:        cfg.RadiusSecret,
+		RouterIdentity:      cfg.RouterIdentityPrefix + "-Router",
+		APIUsername:         cfg.RouterAPIUsername,
+		APIPassword:         cfg.RouterAPIPassword,
+		HotspotBridge:       cfg.HotspotBridgeName,
+		StaffBridge:         cfg.StaffBridgeName,
+		POSBridge:           cfg.POSBridgeName,
+		CCTVBridge:          cfg.CCTVBridgeName,
+		HotspotSubnet:       cfg.HotspotSubnetCIDR,
+		HotspotGateway:      cfg.HotspotGatewayCIDR,
+		HotspotPool:         cfg.HotspotPoolRange,
+		StaffSubnet:         cfg.StaffSubnetCIDR,
+		StaffGateway:        cfg.StaffGatewayCIDR,
+		StaffPool:           cfg.StaffPoolRange,
+		POSSubnet:           cfg.POSSubnetCIDR,
+		POSGateway:          cfg.POSGatewayCIDR,
+		POSPool:             cfg.POSPoolRange,
+		CCTVSubnet:          cfg.CCTVSubnetCIDR,
+		CCTVGateway:         cfg.CCTVGatewayCIDR,
+		CCTVPool:            cfg.CCTVPoolRange,
+		HotspotDNSName:      cfg.HotspotDNSName,
+		HotspotPortalName:   cfg.HotspotPortalName,
+		WalledGardenHosts:   cfg.HotspotWalledGardenHosts,
+		DisableWWWService:   cfg.DisableWWWService,
+		EnableAPIService:    cfg.EnableAPIService,
+		EnableAPISSLService: cfg.EnableAPISSLService,
+	}
 }
 
 func (s *Service) existingConfigureJob(routerID uuid.UUID) (WireGuardJob, bool, error) {
@@ -675,6 +769,18 @@ func hostOnly(value string) string {
 		}
 	}
 	return strings.Trim(value, "[]")
+}
+
+func normalizeProvisioningBaseURL(baseURL string) string {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return "http://localhost:8080/api/v1/provisioning"
+	}
+	lower := strings.ToLower(baseURL)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return "https://" + baseURL
+	}
+	return baseURL
 }
 
 func firstNonEmpty(values ...string) string {

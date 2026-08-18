@@ -12,27 +12,35 @@ import (
 	"github.com/noblifi/noblifi/backend/internal/config"
 	"github.com/noblifi/noblifi/backend/internal/portprofiles"
 	"github.com/noblifi/noblifi/backend/internal/routers"
+	"github.com/noblifi/noblifi/backend/internal/wireguard"
 )
 
 type RadiusRegistrar interface {
 	RegisterNAS(nasName, shortName, secret, description string) error
 }
 
+type WireGuardJobQueuer interface {
+	QueuePeerUpsert(router routers.Router) (wireguard.WireGuardJob, error)
+	QueueRouterConfigure(router routers.Router, configRevision string) (wireguard.WireGuardJob, error)
+	ActiveServerPublicKey() (string, error)
+}
+
 type Service struct {
 	repo   *routers.Repository
 	cfg    config.Config
 	radius RadiusRegistrar
+	wg     WireGuardJobQueuer
 }
 
-func NewService(repo *routers.Repository, cfg config.Config, radius RadiusRegistrar) *Service {
-	return &Service{repo: repo, cfg: cfg, radius: radius}
+func NewService(repo *routers.Repository, cfg config.Config, radius RadiusRegistrar, wg WireGuardJobQueuer) *Service {
+	return &Service{repo: repo, cfg: cfg, radius: radius, wg: wg}
 }
 func (s *Service) BootstrapScript(token string) (string, error) {
 	router, err := s.repo.FindByClaimToken(token)
 	if err != nil {
 		return "", errors.New("invalid claim token")
 	}
-	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) {
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
 		return "", errors.New("claim token expired")
 	}
 	return renderBootstrapScript(token, s.cfg.ProvisioningBaseURL), nil
@@ -175,10 +183,21 @@ func (s *Service) WireGuardScript(token string) (string, error) {
 	if err != nil {
 		return "", errors.New("invalid claim token")
 	}
-	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) {
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
 		return "", errors.New("claim token expired")
 	}
-	return routers.RenderWireGuardRouterOS(router, s.cfg), nil
+	cfg := s.cfg
+	if s.wg != nil {
+		publicKey, err := s.wg.ActiveServerPublicKey()
+		if err != nil {
+			return "", fmt.Errorf("resolve active WireGuard server public key: %w", err)
+		}
+		cfg.WireGuardPublicKey = publicKey
+	}
+	if err := routers.ValidateWireGuardConfig(cfg); err != nil {
+		return "", err
+	}
+	return routers.RenderWireGuardRouterOS(router, cfg), nil
 }
 
 type WireGuardKeyInput struct {
@@ -214,7 +233,22 @@ func (s *Service) WireGuardKey(input WireGuardKeyInput) error {
 	key := strings.TrimSpace(input.PublicKey)
 	router.WireGuardPublicKey = &key
 	router.WireGuardStatus = "awaiting_vps_peer"
-	return s.repo.Save(&router)
+	router.WireGuardPeerStatus = "peer_queued"
+	now := time.Now().UTC()
+	router.LastSeenAt = &now
+	router.WireGuardPeerUpdatedAt = &now
+	router.WireGuardLastError = nil
+	router.ManagementIP = router.WireGuardTunnelIP
+	if err := s.repo.Save(&router); err != nil {
+		return err
+	}
+	if s.wg == nil {
+		return errors.New("WireGuard job service is unavailable")
+	}
+	if _, err := s.wg.QueuePeerUpsert(router); err != nil {
+		return fmt.Errorf("queue xneelo WireGuard peer installation: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) WireGuardStatus(input WireGuardStatusInput) error {
@@ -233,7 +267,23 @@ func (s *Service) WireGuardStatus(input WireGuardStatusInput) error {
 		return errors.New("invalid claim token")
 	}
 	router.WireGuardStatus = strings.TrimSpace(input.Status)
-	return s.repo.Save(&router)
+	router.WireGuardPeerStatus = strings.TrimSpace(input.Status)
+	now := time.Now().UTC()
+	router.LastSeenAt = &now
+	router.WireGuardPeerUpdatedAt = &now
+	if strings.TrimSpace(input.Status) == "connected" {
+		router.WireGuardLastHandshakeAt = &now
+		router.Status = "online"
+	}
+	if err := s.repo.Save(&router); err != nil {
+		return err
+	}
+	if strings.TrimSpace(input.Status) == "connected" && s.wg != nil {
+		if _, err := s.wg.QueueRouterConfigure(router, ""); err != nil {
+			return fmt.Errorf("queue router configuration: %w", err)
+		}
+	}
+	return nil
 }
 
 type InterfaceCheckIn struct {

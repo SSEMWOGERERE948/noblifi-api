@@ -14,6 +14,7 @@ import (
 	"github.com/noblifi/noblifi/backend/internal/radius"
 	"github.com/noblifi/noblifi/backend/internal/routers"
 	"github.com/noblifi/noblifi/backend/internal/vouchers"
+	"github.com/noblifi/noblifi/backend/internal/wireguard"
 )
 
 func Run() {
@@ -46,13 +47,15 @@ func Run() {
 	radiusService := radius.NewService(db)
 	radiusService.StartUDPServers(cfg.RadiusAuthPort, cfg.RadiusAcctPort, cfg.RadiusSecret)
 	routerService := routers.NewService(routerRepo, cfg)
+	wireGuardService := wireguard.NewService(db, cfg)
+	routerService.SetWireGuardServerPublicKeyResolver(wireGuardService)
 	planRepo := plans.NewRepository(db)
 	planService := plans.NewService(planRepo)
 	voucherRepo := vouchers.NewRepository(db)
 	voucherService := vouchers.NewService(voucherRepo)
 	voucherService.SetRadiusSyncer(radiusService)
 	paymentsService := payments.NewService(db, cfg, radiusService)
-	provisioningService := provisioning.NewService(routerRepo, cfg, radiusService)
+	provisioningService := provisioning.NewService(routerRepo, cfg, radiusService, wireGuardService)
 
 	// --- Register every PUBLIC route BEFORE the protected group exists. ---
 	// IMPORTANT: In Fiber v2, api.Group("", authHandler.RequireAuth) attaches
@@ -65,6 +68,7 @@ func Run() {
 	plans.NewHandler(planService, voucherService).RegisterPublicRoutes(api)
 	provisioning.NewHandler(provisioningService).RegisterRoutes(api)
 	radius.NewHandler(radiusService).RegisterRoutes(api)
+	wireguard.NewHandler(wireGuardService).RegisterRoutes(api)
 
 	// --- NOW create the protected group and register everything requiring auth. ---
 	protected := api.Group("", authHandler.RequireAuth)

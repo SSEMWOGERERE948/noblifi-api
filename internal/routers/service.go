@@ -1,4 +1,4 @@
-﻿package routers
+package routers
 
 import (
 	"crypto/rand"
@@ -16,12 +16,21 @@ import (
 )
 
 type Service struct {
-	repo *Repository
-	cfg  config.Config
+	repo                    *Repository
+	cfg                     config.Config
+	serverPublicKeyResolver WireGuardServerPublicKeyResolver
+}
+
+type WireGuardServerPublicKeyResolver interface {
+	ActiveServerPublicKey() (string, error)
 }
 
 func NewService(repo *Repository, cfg config.Config) *Service {
 	return &Service{repo: repo, cfg: cfg}
+}
+
+func (s *Service) SetWireGuardServerPublicKeyResolver(resolver WireGuardServerPublicKeyResolver) {
+	s.serverPublicKeyResolver = resolver
 }
 
 type CreateRouterInput struct {

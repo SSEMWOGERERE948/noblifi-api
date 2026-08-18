@@ -34,8 +34,9 @@ type WireGuardSetupResponse struct {
 }
 
 func (s *Service) PrepareWireGuard(routerID uuid.UUID) (WireGuardSetupResponse, error) {
-	if issues := wireGuardConfigIssues(s.cfg); len(issues) > 0 {
-		return WireGuardSetupResponse{Enabled: s.cfg.WireGuardEnabled, Issues: issues}, errors.New(strings.Join(issues, "; "))
+	cfg := s.wireGuardConfig()
+	if issues := wireGuardConfigIssues(cfg); len(issues) > 0 {
+		return WireGuardSetupResponse{Enabled: cfg.WireGuardEnabled, Issues: issues}, errors.New(strings.Join(issues, "; "))
 	}
 
 	router, err := s.repo.Find(routerID)
@@ -66,7 +67,7 @@ func (s *Service) PrepareWireGuard(routerID uuid.UUID) (WireGuardSetupResponse, 
 	if err != nil {
 		return WireGuardSetupResponse{}, err
 	}
-	profile.RadiusServer = s.cfg.WireGuardServerIP
+	profile.RadiusServer = cfg.WireGuardServerIP
 	if err := s.repo.SaveNetworkProfile(&profile); err != nil {
 		return WireGuardSetupResponse{}, err
 	}
@@ -83,16 +84,17 @@ func (s *Service) WireGuardSetup(routerID uuid.UUID) (WireGuardSetupResponse, er
 }
 
 func (s *Service) wireGuardSetupForRouter(router Router) WireGuardSetupResponse {
-	issues := wireGuardConfigIssues(s.cfg)
+	cfg := s.wireGuardConfig()
+	issues := wireGuardConfigIssues(cfg)
 	response := WireGuardSetupResponse{
-		Enabled:       s.cfg.WireGuardEnabled,
+		Enabled:       cfg.WireGuardEnabled,
 		Ready:         len(issues) == 0 && router.WireGuardTunnelIP != nil,
 		Issues:        issues,
 		Status:        router.WireGuardStatus,
 		InterfaceName: routerWireGuardInterface,
-		Endpoint:      s.cfg.WireGuardEndpoint,
-		EndpointPort:  s.cfg.WireGuardPort,
-		ServerAddress: s.cfg.WireGuardServerIP,
+		Endpoint:      cfg.WireGuardEndpoint,
+		EndpointPort:  cfg.WireGuardPort,
+		ServerAddress: cfg.WireGuardServerIP,
 	}
 	if response.Status == "" {
 		response.Status = "disabled"
@@ -103,10 +105,10 @@ func (s *Service) wireGuardSetupForRouter(router Router) WireGuardSetupResponse 
 
 	response.RouterAddress = strings.TrimSpace(*router.WireGuardTunnelIP)
 	if len(issues) == 0 {
-		response.MikroTikScript = RenderWireGuardRouterOS(router, s.cfg)
-		wireGuardURL := normalizeProvisioningBaseURL(s.cfg.ProvisioningBaseURL) + "/wireguard/" + router.ClaimToken
+		response.MikroTikScript = RenderWireGuardRouterOS(router, cfg)
+		wireGuardURL := normalizeProvisioningBaseURL(cfg.ProvisioningBaseURL) + "/wireguard/" + router.ClaimToken
 		response.MikroTikInstallCommand = fmt.Sprintf(
-			"/tool fetch url=%q mode=%s dst-path=noblifi-wireguard.rsc\n/import file-name=noblifi-wireguard.rsc",
+			"/tool fetch url=%q mode=%s dst-path=\"noblifi-wireguard.rsc\"\n:delay 2s\n/import file-name=\"noblifi-wireguard.rsc\"\n:delay 1s\n/file remove \"noblifi-wireguard.rsc\"",
 			wireGuardURL,
 			provisioningFetchMode(wireGuardURL),
 		)
@@ -116,14 +118,14 @@ func (s *Service) wireGuardSetupForRouter(router Router) WireGuardSetupResponse 
 	}
 
 	response.RouterPublicKey = strings.TrimSpace(*router.WireGuardPublicKey)
-	statusURL := normalizeProvisioningBaseURL(s.cfg.ProvisioningBaseURL) + "/wireguard-status"
+	statusURL := normalizeProvisioningBaseURL(cfg.ProvisioningBaseURL) + "/wireguard-status"
 	statusPayload := fmt.Sprintf(`{"token":"%s","status":"connected"}`, router.ClaimToken)
 	response.VPSPeerCommand = fmt.Sprintf(
 		"sudo wg set %s peer %q allowed-ips %s/32\nsudo wg-quick save %s\nping -c 3 -W 3 %s && curl --fail --silent --show-error -X POST %q -H 'Content-Type: application/json' --data %q",
-		s.cfg.WireGuardInterface,
+		cfg.WireGuardInterface,
 		response.RouterPublicKey,
 		response.RouterAddress,
-		s.cfg.WireGuardInterface,
+		cfg.WireGuardInterface,
 		response.RouterAddress,
 		statusURL,
 		statusPayload,
@@ -137,10 +139,20 @@ func (s *Service) wireGuardSetupForRouter(router Router) WireGuardSetupResponse 
 	)
 	response.VerificationCommands = fmt.Sprintf(
 		"sudo wg show %s\nping -c 3 %s",
-		s.cfg.WireGuardInterface,
+		cfg.WireGuardInterface,
 		response.RouterAddress,
 	)
 	return response
+}
+
+func (s *Service) wireGuardConfig() config.Config {
+	cfg := s.cfg
+	if s.serverPublicKeyResolver != nil {
+		if publicKey, err := s.serverPublicKeyResolver.ActiveServerPublicKey(); err == nil {
+			cfg.WireGuardPublicKey = publicKey
+		}
+	}
+	return cfg
 }
 
 func (s *Service) allocateWireGuardIP() (string, error) {
@@ -250,58 +262,132 @@ func routerSupportsWireGuard(version *string) bool {
 
 func RenderWireGuardRouterOS(router Router, cfg config.Config) string {
 	routerIP := strings.TrimSpace(*router.WireGuardTunnelIP)
-	callbackURL := normalizeProvisioningBaseURL(cfg.ProvisioningBaseURL) + "/wireguard-key"
+	baseURL := normalizeProvisioningBaseURL(cfg.ProvisioningBaseURL)
+	callbackURL := baseURL + "/wireguard-key"
+	statusURL := baseURL + "/wireguard-status"
 	fetchMode := provisioningFetchMode(callbackURL)
+	wgName := routerWireGuardInterface
+	serverIP := strings.TrimSpace(cfg.WireGuardServerIP)
 
 	return fmt.Sprintf(`# NobliFi management tunnel - RouterOS 7+
 # This script does not alter WAN, bridges, DHCP, HotSpot ports, or the default route.
-:local wgName "%s"
 :local claimToken "%s"
 
-:if ([:len [/interface wireguard find where name=$wgName]] = 0) do={
-  /interface wireguard add name=$wgName mtu=1420 comment="NobliFi management tunnel"
+:if ([:len [/interface wireguard find where name="%s"]] = 0) do={
+  /interface wireguard add name="%s" mtu=1420 comment="NobliFi management tunnel"
 }
 
-:local wgInterface [/interface wireguard find where name=$wgName]
+:local wgInterface [/interface wireguard find where name="%s"]
 /interface wireguard set $wgInterface mtu=1420 disabled=no comment="NobliFi management tunnel"
 
 /ip address remove [find where comment="NobliFi WireGuard address"]
-/ip address add address=%s/32 interface=$wgName comment="NobliFi WireGuard address"
+/ip address add address="%s/32" interface="%s" comment="NobliFi WireGuard address"
 
 /interface wireguard peers remove [find where comment="NobliFi VPS"]
-/interface wireguard peers add interface=$wgName public-key="%s" endpoint-address="%s" endpoint-port=%d allowed-address=%s/32 persistent-keepalive=%ds comment="NobliFi VPS"
+/interface wireguard peers add interface="%s" public-key="%s" endpoint-address="%s" endpoint-port=%d allowed-address="%s/32" persistent-keepalive=%ds comment="NobliFi VPS"
 
 /ip firewall filter remove [find where comment="Allow NobliFi management over WireGuard"]
 /ip firewall filter remove [find where comment="Allow NobliFi WireGuard ping"]
 :local inputRules [/ip firewall filter find where chain=input]
 :if ([:len $inputRules] = 0) do={
-  /ip firewall filter add chain=input action=accept in-interface=$wgName src-address=%s/32 protocol=tcp dst-port=8291,8728,8729 comment="Allow NobliFi management over WireGuard"
-  /ip firewall filter add chain=input action=accept in-interface=$wgName src-address=%s/32 protocol=icmp comment="Allow NobliFi WireGuard ping"
+  /ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s/32" protocol=tcp dst-port=8291,8728,8729 comment="Allow NobliFi management over WireGuard"
+  /ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s/32" protocol=icmp comment="Allow NobliFi WireGuard ping"
 } else={
   :local firstInputRule [:pick $inputRules 0]
-  /ip firewall filter add chain=input action=accept in-interface=$wgName src-address=%s/32 protocol=tcp dst-port=8291,8728,8729 place-before=$firstInputRule comment="Allow NobliFi management over WireGuard"
-  /ip firewall filter add chain=input action=accept in-interface=$wgName src-address=%s/32 protocol=icmp place-before=$firstInputRule comment="Allow NobliFi WireGuard ping"
+  /ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s/32" protocol=tcp dst-port=8291,8728,8729 place-before=$firstInputRule comment="Allow NobliFi management over WireGuard"
+  /ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s/32" protocol=icmp place-before=$firstInputRule comment="Allow NobliFi WireGuard ping"
 }
 
-:local routerPublicKey [/interface wireguard get $wgInterface public-key]
-:local callbackPayload ("{\"token\":\"" . $claimToken . "\",\"public_key\":\"" . $routerPublicKey . "\"}")
-/tool fetch url="%s" mode=%s http-method=post http-header-field="Content-Type: application/json" http-data=$callbackPayload keep-result=no
+:do { /user remove [find where name="%s" comment="NobliFi API management user"] } on-error={}
+:do { /user add name="%s" group=full password="%s" comment="NobliFi API management user" } on-error={ :error "NobliFi failed to create API management user" }
+:do { /ip service set api disabled=no address="%s/32" } on-error={ :error "NobliFi failed to enable restricted RouterOS API" }
 
+:local routerPublicKey [/interface wireguard get $wgInterface public-key]
 :put ("NobliFi WireGuard public key: " . $routerPublicKey)
-:put "Tunnel configured. Return to NobliFi and install the generated VPS peer command."`,
-		routerWireGuardInterface,
+:local callbackPayload ("{\"claim_token\":\"" . $claimToken . "\",\"public_key\":\"" . $routerPublicKey . "\"}")
+:local keyReported false
+:for attempt from=1 to=3 do={
+  :if (!$keyReported) do={
+    :do {
+      :local keyResult [/tool fetch url="%s" mode=%s http-method=post http-header-field="Content-Type: application/json" http-data=$callbackPayload output=user as-value idle-timeout=30s duration=1m]
+      :if (($keyResult->"status") = "finished") do={ :set keyReported true }
+    } on-error={
+      :log warning ("NobliFi WireGuard key report attempt " . $attempt . " failed")
+    }
+    :if (!$keyReported) do={ :delay 3s }
+  }
+}
+:if (!$keyReported) do={ :error "NobliFi could not register this router WireGuard key with the control plane" }
+
+:put "NobliFi WireGuard key registered; waiting for xneelo agent"
+:local wgPeer [/interface wireguard peers find where interface="%s" comment="NobliFi VPS"]
+:local connected false
+:local lastHandshake ""
+
+:for second from=1 to=120 do={
+  :do {
+    /tool ping address="%s" src-address="%s" interface="%s" count=1 interval=200ms
+  } on-error={}
+
+  :if ([:len $wgPeer] > 0) do={
+    :local rx [/interface wireguard peers get [:pick $wgPeer 0] rx]
+    :set lastHandshake [/interface wireguard peers get [:pick $wgPeer 0] last-handshake]
+    :if (($rx > 0) && ($lastHandshake != "")) do={ :set connected true }
+  }
+
+  :if ($connected) do={ :set second 120 } else={ :delay 1s }
+}
+
+:if ($connected) do={
+  :put ("NobliFi WireGuard connected; last-handshake=" . $lastHandshake)
+  :local connectedPayload ("{\"claim_token\":\"" . $claimToken . "\",\"status\":\"connected\"}")
+  :do {
+    /tool fetch url="%s" mode=%s http-method=post http-header-field="Content-Type: application/json" http-data=$connectedPayload keep-result=no
+  } on-error={ :log warning "NobliFi connected status report failed" }
+} else={
+  :local failedPayload ("{\"claim_token\":\"" . $claimToken . "\",\"status\":\"failed\"}")
+  :do {
+    /tool fetch url="%s" mode=%s http-method=post http-header-field="Content-Type: application/json" http-data=$failedPayload keep-result=no
+  } on-error={ :log warning "NobliFi failed status report failed" }
+  :error "NobliFi xneelo agent did not establish a WireGuard handshake within 120 seconds"
+}`,
 		router.ClaimToken,
+		routerOSQuotedString(wgName),
+		routerOSQuotedString(wgName),
+		routerOSQuotedString(wgName),
 		routerIP,
+		routerOSQuotedString(wgName),
+		routerOSQuotedString(wgName),
 		cfg.WireGuardPublicKey,
 		cfg.WireGuardEndpoint,
 		cfg.WireGuardPort,
-		cfg.WireGuardServerIP,
+		serverIP,
 		cfg.WireGuardKeepalive,
-		cfg.WireGuardServerIP,
-		cfg.WireGuardServerIP,
-		cfg.WireGuardServerIP,
-		cfg.WireGuardServerIP,
+		routerOSQuotedString(wgName),
+		serverIP,
+		routerOSQuotedString(wgName),
+		serverIP,
+		routerOSQuotedString(wgName),
+		serverIP,
+		routerOSQuotedString(wgName),
+		serverIP,
+		routerOSQuotedString(cfg.RouterAPIUsername),
+		routerOSQuotedString(cfg.RouterAPIUsername),
+		routerOSQuotedString(cfg.RouterAPIPassword),
+		serverIP,
 		callbackURL,
 		fetchMode,
+		routerOSQuotedString(wgName),
+		serverIP,
+		routerIP,
+		routerOSQuotedString(wgName),
+		statusURL,
+		fetchMode,
+		statusURL,
+		fetchMode,
 	)
+}
+
+func routerOSQuotedString(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(value)
 }

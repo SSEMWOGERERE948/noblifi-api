@@ -30,6 +30,7 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	internal.Post("/routers/:id/remote-access-ready", h.remoteAccessReady)
 	internal.Post("/routers/:id/remote-access-error", h.remoteAccessError)
 	internal.Get("/routers/:id/remote-access-config", h.remoteAccessConfig)
+	internal.Get("/routers/:id/desired-config", h.desiredConfig)
 }
 
 func (h *Handler) auth(c *fiber.Ctx) error {
@@ -203,6 +204,18 @@ func (h *Handler) remoteAccessConfig(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
 	}
 	cfg, err := h.service.DesiredRemoteAccess(routerID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, err.Error())
+	}
+	return c.JSON(cfg)
+}
+
+func (h *Handler) desiredConfig(c *fiber.Ctx) error {
+	routerID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
+	}
+	cfg, err := h.service.DesiredRouterConfig(routerID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, err.Error())
 	}

@@ -21,11 +21,18 @@ import (
 )
 
 type config struct {
-	BaseURL           string
-	AgentToken        string
-	AgentID           string
-	TelemetryInterval time.Duration
-	HTTPTimeout       time.Duration
+	BaseURL              string
+	AgentToken           string
+	AgentID              string
+	TelemetryInterval    time.Duration
+	PollInterval         time.Duration
+	HeartbeatInterval    time.Duration
+	HTTPTimeout          time.Duration
+	InterfaceName        string
+	ConfigPath           string
+	LockPath             string
+	BackupDir            string
+	RouterConnectTimeout time.Duration
 }
 
 type telemetryTargetsResponse struct {
@@ -65,6 +72,7 @@ func main() {
 
 	client := &http.Client{Timeout: cfg.HTTPTimeout}
 	log.Printf("noblifi telemetry agent started agent_id=%s interval=%s", cfg.AgentID, cfg.TelemetryInterval)
+	go runWireGuardWorker(ctx, client, cfg)
 
 	runTelemetry(ctx, client, cfg)
 
@@ -224,11 +232,18 @@ func responseError(resp *http.Response) error {
 
 func loadConfig() (config, error) {
 	cfg := config{
-		BaseURL:           strings.TrimRight(strings.TrimSpace(os.Getenv("NOBLIFI_CONTROL_PLANE_URL")), "/"),
-		AgentToken:        strings.TrimSpace(os.Getenv("NOBLIFI_AGENT_TOKEN")),
-		AgentID:           firstNonEmpty(os.Getenv("NOBLIFI_AGENT_ID"), "xneelo-wg-agent-01"),
-		TelemetryInterval: durationEnv("NOBLIFI_AGENT_TELEMETRY_INTERVAL", 2*time.Minute),
-		HTTPTimeout:       durationEnv("NOBLIFI_AGENT_HTTP_TIMEOUT", 15*time.Second),
+		BaseURL:              strings.TrimRight(strings.TrimSpace(os.Getenv("NOBLIFI_CONTROL_PLANE_URL")), "/"),
+		AgentToken:           strings.TrimSpace(os.Getenv("NOBLIFI_AGENT_TOKEN")),
+		AgentID:              firstNonEmpty(os.Getenv("NOBLIFI_AGENT_ID"), "xneelo-wg-agent-01"),
+		TelemetryInterval:    durationEnv("NOBLIFI_AGENT_TELEMETRY_INTERVAL", 2*time.Minute),
+		PollInterval:         durationEnv("NOBLIFI_AGENT_POLL_INTERVAL", 5*time.Second),
+		HeartbeatInterval:    durationEnv("NOBLIFI_AGENT_HEARTBEAT_INTERVAL", 5*time.Minute),
+		HTTPTimeout:          durationEnv("NOBLIFI_AGENT_HTTP_TIMEOUT", 30*time.Second),
+		InterfaceName:        firstNonEmpty(os.Getenv("NOBLIFI_WIREGUARD_INTERFACE"), "wg0"),
+		ConfigPath:           firstNonEmpty(os.Getenv("NOBLIFI_WIREGUARD_CONFIG"), "/etc/wireguard/wg0.conf"),
+		LockPath:             firstNonEmpty(os.Getenv("NOBLIFI_WIREGUARD_LOCK"), "/run/lock/noblifi-wireguard.lock"),
+		BackupDir:            firstNonEmpty(os.Getenv("NOBLIFI_WIREGUARD_BACKUP_DIR"), "/etc/wireguard/backups"),
+		RouterConnectTimeout: durationEnv("NOBLIFI_ROUTER_CONNECT_TIMEOUT", 2*time.Minute),
 	}
 	if cfg.BaseURL == "" {
 		return config{}, errors.New("NOBLIFI_CONTROL_PLANE_URL is required")
