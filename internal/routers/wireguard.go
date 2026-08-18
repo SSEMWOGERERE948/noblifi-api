@@ -43,12 +43,12 @@ func (s *Service) PrepareWireGuard(routerID uuid.UUID) (WireGuardSetupResponse, 
 	if err != nil {
 		return WireGuardSetupResponse{}, err
 	}
-	if !routerSupportsWireGuard(router.RouterOSVersion) {
+	if !RouterSupportsWireGuard(router.RouterOSVersion) {
 		return WireGuardSetupResponse{}, errors.New("WireGuard requires RouterOS 7; upgrade this MikroTik before installing the tunnel")
 	}
 
 	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
-		address, allocErr := s.allocateWireGuardIP()
+		address, allocErr := AllocateWireGuardIP(s.repo, cfg)
 		if allocErr != nil {
 			return WireGuardSetupResponse{}, allocErr
 		}
@@ -103,7 +103,7 @@ func (s *Service) wireGuardSetupForRouter(router Router) WireGuardSetupResponse 
 		return response
 	}
 
-	response.RouterAddress = strings.TrimSpace(*router.WireGuardTunnelIP)
+	response.RouterAddress = normalizeWireGuardAddress(*router.WireGuardTunnelIP)
 	if len(issues) == 0 {
 		response.MikroTikScript = RenderWireGuardRouterOS(router, cfg)
 		wireGuardURL := normalizeProvisioningBaseURL(cfg.ProvisioningBaseURL) + "/wireguard/" + router.ClaimToken
@@ -155,8 +155,11 @@ func (s *Service) wireGuardConfig() config.Config {
 	return cfg
 }
 
-func (s *Service) allocateWireGuardIP() (string, error) {
-	baseIP, network, err := net.ParseCIDR(strings.TrimSpace(s.cfg.WireGuardSubnetCIDR))
+func AllocateWireGuardIP(repo *Repository, cfg config.Config) (string, error) {
+	if repo == nil {
+		return "", errors.New("router repository is required")
+	}
+	baseIP, network, err := net.ParseCIDR(strings.TrimSpace(cfg.WireGuardSubnetCIDR))
 	if err != nil || baseIP.To4() == nil {
 		return "", errors.New("NOBLIFI_WIREGUARD_SUBNET must be a valid IPv4 CIDR")
 	}
@@ -165,14 +168,14 @@ func (s *Service) allocateWireGuardIP() (string, error) {
 		return "", errors.New("NOBLIFI_WIREGUARD_SUBNET must contain at least two usable router addresses")
 	}
 
-	routers, err := s.repo.List()
+	routers, err := repo.List()
 	if err != nil {
 		return "", err
 	}
-	used := map[string]bool{strings.TrimSpace(s.cfg.WireGuardServerIP): true}
+	used := map[string]bool{normalizeWireGuardAddress(cfg.WireGuardServerIP): true}
 	for _, router := range routers {
 		if router.WireGuardTunnelIP != nil {
-			used[strings.TrimSpace(*router.WireGuardTunnelIP)] = true
+			used[normalizeWireGuardAddress(*router.WireGuardTunnelIP)] = true
 		}
 	}
 
@@ -188,6 +191,25 @@ func (s *Service) allocateWireGuardIP() (string, error) {
 		}
 	}
 	return "", errors.New("WireGuard address pool is exhausted")
+}
+
+func normalizeWireGuardAddress(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if strings.Contains(value, "/") {
+		ip, _, err := net.ParseCIDR(value)
+		if err != nil || ip == nil || ip.To4() == nil {
+			return ""
+		}
+		return ip.To4().String()
+	}
+	ip := net.ParseIP(value)
+	if ip == nil || ip.To4() == nil {
+		return ""
+	}
+	return ip.To4().String()
 }
 
 func wireGuardConfigIssues(cfg config.Config) []string {
@@ -249,7 +271,7 @@ func validInterfaceName(value string) bool {
 	return true
 }
 
-func routerSupportsWireGuard(version *string) bool {
+func RouterSupportsWireGuard(version *string) bool {
 	if version == nil || strings.TrimSpace(*version) == "" {
 		return true
 	}
@@ -261,7 +283,7 @@ func routerSupportsWireGuard(version *string) bool {
 }
 
 func RenderWireGuardRouterOS(router Router, cfg config.Config) string {
-	routerIP := strings.TrimSpace(*router.WireGuardTunnelIP)
+	routerIP := normalizeWireGuardAddress(*router.WireGuardTunnelIP)
 	baseURL := normalizeProvisioningBaseURL(cfg.ProvisioningBaseURL)
 	callbackURL := baseURL + "/wireguard-key"
 	statusURL := baseURL + "/wireguard-status"
@@ -285,6 +307,11 @@ func RenderWireGuardRouterOS(router Router, cfg config.Config) string {
 
 /interface wireguard peers remove [find where comment="NobliFi VPS"]
 /interface wireguard peers add interface="%s" public-key="%s" endpoint-address="%s" endpoint-port=%d allowed-address="%s/32" persistent-keepalive=%ds comment="NobliFi VPS"
+
+# Route only NobliFi management traffic through WireGuard. Do not alter the ISP default route.
+/ip route remove [find where comment="NobliFi WireGuard VPS route"]
+/ip route add dst-address="%s/32" gateway="%s" comment="NobliFi WireGuard VPS route"
+:if ([:len [/ip route find where comment="NobliFi WireGuard VPS route"]] = 0) do={ :error "NobliFi failed to install WireGuard management route" }
 
 /ip firewall filter remove [find where comment="Allow NobliFi management over WireGuard"]
 /ip firewall filter remove [find where comment="Allow NobliFi WireGuard ping"]
@@ -363,6 +390,8 @@ func RenderWireGuardRouterOS(router Router, cfg config.Config) string {
 		cfg.WireGuardPort,
 		serverIP,
 		cfg.WireGuardKeepalive,
+		serverIP,
+		routerOSQuotedString(wgName),
 		routerOSQuotedString(wgName),
 		serverIP,
 		routerOSQuotedString(wgName),

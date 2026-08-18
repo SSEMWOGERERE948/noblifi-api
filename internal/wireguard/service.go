@@ -103,7 +103,7 @@ func (s *Service) QueuePeerUpsert(router routers.Router) (WireGuardJob, error) {
 		router.ID,
 		OperationUpsertPeer,
 		strings.TrimSpace(*router.WireGuardPublicKey),
-		strings.TrimSpace(*router.WireGuardTunnelIP)+"/32",
+		hostOnly(strings.TrimSpace(*router.WireGuardTunnelIP))+"/32",
 	)
 }
 
@@ -429,7 +429,7 @@ func (s *Service) QueuePeerRemoval(router routers.Router) (WireGuardJob, error) 
 	}
 	allowedIP := ""
 	if router.WireGuardTunnelIP != nil && strings.TrimSpace(*router.WireGuardTunnelIP) != "" {
-		allowedIP = strings.TrimSpace(*router.WireGuardTunnelIP) + "/32"
+		allowedIP = hostOnly(strings.TrimSpace(*router.WireGuardTunnelIP)) + "/32"
 	}
 	publicKey := ""
 	if router.WireGuardPublicKey != nil {
@@ -758,6 +758,9 @@ func hostOnly(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""
+	}
+	if strings.Contains(value, "/") {
+		return strings.TrimSpace(strings.SplitN(value, "/", 2)[0])
 	}
 	if parsed, err := url.Parse(value); err == nil && parsed.Hostname() != "" {
 		return parsed.Hostname()

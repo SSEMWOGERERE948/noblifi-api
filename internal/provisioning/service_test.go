@@ -40,3 +40,18 @@ func TestRenderHotspotLoginPageEscapesPortalName(t *testing.T) {
 		t.Fatalf("expected escaped portal name, got:\n%s", html)
 	}
 }
+
+func TestBootstrapScriptImportsWireGuardForRouterOS7(t *testing.T) {
+	script := renderBootstrapScript("NOB-TEST", "https://api.example.com/api/v1/provisioning")
+	for _, expected := range []string{
+		`http-method=post`,
+		`\"routeros_version\":\"`,
+		`:if ($majorVersion = "7") do={`,
+		`/wireguard/`,
+		`/import file-name="noblifi-wireguard.rsc"`,
+	} {
+		if !strings.Contains(script, expected) {
+			t.Fatalf("expected bootstrap script to contain %q, got:\n%s", expected, script)
+		}
+	}
+}

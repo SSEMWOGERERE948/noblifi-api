@@ -197,6 +197,22 @@ func (s *Service) WireGuardScript(token string) (string, error) {
 	if err := routers.ValidateWireGuardConfig(cfg); err != nil {
 		return "", err
 	}
+	if !routers.RouterSupportsWireGuard(router.RouterOSVersion) {
+		return "", errors.New("WireGuard requires RouterOS 7")
+	}
+	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
+		address, err := routers.AllocateWireGuardIP(s.repo, cfg)
+		if err != nil {
+			return "", fmt.Errorf("allocate WireGuard tunnel IP: %w", err)
+		}
+		router.WireGuardTunnelIP = &address
+		router.ManagementIP = &address
+		router.WireGuardStatus = "wireguard_configuring"
+		router.WireGuardPeerStatus = "waiting_for_router_key"
+		if err := s.repo.Save(&router); err != nil {
+			return "", err
+		}
+	}
 	return routers.RenderWireGuardRouterOS(router, cfg), nil
 }
 
@@ -259,26 +275,30 @@ func (s *Service) WireGuardStatus(input WireGuardStatusInput) error {
 	if token == "" {
 		return errors.New("invalid claim token")
 	}
-	if strings.TrimSpace(input.Status) == "" {
+	status := strings.ToLower(strings.TrimSpace(input.Status))
+	if status == "" {
 		return errors.New("status required")
+	}
+	if status != "connected" && status != "failed" {
+		return errors.New("invalid WireGuard status")
 	}
 	router, err := s.repo.FindByClaimToken(token)
 	if err != nil {
 		return errors.New("invalid claim token")
 	}
-	router.WireGuardStatus = strings.TrimSpace(input.Status)
-	router.WireGuardPeerStatus = strings.TrimSpace(input.Status)
+	router.WireGuardStatus = status
+	router.WireGuardPeerStatus = status
 	now := time.Now().UTC()
 	router.LastSeenAt = &now
 	router.WireGuardPeerUpdatedAt = &now
-	if strings.TrimSpace(input.Status) == "connected" {
+	if status == "connected" {
 		router.WireGuardLastHandshakeAt = &now
 		router.Status = "online"
 	}
 	if err := s.repo.Save(&router); err != nil {
 		return err
 	}
-	if strings.TrimSpace(input.Status) == "connected" && s.wg != nil {
+	if status == "connected" && s.wg != nil {
 		if _, err := s.wg.QueueRouterConfigure(router, ""); err != nil {
 			return fmt.Errorf("queue router configuration: %w", err)
 		}
@@ -325,6 +345,9 @@ func (s *Service) CheckIn(input CheckInInput) error {
 	router, err := s.repo.FindByClaimToken(token)
 	if err != nil {
 		return errors.New("invalid claim token")
+	}
+	if router.ClaimTokenExpiresAt != nil && router.ClaimTokenExpiresAt.Before(time.Now()) && !canFetchConfigAfterClaimExpiry(router) {
+		return errors.New("claim token expired")
 	}
 	if serial != "" {
 		router.SerialNumber = &serial
@@ -473,24 +496,17 @@ func renderBootstrapScript(token, baseURL string) string {
 
 /system identity set name=("noblifi-pending-" . $claimToken)
 
-:global serial [/system routerboard get serial-number]
-:global model [/system routerboard get model]
-:global versionRaw [/system resource get version]
-:global version $versionRaw
-:global spacePos [:find $versionRaw " "]
+:local serial [/system routerboard get serial-number]
+:local model [/system routerboard get model]
+:local versionRaw [/system resource get version]
+:local version $versionRaw
+:local spacePos [:find $versionRaw " "]
 :if ($spacePos != nil) do={ :set version [:pick $versionRaw 0 $spacePos] }
 
 :put ("RAW VERSION: " . $versionRaw)
 :put ("PARSED VERSION: " . $version)
 
-:global checkInUrl ($baseUrl . "/check-in?token=" . $claimToken . "&serial=" . $serial . "&model=" . $model . "&routeros_version=" . $version)
-:global statusUrl ($baseUrl . "/status?token=" . $claimToken . "&serial=" . $serial . "&status=linked")
-
-:put ("NobliFi check-in URL: " . $checkInUrl)
-:put ("NobliFi status URL: " . $statusUrl)
-
-/tool fetch url=$checkInUrl mode=%s keep-result=no
-
+:local ifaceJson ""
 :foreach iface in=[/interface find] do={
   :local name [/interface get $iface name]
   :local type [/interface get $iface type]
@@ -498,9 +514,32 @@ func renderBootstrapScript(token, baseURL string) string {
   :do { :set mac [/interface get $iface mac-address] } on-error={ :set mac "" }
   :local running [/interface get $iface running]
   :local disabled [/interface get $iface disabled]
-  :local ifaceUrl ($baseUrl . "/interface?token=" . $claimToken . "&name=" . $name . "&type=" . $type . "&mac_address=" . $mac . "&running=" . $running . "&disabled=" . $disabled)
-  :put ("NobliFi interface URL: " . $ifaceUrl)
-  /tool fetch url=$ifaceUrl mode=%s keep-result=no
+  :if ([:len $ifaceJson] > 0) do={ :set ifaceJson ($ifaceJson . ",") }
+  :set ifaceJson ($ifaceJson . "{\"name\":\"" . $name . "\",\"type\":\"" . $type . "\",\"mac_address\":\"" . $mac . "\",\"running\":" . $running . ",\"disabled\":" . $disabled . "}")
+}
+
+:local checkInPayload ("{\"claim_token\":\"" . $claimToken . "\",\"serial_number\":\"" . $serial . "\",\"model\":\"" . $model . "\",\"routeros_version\":\"" . $version . "\",\"interfaces\":[" . $ifaceJson . "]}")
+:local checkInUrl ($baseUrl . "/check-in")
+:local statusUrl ($baseUrl . "/status?token=" . $claimToken . "&serial=" . $serial . "&status=linked")
+:local wireGuardUrl ($baseUrl . "/wireguard/" . $claimToken)
+:put ("NobliFi check-in URL: " . $checkInUrl)
+:put ("NobliFi status URL: " . $statusUrl)
+:local checkInResult [/tool fetch url=$checkInUrl mode=%s http-method=post http-header-field="Content-Type: application/json" http-data=$checkInPayload output=user as-value idle-timeout=30s duration=1m]
+:if (($checkInResult->"status") != "finished") do={ :error "NobliFi router check-in failed" }
+
+:local dotPos [:find $version "."]
+:local majorVersion $version
+:if ($dotPos != nil) do={ :set majorVersion [:pick $version 0 $dotPos] }
+
+:if ($majorVersion = "7") do={
+  :put ("NobliFi WireGuard URL: " . $wireGuardUrl)
+  /tool fetch url=$wireGuardUrl mode=%s dst-path="noblifi-wireguard.rsc" idle-timeout=30s duration=1m
+  :delay 2s
+  /import file-name="noblifi-wireguard.rsc"
+  :delay 1s
+  :do { /file remove "noblifi-wireguard.rsc" } on-error={ :put "NobliFi WARNING: could not remove WireGuard installer file" }
+} else={
+  :put ("NobliFi WireGuard skipped because RouterOS major version is " . $majorVersion)
 }
 
 /tool fetch url=$statusUrl mode=%s keep-result=no
