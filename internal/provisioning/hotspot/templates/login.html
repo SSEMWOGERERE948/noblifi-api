@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>{{.HotspotName}}</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 420px;
+            margin: 40px auto;
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+        }
+
+        .title {
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .plan {
+            border: 1px solid #ddd;
+            padding: 14px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+        }
+
+        input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 12px;
+            margin-top: 12px;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            margin-top: 10px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1 class="title">{{.HotspotName}}</h1>
+
+    {{if .Plans}}
+
+    <div class="subtitle">
+        Available Packages
+    </div>
+
+    {{range .Plans}}
+
+    <div class="plan">
+
+        <strong>{{.Name}}</strong>
+
+        <div>
+            UGX {{.Price}}
+        </div>
+
+        {{if gt .DurationMinutes 0}}
+        <div>
+            {{.DurationMinutes}} minutes
+        </div>
+        {{end}}
+
+    </div>
+
+    {{end}}
+
+    {{end}}
+
+    <form action="$(link-login-only)" method="post">
+
+        <input
+            type="hidden"
+            name="dst"
+            value="$(link-orig)"
+        >
+
+        <input
+            type="hidden"
+            name="popup"
+            value="true"
+        >
+
+        <input
+            type="text"
+            name="username"
+            placeholder="Voucher Code"
+            required
+        >
+
+        <input
+            type="hidden"
+            name="password"
+            id="password"
+        >
+
+        <button type="submit">
+            Connect
+        </button>
+
+    </form>
+
+</div>
+
+<script>
+document.querySelector("form").addEventListener(
+    "submit",
+    function () {
+        const username =
+            document.querySelector(
+                'input[name="username"]'
+            ).value;
+
+        document.getElementById("password").value =
+            username;
+    }
+);
+</script>
+
+</body>
+</html>
