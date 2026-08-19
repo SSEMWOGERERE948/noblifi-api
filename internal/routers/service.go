@@ -997,7 +997,7 @@ func tenantHotspotDNSName(hotspotName string) string {
 		return ""
 	}
 
-	return label + ".login.noblifi.local"
+	return label + ".login"
 }
 
 func sanitizeHotspotDNSLabel(value string) string {

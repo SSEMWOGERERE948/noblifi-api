@@ -1,6 +1,8 @@
 package plans
 
 import (
+	"strings"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
@@ -11,11 +13,21 @@ type Handler struct {
 }
 
 type OnlineVoucherGenerator interface {
-	GenerateOnlineVoucherCount(planID uuid.UUID, userID *uuid.UUID, isSuperadmin bool) (int, error)
+	GenerateOnlineVoucherCount(
+		planID uuid.UUID,
+		userID *uuid.UUID,
+		isSuperadmin bool,
+	) (int, error)
 }
 
-func NewHandler(service *Service, voucherGenerator OnlineVoucherGenerator) *Handler {
-	return &Handler{service: service, voucherGenerator: voucherGenerator}
+func NewHandler(
+	service *Service,
+	voucherGenerator OnlineVoucherGenerator,
+) *Handler {
+	return &Handler{
+		service:          service,
+		voucherGenerator: voucherGenerator,
+	}
 }
 
 func (h *Handler) RegisterRoutes(router fiber.Router) {
@@ -34,77 +46,170 @@ type currentUser interface {
 	TrialExpired() bool
 }
 
+type scopedUser interface {
+	GetID() uuid.UUID
+	GetRole() string
+}
+
 func (h *Handler) create(c *fiber.Ctx) error {
 	if user, ok := c.Locals("user").(currentUser); ok && user.TrialExpired() {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "your free trial has expired. Please subscribe to continue."})
+		return c.Status(fiber.StatusForbidden).JSON(
+			fiber.Map{
+				"error": "your free trial has expired. Please subscribe to continue.",
+			},
+		)
 	}
 
 	var plan Plan
 	if err := c.BodyParser(&plan); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+		return fiber.NewError(
+			fiber.StatusBadRequest,
+			"invalid request body",
+		)
 	}
+
 	userID, isSuperadmin := currentUserScope(c)
-	created, err := h.service.Create(plan, userID, isSuperadmin)
+
+	created, err := h.service.Create(
+		plan,
+		userID,
+		isSuperadmin,
+	)
 	if err != nil {
-		return err
+		return planRequestError(err)
 	}
+
 	if h.voucherGenerator != nil {
-		count, err := h.voucherGenerator.GenerateOnlineVoucherCount(created.ID, userID, isSuperadmin)
+		count, err := h.voucherGenerator.GenerateOnlineVoucherCount(
+			created.ID,
+			userID,
+			isSuperadmin,
+		)
 		if err != nil {
-			return fiber.NewError(fiber.StatusInternalServerError, "plan created but mobile money online vouchers could not be generated: "+err.Error())
+			return fiber.NewError(
+				fiber.StatusInternalServerError,
+				"plan created but mobile money online vouchers could not be generated: "+err.Error(),
+			)
 		}
+
 		created.OnlineVouchersCreated = count
 	}
+
 	return c.Status(fiber.StatusCreated).JSON(created)
 }
 
 func (h *Handler) list(c *fiber.Ctx) error {
 	userID, isSuperadmin := currentUserScope(c)
-	plans, err := h.service.List(userID, isSuperadmin)
+
+	items, err := h.service.List(
+		userID,
+		isSuperadmin,
+	)
 	if err != nil {
 		return err
 	}
-	return c.JSON(plans)
+
+	return c.JSON(items)
 }
 
 func (h *Handler) get(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid plan id")
+		return fiber.NewError(
+			fiber.StatusBadRequest,
+			"invalid plan id",
+		)
 	}
+
 	userID, isSuperadmin := currentUserScope(c)
-	plan, err := h.service.Find(id, userID, isSuperadmin)
+
+	plan, err := h.service.Find(
+		id,
+		userID,
+		isSuperadmin,
+	)
 	if err != nil {
 		return err
 	}
+
 	return c.JSON(plan)
 }
 
 func (h *Handler) patch(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid plan id")
+		return fiber.NewError(
+			fiber.StatusBadRequest,
+			"invalid plan id",
+		)
 	}
-	var input Plan
+
+	var input PatchInput
 	if err := c.BodyParser(&input); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+		return fiber.NewError(
+			fiber.StatusBadRequest,
+			"invalid request body",
+		)
 	}
+
 	userID, isSuperadmin := currentUserScope(c)
-	plan, err := h.service.Patch(id, input, userID, isSuperadmin)
+
+	plan, err := h.service.Patch(
+		id,
+		input,
+		userID,
+		isSuperadmin,
+	)
 	if err != nil {
-		return err
+		return planRequestError(err)
 	}
+
 	return c.JSON(plan)
 }
 
 func currentUserScope(c *fiber.Ctx) (*uuid.UUID, bool) {
-	user, ok := c.Locals("user").(interface {
-		GetID() uuid.UUID
-		GetRole() string
-	})
+	user, ok := c.Locals("user").(scopedUser)
 	if !ok {
 		return nil, false
 	}
+
 	id := user.GetID()
-	return &id, user.GetRole() == "superadmin"
+	isSuperadmin := strings.EqualFold(
+		strings.TrimSpace(user.GetRole()),
+		"superadmin",
+	)
+
+	return &id, isSuperadmin
+}
+
+func planRequestError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	message := strings.ToLower(
+		strings.TrimSpace(err.Error()),
+	)
+
+	validationTerms := []string{
+		"required",
+		"must be",
+		"cannot be",
+		"greater than",
+		"duration",
+		"data limit",
+		"max devices",
+		"price",
+	}
+
+	for _, term := range validationTerms {
+		if strings.Contains(message, term) {
+			return fiber.NewError(
+				fiber.StatusBadRequest,
+				err.Error(),
+			)
+		}
+	}
+
+	return err
 }

@@ -2,6 +2,7 @@ package portprofiles
 
 import (
 	"fmt"
+	"html"
 	"net"
 	"sort"
 	"strings"
@@ -132,7 +133,7 @@ func RenderRouterOS(assignments []Assignment) (string, error) {
 		CCTVSubnet:          "10.40.40.0/24",
 		CCTVGateway:         "10.40.40.1/24",
 		CCTVPool:            "10.40.40.10-10.40.40.254",
-		HotspotDNSName:      "login",
+		HotspotDNSName:      "noblifi.login",
 		HotspotPortalName:   "NobliFi WiFi",
 		DisableWWWService:   true,
 		EnableAPIService:    true,
@@ -296,7 +297,7 @@ func withDefaults(options RenderOptions) RenderOptions {
 		CCTVSubnet:          "10.40.40.0/24",
 		CCTVGateway:         "10.40.40.1/24",
 		CCTVPool:            "10.40.40.10-10.40.40.254",
-		HotspotDNSName:      "login",
+		HotspotDNSName:      "noblifi.login",
 		HotspotPortalName:   "NobliFi WiFi",
 		DisableWWWService:   true,
 		EnableAPIService:    true,
@@ -673,58 +674,134 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	builder.WriteString(`:if ([:len [/file find where name=$hotspotDirLookup]] = 0) do={ :error "NobliFi /flash/noblifi directory is still missing after creation" }` + "\n")
 	builder.WriteString(":put \"[3/12] OK - /flash/noblifi directory is ready\"\n")
 
-	// Create local supporting servlet files first. They make the portal usable
-	// even before dedicated tenant status/logout endpoints are available.
-	// login.html itself is always fetched from the tenant-scoped backend URL.
-	builder.WriteString(":put \"[4/12] Installing RouterOS captive portal support files...\"\n")
+	// Create branded local supporting servlet files first. The tenant login page
+	// is fetched from the backend, while RouterOS-native status/logout/error
+	// pages use the same NobliFi visual language.
+	builder.WriteString(":put \"[4/12] Installing branded RouterOS captive portal support files...\"\n")
+
 	writeStaticHotspotFile(
 		builder,
 		"/flash/noblifi/status.html",
 		"flash/noblifi/status.html",
-		`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>NobliFi</title></head><body><h2>Connected to NobliFi</h2><p>Your internet session is active.</p><p><a href="/logout">Disconnect</a></p></body></html>`,
+		hotspotStatusPageHTML(options.HotspotPortalName),
 		"status.html",
 	)
+
 	writeStaticHotspotFile(
 		builder,
 		"/flash/noblifi/logout.html",
 		"flash/noblifi/logout.html",
-		`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>NobliFi</title></head><body><h2>Disconnected</h2><p>Your NobliFi session has ended.</p><p><a href="/login">Connect again</a></p></body></html>`,
+		hotspotLogoutPageHTML(options.HotspotPortalName),
 		"logout.html",
 	)
+
+	// rlogin/redirect must continue to emit a real HTTP 302 Location header.
 	writeStaticHotspotFile(
 		builder,
 		"/flash/noblifi/redirect.html",
 		"flash/noblifi/redirect.html",
-		`<!doctype html><html><head><meta http-equiv="refresh" content="0;url=/login"></head><body><a href="/login">Continue</a></body></html>`,
+		hotspotRedirectPageHTML(
+			options.HotspotPortalName,
+			"WiFi login required",
+			"Continue to WiFi",
+			"$(link-login)",
+		),
 		"redirect.html",
 	)
+
 	writeStaticHotspotFile(
 		builder,
 		"/flash/noblifi/rlogin.html",
 		"flash/noblifi/rlogin.html",
-		`<!doctype html><html><head><meta http-equiv="refresh" content="0;url=/login"></head><body><a href="/login">Continue</a></body></html>`,
+		hotspotRedirectPageHTML(
+			options.HotspotPortalName,
+			"WiFi login required",
+			"Continue to WiFi",
+			"$(link-login)",
+		),
 		"rlogin.html",
 	)
+
+	writeStaticHotspotFile(
+		builder,
+		"/flash/noblifi/rstatus.html",
+		"flash/noblifi/rstatus.html",
+		hotspotRedirectPageHTML(
+			options.HotspotPortalName,
+			"Your session is active",
+			"View connection status",
+			"$(link-status)",
+		),
+		"rstatus.html",
+	)
+
 	writeStaticHotspotFile(
 		builder,
 		"/flash/noblifi/fstatus.html",
 		"flash/noblifi/fstatus.html",
-		`<!doctype html><html><head><meta http-equiv="refresh" content="0;url=/login"></head><body><a href="/login">Login</a></body></html>`,
+		hotspotRedirectPageHTML(
+			options.HotspotPortalName,
+			"You are not connected",
+			"Go to WiFi login",
+			"$(link-login-only)",
+		),
 		"fstatus.html",
 	)
+
 	writeStaticHotspotFile(
 		builder,
 		"/flash/noblifi/flogout.html",
 		"flash/noblifi/flogout.html",
-		`<!doctype html><html><head><meta http-equiv="refresh" content="0;url=/login"></head><body><a href="/login">Login</a></body></html>`,
+		hotspotRedirectPageHTML(
+			options.HotspotPortalName,
+			"You are already disconnected",
+			"Return to WiFi login",
+			"$(link-login-only)",
+		),
 		"flogout.html",
 	)
+
+	writeStaticHotspotFile(
+		builder,
+		"/flash/noblifi/flogin.html",
+		"flash/noblifi/flogin.html",
+		hotspotFailedLoginPageHTML(options.HotspotPortalName),
+		"flogin.html",
+	)
+
+	writeStaticHotspotFile(
+		builder,
+		"/flash/noblifi/error.html",
+		"flash/noblifi/error.html",
+		hotspotErrorPageHTML(options.HotspotPortalName),
+		"error.html",
+	)
+
 	writeStaticHotspotFile(
 		builder,
 		"/flash/noblifi/alogin.html",
 		"flash/noblifi/alogin.html",
-		`<!doctype html><html><head><meta http-equiv="refresh" content="0;url=/status"></head><body><a href="/status">Continue</a></body></html>`,
+		hotspotAfterLoginPageHTML(options.HotspotPortalName),
 		"alogin.html",
+	)
+
+	// Captive-portal API stays machine-readable JSON.
+	writeStaticHotspotFile(
+		builder,
+		"/flash/noblifi/api.json",
+		"flash/noblifi/api.json",
+		`{
+  "captive": $(if logged-in == 'yes')false$(else)true$(endif),
+  "user-portal-url": "$(link-login-only)",
+  $(if session-timeout-secs != 0)
+  "seconds-remaining": $(session-timeout-secs),
+  $(endif)
+  $(if remain-bytes-total)
+  "bytes-remaining": $(remain-bytes-total),
+  $(endif)
+  "can-extend-session": true
+}`,
+		"api.json",
 	)
 
 	builder.WriteString(":put \"[5/12] Creating NobliFi voucher profile...\"\n")
@@ -808,13 +885,30 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		`:foreach p in=$noblifiHotspotProfile do={ :do { /ip hotspot profile set $p html-directory="/flash/noblifi" } on-error={ :do { /ip hotspot profile set $p html-directory="flash/noblifi" } on-error={ :error "NobliFi failed to set HotSpot HTML directory to flash/noblifi" } } }` + "\n",
 	)
 
-	builder.WriteString(":put \"      enabling RADIUS accounting...\"\n")
-	builder.WriteString(
-		`:foreach p in=$noblifiHotspotProfile do={ :do { /ip hotspot profile set $p radius-accounting=yes } on-error={ :error "NobliFi failed to enable HotSpot RADIUS accounting" } }` + "\n",
-	)
-	builder.WriteString(
-		`:foreach p in=$noblifiHotspotProfile do={ :do { /ip hotspot profile set $p radius-interim-update=5m } on-error={ :error "NobliFi failed to set HotSpot RADIUS interim update" } }` + "\n",
-	)
+	// Do not emit https-redirect=no in the RouterOS import script.
+	//
+	// Although current RouterOS documentation exposes the HotSpot profile
+	// https-redirect property, older RouterOS builds reject the property while
+	// parsing /import. A parser error occurs before on-error can handle it, so
+	// this optional setting must not be present in the generated .rsc.
+	//
+	// Captive portal detection still works through ordinary HTTP interception
+	// (including Windows NCSI/msftconnecttest). HTTPS redirect behavior can be
+	// configured separately on RouterOS versions that support the property.
+	builder.WriteString(":put \"      HTTPS redirect policy left at RouterOS default for compatibility\"\n")
+
+	// Do not explicitly set radius-accounting or radius-interim-update here.
+	//
+	// Some RouterOS builds reject those properties during scripted profile
+	// updates even though newer RouterOS documentation exposes them. They are
+	// not required for NobliFi authentication:
+	//   - use-radius=yes is already enabled above;
+	//   - RouterOS HotSpot defaults radius-accounting to yes;
+	//   - radius-interim-update can remain at the RouterOS/RADIUS default.
+	//
+	// Keeping these optional properties out of the bootstrap script prevents
+	// a version-specific parser failure from aborting the entire installation.
+	builder.WriteString(":put \"      RADIUS authentication enabled; accounting uses RouterOS defaults\"\n")
 
 	builder.WriteString(":put \"[6/12] OK - HotSpot server profile configured\"\n")
 
@@ -846,60 +940,18 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	)
 	builder.WriteString(":put \"[8/12] OK - tenant login.html downloaded\"\n")
 
-	// status.html/logout.html already have local fallbacks. If dedicated backend
-	// URLs exist, replace those fallbacks, but a missing optional endpoint must
-	// never prevent the HotSpot server from being installed.
-	statusURL := strings.TrimSpace(options.StatusPageURL)
-	if statusURL != "" {
-		builder.WriteString(":put \"[9/12] Downloading tenant status.html -> /flash/noblifi/status.html...\"\n")
-		writeSafe(
-			builder,
-			fmt.Sprintf(
-				`/tool fetch url=%q mode=%s dst-path="flash/noblifi/status.html" idle-timeout=30s duration=1m`,
-				statusURL,
-				portalFetchMode(statusURL),
-			),
-			"download tenant captive portal status page",
-		)
-	}
-
-	logoutURL := strings.TrimSpace(options.LogoutPageURL)
-	if logoutURL != "" {
-		builder.WriteString(":put \"[9/12] Downloading tenant logout.html -> /flash/noblifi/logout.html...\"\n")
-		writeSafe(
-			builder,
-			fmt.Sprintf(
-				`/tool fetch url=%q mode=%s dst-path="flash/noblifi/logout.html" idle-timeout=30s duration=1m`,
-				logoutURL,
-				portalFetchMode(logoutURL),
-			),
-			"download tenant captive portal logout page",
-		)
-	}
-
-	// Refresh login.html periodically so tenant branding and packages update.
-	builder.WriteString(":put \"[10/12] Installing captive portal refresh scheduler...\"\n")
+	// Keep status/logout/error pages local. They need RouterOS servlet variables
+	// such as $(username), $(mac), $(ip), $(uptime), and $(session-timeout).
+	// Only login.html is refreshed from the backend because packages and payment
+	// options are dynamic there.
+	builder.WriteString(":put \"[9/12] Branded local status/logout/error pages retained\"\n")
+	builder.WriteString(":put \"[10/12] Installing captive portal login refresh scheduler...\"\n")
 
 	refreshCommand := fmt.Sprintf(
 		`/tool fetch url="%s" mode=%s dst-path="flash/noblifi/login.html" idle-timeout=30s duration=1m`,
 		escape(loginURL),
 		portalFetchMode(loginURL),
 	)
-
-	if statusURL != "" {
-		refreshCommand += fmt.Sprintf(
-			`; /tool fetch url="%s" mode=%s dst-path="flash/noblifi/status.html" idle-timeout=30s duration=1m`,
-			escape(statusURL),
-			portalFetchMode(statusURL),
-		)
-	}
-	if logoutURL != "" {
-		refreshCommand += fmt.Sprintf(
-			`; /tool fetch url="%s" mode=%s dst-path="flash/noblifi/logout.html" idle-timeout=30s duration=1m`,
-			escape(logoutURL),
-			portalFetchMode(logoutURL),
-		)
-	}
 
 	builder.WriteString(`:local noblifiPortalScheduler [/system scheduler find where name="noblifi-hotspot-portal-refresh"]` + "\n")
 	builder.WriteString(fmt.Sprintf(`:if ([:len $noblifiPortalScheduler] = 0) do={ :do { /system scheduler add name=noblifi-hotspot-portal-refresh interval=10m on-event=%q comment="NobliFi tenant HotSpot portal refresh" } on-error={ :error "NobliFi failed to create portal refresh scheduler" } } else={ :foreach s in=$noblifiPortalScheduler do={ :do { /system scheduler set $s interval=10m on-event=%q disabled=no comment="NobliFi tenant HotSpot portal refresh" } on-error={ :error "NobliFi failed to update portal refresh scheduler" } } }`+"\n", refreshCommand, refreshCommand))
@@ -922,6 +974,157 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	builder.WriteString(":put \"============================================================\"\n\n")
 }
 
+func hotspotPortalName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = "NobliFi WiFi"
+	}
+	return html.EscapeString(value)
+}
+
+func hotspotPortalStyles() string {
+	return `<style>
+:root{color-scheme:dark;--bg:#06111f;--panel:#0b1727;--line:#24384f;--text:#f8fbff;--muted:#9fb0c5;--brand:#7dd3fc;--accent:#34d399;--danger:#fca5a5}
+*{box-sizing:border-box}html,body{min-height:100%}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(145deg,#06111f 0%,#0b1727 52%,#102033 100%);color:var(--text)}
+main{min-height:100vh;display:grid;place-items:center;padding:24px 16px}
+.card{width:min(420px,100%);border:1px solid var(--line);background:rgba(11,23,39,.94);border-radius:12px;padding:26px;box-shadow:0 18px 50px rgba(0,0,0,.32)}
+.mark{width:48px;height:48px;display:grid;place-items:center;margin:0 auto 16px;border-radius:10px;background:var(--brand);color:#06111f;font-weight:900;font-size:21px}
+.eyebrow{margin:0 0 7px;text-align:center;color:var(--brand);font-size:11px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}
+h1{margin:0;text-align:center;font-size:30px;line-height:1.1}
+.lead{margin:10px auto 22px;max-width:340px;color:var(--muted);line-height:1.5;text-align:center;font-size:14px}
+.notice{margin:18px 0;padding:12px 14px;border:1px solid rgba(52,211,153,.25);background:rgba(52,211,153,.08);border-radius:10px;color:#c9fbe8;font-size:13px;line-height:1.45}
+.notice.error{border-color:rgba(252,165,165,.3);background:rgba(252,165,165,.08);color:#ffd8d8}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:18px 0}
+.stat{border:1px solid var(--line);background:rgba(6,17,31,.55);border-radius:10px;padding:12px;min-width:0}
+.stat-label{display:block;color:var(--muted);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:5px}
+.stat-value{display:block;color:var(--text);font-size:13px;font-weight:700;overflow-wrap:anywhere}
+.btn{display:block;width:100%;padding:13px 16px;border:0;border-radius:10px;background:var(--accent);color:#04150f;text-align:center;text-decoration:none;font-size:14px;font-weight:900;cursor:pointer}
+.btn.secondary{margin-top:10px;background:transparent;color:var(--text);border:1px solid var(--line)}
+.footer{margin:18px 0 0;color:var(--muted);font-size:11px;text-align:center;line-height:1.45}
+@media(max-width:380px){.card{padding:22px 18px}.grid{grid-template-columns:1fr}h1{font-size:26px}}
+</style>`
+}
+
+func hotspotPortalDocument(portalName, title, eyebrow, lead, body string) string {
+	name := hotspotPortalName(portalName)
+	return `<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#06111f">
+<title>` + html.EscapeString(title) + ` · ` + name + `</title>
+` + hotspotPortalStyles() + `
+</head><body><main><section class="card">
+<div class="mark">N</div>
+<p class="eyebrow">` + html.EscapeString(eyebrow) + `</p>
+<h1>` + name + `</h1>
+<p class="lead">` + html.EscapeString(lead) + `</p>
+` + body + `
+<p class="footer">Secure WiFi access powered by NobliFi</p>
+</section></main></body></html>`
+}
+
+func hotspotStatusPageHTML(portalName string) string {
+	return hotspotPortalDocument(
+		portalName,
+		"Connection status",
+		"Connected",
+		"Your internet session is active.",
+		`<div class="notice">Your voucher stays assigned to this device while it still has valid access time.</div>
+<div class="grid">
+<div class="stat"><span class="stat-label">Voucher</span><span class="stat-value">$(username)</span></div>
+<div class="stat"><span class="stat-label">Device</span><span class="stat-value">$(mac)</span></div>
+<div class="stat"><span class="stat-label">IP address</span><span class="stat-value">$(ip)</span></div>
+<div class="stat"><span class="stat-label">Connected</span><span class="stat-value">$(uptime)</span></div>
+<div class="stat"><span class="stat-label">Time remaining</span><span class="stat-value">$(session-timeout)</span></div>
+<div class="stat"><span class="stat-label">Login method</span><span class="stat-value">$(login-by)</span></div>
+</div>
+<a class="btn secondary" href="$(link-logout)">Disconnect</a>`,
+	)
+}
+
+func hotspotLogoutPageHTML(portalName string) string {
+	return hotspotPortalDocument(
+		portalName,
+		"Disconnected",
+		"Session ended",
+		"You are no longer connected to the internet.",
+		`<div class="notice">If your voucher still has time remaining, you can use the same voucher again on this device.</div>
+<div class="grid">
+<div class="stat"><span class="stat-label">Device</span><span class="stat-value">$(mac)</span></div>
+<div class="stat"><span class="stat-label">Session uptime</span><span class="stat-value">$(uptime)</span></div>
+</div>
+<a class="btn" href="$(link-login-only)">Reconnect to WiFi</a>`,
+	)
+}
+
+func hotspotFailedLoginPageHTML(portalName string) string {
+	return hotspotPortalDocument(
+		portalName,
+		"Login failed",
+		"Could not connect",
+		"We could not authorize this voucher on this device.",
+		`<div class="notice error">$(error)</div>
+<a class="btn" href="$(link-login-only)">Try again</a>`,
+	)
+}
+
+func hotspotErrorPageHTML(portalName string) string {
+	return hotspotPortalDocument(
+		portalName,
+		"WiFi error",
+		"Something went wrong",
+		"The hotspot could not complete this request.",
+		`<div class="notice error">$(error)</div>
+<a class="btn" href="$(link-login-only)">Return to WiFi login</a>`,
+	)
+}
+
+func hotspotAfterLoginPageHTML(portalName string) string {
+	return `$(if http-status == 302)NobliFi login successful$(endif)
+$(if http-header == "Location")$(link-orig)$(endif)
+` + hotspotPortalDocument(
+		portalName,
+		"Connected",
+		"Connected",
+		"Your WiFi session is ready.",
+		`<div class="notice">Authentication was successful.</div>
+<a class="btn" href="$(link-orig)">Continue to internet</a>
+<a class="btn secondary" href="$(link-status)">View connection status</a>`,
+	)
+}
+
+func hotspotRedirectPageHTML(portalName, message, buttonLabel, target string) string {
+	return `$(if http-status == 302)` + message + `$(endif)
+$(if http-header == "Location")` + target + `$(endif)
+` + hotspotPortalDocument(
+		portalName,
+		"WiFi portal",
+		"NobliFi WiFi",
+		message,
+		`<a class="btn" href="`+target+`">`+html.EscapeString(buttonLabel)+`</a>`,
+	)
+}
+
+// routerOSQuotedLiteral returns a RouterOS double-quoted string that writes
+// the supplied value literally.
+//
+// fmt.Sprintf("%q", value) gives us compatible escapes for quotes, newlines,
+// tabs and backslashes. RouterOS additionally requires a literal dollar sign
+// inside a script string to be written as \$ because $ otherwise begins a
+// RouterOS variable reference.
+//
+// Example:
+//
+//	HTML input:  <a href="$(link-login)">Login</a>
+//	RSC output:  "<a href=\"\$(link-login)\">Login</a>"
+//	File result: <a href="$(link-login)">Login</a>
+func routerOSQuotedLiteral(value string) string {
+	quoted := fmt.Sprintf("%q", value)
+	return strings.ReplaceAll(quoted, "$", `\$`)
+}
+
 func writeStaticHotspotFile(
 	builder *strings.Builder,
 	createPath string,
@@ -941,12 +1144,19 @@ func writeStaticHotspotFile(
 		"create "+label,
 	)
 
+	// HotSpot HTML variables use syntax such as $(link-login). When those
+	// templates are embedded inside a RouterOS .rsc string, the dollar sign
+	// MUST be escaped as \$; otherwise the RouterOS script parser tries to
+	// evaluate $(link-login) during /import and fails before the file is written.
+	//
+	// routerOSQuotedLiteral() preserves RouterOS string escapes while making
+	// the HotSpot variables literal file content.
 	writeSafe(
 		builder,
 		fmt.Sprintf(
-			`/file set [find where name=%q] contents=%q`,
+			`/file set [find where name=%q] contents=%s`,
 			lookupPath,
-			contents,
+			routerOSQuotedLiteral(contents),
 		),
 		"write "+label,
 	)
@@ -987,6 +1197,9 @@ func writeHotspotVerification(builder *strings.Builder, options RenderOptions, i
 	builder.WriteString(`:if ([:len [/file find where name="flash/noblifi/login.html"]] = 0) do={ :error "NobliFi tenant captive portal login.html missing from flash" }` + "\n")
 	builder.WriteString(`:if ([:len [/file find where name="flash/noblifi/status.html"]] = 0) do={ :error "NobliFi captive portal status.html missing from flash" }` + "\n")
 	builder.WriteString(`:if ([:len [/file find where name="flash/noblifi/logout.html"]] = 0) do={ :error "NobliFi captive portal logout.html missing from flash" }` + "\n")
+	builder.WriteString(`:if ([:len [/file find where name="flash/noblifi/flogin.html"]] = 0) do={ :error "NobliFi captive portal flogin.html missing from flash" }` + "\n")
+	builder.WriteString(`:if ([:len [/file find where name="flash/noblifi/error.html"]] = 0) do={ :error "NobliFi captive portal error.html missing from flash" }` + "\n")
+	builder.WriteString(`:if ([:len [/file find where name="flash/noblifi/rstatus.html"]] = 0) do={ :error "NobliFi captive portal rstatus.html missing from flash" }` + "\n")
 
 	builder.WriteString(`:local verifyNobliFiDNS [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] dns-name]` + "\n")
 	builder.WriteString(fmt.Sprintf(

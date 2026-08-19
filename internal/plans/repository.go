@@ -18,21 +18,32 @@ func (r *Repository) Create(plan *Plan) error {
 }
 
 func (r *Repository) List() ([]Plan, error) {
-	var plans []Plan
-	err := r.db.Order("created_at desc").Find(&plans).Error
-	return plans, err
+	var items []Plan
+	err := r.db.
+		Order("created_at desc").
+		Find(&items).
+		Error
+	return items, err
 }
 
 func (r *Repository) ListForUser(userID uuid.UUID) ([]Plan, error) {
-	var plans []Plan
-	err := r.db.Where("user_id = ?", userID).Order("created_at desc").Find(&plans).Error
-	return plans, err
+	var items []Plan
+	err := r.db.
+		Where("user_id = ?", userID).
+		Order("created_at desc").
+		Find(&items).
+		Error
+	return items, err
 }
 
 func (r *Repository) ActiveList() ([]Plan, error) {
-	var plans []Plan
-	err := r.db.Where("is_active = ?", true).Order("price asc, duration_minutes asc, created_at desc").Find(&plans).Error
-	return plans, err
+	var items []Plan
+	err := r.db.
+		Where("is_active = ?", true).
+		Order("price asc, duration_minutes asc, created_at desc").
+		Find(&items).
+		Error
+	return items, err
 }
 
 func (r *Repository) Find(id uuid.UUID) (Plan, error) {
@@ -43,7 +54,10 @@ func (r *Repository) Find(id uuid.UUID) (Plan, error) {
 
 func (r *Repository) FindForUser(id uuid.UUID, userID uuid.UUID) (Plan, error) {
 	var plan Plan
-	err := r.db.Where("user_id = ?", userID).First(&plan, "id = ?", id).Error
+	err := r.db.
+		Where("user_id = ?", userID).
+		First(&plan, "id = ?", id).
+		Error
 	return plan, err
 }
 
