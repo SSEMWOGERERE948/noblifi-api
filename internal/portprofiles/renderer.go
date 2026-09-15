@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"net"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -405,6 +406,14 @@ func routerOSDisabled(disabled bool) string {
 
 func escape(value string) string {
 	return strings.ReplaceAll(value, `"`, `\"`)
+}
+
+func portalURLHost(value string) string {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Hostname() == "" {
+		return ""
+	}
+	return parsed.Hostname()
 }
 
 func writeSafe(builder *strings.Builder, command string, label string) {
@@ -982,15 +991,20 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 
 	// login.html is mandatory and tenant-scoped.
 	builder.WriteString(":put \"[9/13] Downloading tenant login.html -> /flash/noblifi/login.html...\"\n")
-	writeCritical(
-		builder,
-		fmt.Sprintf(
-			`/tool fetch url=%q mode=%s dst-path="flash/noblifi/login.html" idle-timeout=30s duration=1m`,
-			loginURL,
-			portalFetchMode(loginURL),
-		),
-		"NobliFi failed to download tenant captive portal login page",
-	)
+	if loginHost := portalURLHost(loginURL); loginHost != "" {
+		builder.WriteString(fmt.Sprintf(`:local noblifiLoginHost %q`+"\n", loginHost))
+		builder.WriteString(`:do { /resolve $noblifiLoginHost } on-error={ :error "NobliFi could not resolve tenant captive portal host" }` + "\n")
+	}
+	builder.WriteString(":local noblifiLoginFetched false\n")
+	builder.WriteString(":for noblifiLoginAttempt from=1 to=3 do={\n")
+	builder.WriteString(":if (!$noblifiLoginFetched) do={\n")
+	builder.WriteString(fmt.Sprintf(
+		`:do { /tool fetch url=%q mode=%s dst-path="flash/noblifi/login.html" idle-timeout=30s duration=1m; :set noblifiLoginFetched true } on-error={ :delay 2s }`+"\n",
+		loginURL,
+		portalFetchMode(loginURL),
+	))
+	builder.WriteString("}\n}\n")
+	builder.WriteString(`:if (!$noblifiLoginFetched) do={ :error "NobliFi failed to download tenant captive portal login page after 3 attempts" }` + "\n")
 	builder.WriteString(":put \"[9/13] OK - tenant login.html downloaded\"\n")
 
 	// status.html, logout.html, error.html and the other RouterOS servlet pages
