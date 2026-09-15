@@ -1,25 +1,77 @@
-# This file specifies files that are *not* uploaded to Google Cloud
-# using gcloud. It follows the same syntax as .gitignore, with the addition of
-# "#!include" directives (which insert the entries of the given .gitignore-style
-# file at that point).
-#
-# For more information, run:
-#   $ gcloud topic gcloudignore
-#
+# Never upload this file itself
 .gcloudignore
-# If you would like to upload your .git directory, .gitignore file or files
-# from your .gitignore file, remove the corresponding line
-# below:
+
+# Git
 .git
 .gitignore
 
-# Binaries for programs and plugins
+# Secrets / environment
+.env
+.env.*
+!.env.example
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+noblifi-server.err.log
+noblifi-server.log
+
+# Compiled binaries
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-# Test binary, build with `go test -c`
 *.test
-# Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+
+noblifi-server
+noblifi-vps-agent
+noblifi-vps-agent-linux-amd64
+
+# Go build output
+bin/
+tmp/
+dist/
+build/
+
+# Node / Next.js
+node_modules/
+.next/
+coverage/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local caches
+.cache/
+__pycache__/
+
+# Local/generated files
+*.tmp
+*.bak
+*.swp
+
+# Do not upload local RouterOS/export artifacts unless runtime needs them
+*.backup
+
+# Keep these runtime/build files:
+# app.yaml
+# cron.yaml
+# go.mod
+# go.sum
+# main.go
+# internal/
+# cmd/
+# config.rsc   <- keep only if your app actually needs it
+# package.json <- keep only if App Engine build actually needs it

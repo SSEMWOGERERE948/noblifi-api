@@ -10,6 +10,7 @@ automatic_scaling:
 env_variables:
   PORT: "8080"
   APP_ENV: "production"
+  GCP_PROJECT_ID: "noblifi"
 
   DATABASE_URL: "postgresql://neondb_owner:npg_WFD5YkdowM1z@ep-green-pond-adlzg68u-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
   JWT_SECRET: "NoblifiJwt-8wF3nP6qR2xV9zLmT5sK"
@@ -23,12 +24,15 @@ env_variables:
   NEXT_PUBLIC_BASE_URL: "https://ae2e-41-210-143-246.ngrok-free.app"
   FRONTEND_URL: "http://localhost:3000"
 
-  IOTEC_CLIENT_ID: "pay-019fc76d-d4d8-73e4-aef8-9b65e2340973"
-  IOTEC_CLIENT_SECRET: "set-from-github-actions-secret"
-  IOTEC_WALLET_ID: "019fc76d-d4ef-72d4-8677-2b46fee8b4f5"
-  IOTEC_TOKEN_URL: "https://id.iotec.io/connect/token"
   IOTEC_BASE_URL: "https://pay.iotec.io"
+  IOTEC_CLIENT_ID: "pay-01a023ea-416a-73e4-a2e1-87478ef7df7c"
+  IOTEC_CLIENT_SECRET: "IO-kKe5ubZLrsIeRQs1EeuhaoW0OYaHGz3Nc"
+  IOTEC_PAYMENT_LINK: "https://pay.iotec.io/p/02608627"
+  IOTEC_TOKEN_URL: "https://id.iotec.io/connect/token"
+  IOTEC_WALLET_CODE: "02608627"
+  IOTEC_WALLET_ID: "01a023f3-c9d7-7103-b774-b83336aa4699"
   IOTEC_CURRENCY: "UGX"
+
 
   # MikroTik reaches RADIUS through the WireGuard tunnel.
   NOBLIFI_RADIUS_SERVER: "10.77.0.1"

@@ -1,9 +1,11 @@
 package payments
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -13,7 +15,6 @@ import (
 	"github.com/noblifi/noblifi/backend/internal/vouchers"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // HotspotPurchase is deliberately isolated from PaymentOrder because
@@ -26,18 +27,21 @@ type HotspotPurchase struct {
 	PlanID      uuid.UUID `gorm:"type:uuid;index;not null" json:"plan_id"`
 	DeviceMAC   string    `gorm:"size:17;index;not null" json:"device_mac"`
 
-	MerchantReference string `gorm:"uniqueIndex;not null" json:"merchant_reference"`
-	OrderTrackingID   string `gorm:"index" json:"order_tracking_id"`
-	Provider          string `gorm:"default:iotec" json:"provider"`
-	Status            string `gorm:"default:pending;index" json:"status"`
-	RawStatus         string `json:"raw_status"`
-	Amount            int    `json:"amount"`
-	Currency          string `json:"currency"`
-	Phone             string `json:"phone"`
-	Email             string `json:"email"`
+	MerchantReference  string `gorm:"uniqueIndex;not null" json:"merchant_reference"`
+	LocalTransactionID string `gorm:"size:9;uniqueIndex" json:"transaction_id"`
+	OrderTrackingID    string `gorm:"index" json:"order_tracking_id"`
+	Provider           string `gorm:"default:iotec" json:"provider"`
+	Status             string `gorm:"default:pending;index" json:"status"`
+	RawStatus          string `json:"raw_status"`
+	Amount             int    `json:"amount"`
+	Currency           string `json:"currency"`
+	CustomerName       string `gorm:"size:160;index" json:"customer_name"`
+	Phone              string `gorm:"size:32;index" json:"phone"`
+	Email              string `json:"email"`
 
 	VoucherID       *uuid.UUID     `gorm:"type:uuid;index" json:"voucher_id,omitempty"`
 	ProviderPayload datatypes.JSON `gorm:"type:json" json:"-"`
+	PaidAt          *time.Time     `gorm:"index" json:"paid_at,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
 }
@@ -50,17 +54,19 @@ func (p *HotspotPurchase) BeforeCreate(_ *gorm.DB) error {
 }
 
 type HotspotOrderInput struct {
-	OwnerUserID uuid.UUID
-	RouterID    uuid.UUID
-	PlanID      uuid.UUID
-	DeviceMAC   string
-	Phone       string
-	Email       string
+	OwnerUserID  uuid.UUID
+	RouterID     uuid.UUID
+	PlanID       uuid.UUID
+	DeviceMAC    string
+	Phone        string
+	Email        string
+	CustomerName string
 }
 
 type HotspotOrderResult struct {
 	Provider          string `json:"provider"`
 	MerchantReference string `json:"merchant_reference"`
+	TransactionID     string `json:"transaction_id"`
 	OrderTrackingID   string `json:"order_tracking_id"`
 	RedirectURL       string `json:"redirect_url"`
 	Status            string `json:"status"`
@@ -79,8 +85,10 @@ type HotspotOrderStatusResult struct {
 	Status            string `json:"status"`
 	RawStatus         string `json:"raw_status"`
 	MerchantReference string `json:"merchant_reference"`
+	TransactionID     string `json:"transaction_id"`
 	OrderTrackingID   string `json:"order_tracking_id"`
 	Voucher           string `json:"voucher,omitempty"`
+	AutoConnect       bool   `json:"auto_connect"`
 }
 
 func (s *Service) EnsureHotspotPurchaseSchema() error {
@@ -99,9 +107,13 @@ func (s *Service) StartHotspotOrder(input HotspotOrderInput) (HotspotOrderResult
 	if err != nil {
 		return HotspotOrderResult{}, err
 	}
-	phone := strings.TrimSpace(input.Phone)
-	if phone == "" {
-		return HotspotOrderResult{}, errors.New("phone is required for ioTec mobile money collection")
+	customerName := strings.TrimSpace(input.CustomerName)
+	phone, err := normalizeUgandaPhone(input.Phone)
+	if err != nil {
+		return HotspotOrderResult{}, err
+	}
+	if customerName == "" {
+		customerName = phone
 	}
 
 	var router routers.Router
@@ -118,11 +130,15 @@ func (s *Service) StartHotspotOrder(input HotspotOrderInput) (HotspotOrderResult
 	}
 
 	merchantReference := "NOBLIFI-HS-" + strings.ToUpper(randomHex(8))
+	transactionID, err := s.generateLocalTransactionID()
+	if err != nil {
+		return HotspotOrderResult{}, err
+	}
 	purchase := HotspotPurchase{
 		ID: uuid.New(), OwnerUserID: input.OwnerUserID, RouterID: input.RouterID,
-		PlanID: input.PlanID, DeviceMAC: mac, MerchantReference: merchantReference,
+		PlanID: input.PlanID, DeviceMAC: mac, MerchantReference: merchantReference, LocalTransactionID: transactionID,
 		Provider: "iotec", Status: "pending", Amount: plan.Price, Currency: s.currency(),
-		Phone: phone, Email: strings.TrimSpace(input.Email),
+		CustomerName: customerName, Phone: phone, Email: strings.TrimSpace(input.Email),
 	}
 	if err := s.db.Create(&purchase).Error; err != nil {
 		return HotspotOrderResult{}, err
@@ -151,7 +167,7 @@ func (s *Service) StartHotspotOrder(input HotspotOrderInput) (HotspotOrderResult
 
 	return HotspotOrderResult{
 		Provider: "iotec", MerchantReference: merchantReference,
-		OrderTrackingID: response.OrderTrackingID, RedirectURL: response.RedirectURL, Status: "pending",
+		TransactionID: transactionID, OrderTrackingID: response.OrderTrackingID, RedirectURL: response.RedirectURL, Status: "pending",
 	}, nil
 }
 
@@ -167,8 +183,8 @@ func (s *Service) CheckHotspotOrder(input HotspotOrderStatusInput) (HotspotOrder
 
 	var purchase HotspotPurchase
 	if err := s.db.Where(
-		"owner_user_id = ? AND router_id = ? AND device_mac = ? AND (order_tracking_id = ? OR merchant_reference = ?)",
-		input.OwnerUserID, input.RouterID, mac, paymentID, paymentID,
+		"owner_user_id = ? AND router_id = ? AND device_mac = ? AND (local_transaction_id = ? OR order_tracking_id = ? OR merchant_reference = ?)",
+		input.OwnerUserID, input.RouterID, mac, paymentID, paymentID, paymentID,
 	).First(&purchase).Error; err != nil {
 		return HotspotOrderStatusResult{}, errors.New("hotspot payment not found")
 	}
@@ -186,63 +202,76 @@ func (s *Service) CheckHotspotOrder(input HotspotOrderStatusInput) (HotspotOrder
 		persistedStatus = "pending"
 	}
 	payload, _ := json.Marshal(status.raw)
-	if err := s.db.Model(&HotspotPurchase{}).Where("id = ?", purchase.ID).Updates(map[string]any{
+	updates := map[string]any{
 		"status": persistedStatus, "raw_status": status.RawStatus, "provider_payload": datatypes.JSON(payload),
-	}).Error; err != nil {
+	}
+	if payerName := extractIotecCustomerName(status.raw); payerName != "" {
+		updates["customer_name"] = payerName
+		purchase.CustomerName = payerName
+	}
+	if normalized == "paid" && purchase.PaidAt == nil {
+		now := time.Now()
+		updates["paid_at"] = &now
+		purchase.PaidAt = &now
+	}
+	if err := s.db.Model(&HotspotPurchase{}).Where("id = ?", purchase.ID).Updates(updates).Error; err != nil {
 		return HotspotOrderStatusResult{}, err
 	}
 
 	voucherCode := ""
 	if normalized == "paid" {
-		voucher, err := s.ensureHotspotVoucher(purchase)
+		if s.hotspotSettlement == nil {
+			return HotspotOrderStatusResult{}, errors.New("hotspot settlement service is unavailable")
+		}
+		settlement, err := s.hotspotSettlement.SettlePaidHotspotPurchase(purchase.ID)
 		if err != nil {
 			return HotspotOrderStatusResult{}, err
 		}
-		voucherCode = voucher.Code
-		if s.radius != nil {
-			if err := s.radius.SyncVoucherForVoucher(voucher.Code); err != nil {
-				return HotspotOrderStatusResult{}, fmt.Errorf("hotspot voucher created but RADIUS sync failed: %w", err)
-			}
-		}
+		voucherCode = settlement.VoucherCode
 	}
 
 	return HotspotOrderStatusResult{
 		Success: normalized == "paid", Provider: "iotec", Status: normalized, RawStatus: status.RawStatus,
-		MerchantReference: purchase.MerchantReference, OrderTrackingID: purchase.OrderTrackingID, Voucher: voucherCode,
+		MerchantReference: purchase.MerchantReference, TransactionID: purchase.LocalTransactionID, OrderTrackingID: purchase.OrderTrackingID, Voucher: voucherCode,
+		AutoConnect: voucherCode != "",
 	}, nil
 }
 
-func (s *Service) ensureHotspotVoucher(purchase HotspotPurchase) (vouchers.Voucher, error) {
-	var result vouchers.Voucher
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		var locked HotspotPurchase
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ?", purchase.ID).Error; err != nil {
-			return err
+func (s *Service) generateLocalTransactionID() (string, error) {
+	const maxAttempts = 50
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		code, err := randomNumericCode(9)
+		if err != nil {
+			return "", err
 		}
-		if locked.VoucherID != nil {
-			if err := tx.First(&result, "id = ?", *locked.VoucherID).Error; err == nil {
-				return nil
+		var count int64
+		if err := s.db.Model(&HotspotPurchase{}).Where("local_transaction_id = ?", code).Count(&count).Error; err != nil {
+			return "", err
+		}
+		if count == 0 {
+			if err := s.db.Model(&vouchers.Voucher{}).Where("code = ?", code).Count(&count).Error; err != nil {
+				return "", err
 			}
 		}
-		for attempt := 0; attempt < 8; attempt++ {
-			ownerID := locked.OwnerUserID
-			result = vouchers.Voucher{
-				ID: uuid.New(), UserID: &ownerID, Code: "NF-" + strings.ToUpper(randomHex(4)),
-				PlanID: locked.PlanID, Channel: "online", Status: "unused",
-			}
-			if err := tx.Create(&result).Error; err != nil {
-				if strings.Contains(strings.ToLower(err.Error()), "duplicate") {
-					continue
-				}
-				return err
-			}
-			locked.VoucherID = &result.ID
-			locked.Status = "paid"
-			return tx.Save(&locked).Error
+		if count == 0 {
+			return code, nil
 		}
-		return errors.New("could not generate unique hotspot voucher code")
-	})
-	return result, err
+	}
+	return "", fmt.Errorf("could not generate unique 9-digit transaction id")
+}
+
+func randomNumericCode(length int) (string, error) {
+	var builder strings.Builder
+	builder.Grow(length)
+	max := big.NewInt(10)
+	for i := 0; i < length; i++ {
+		value, err := rand.Int(rand.Reader, max)
+		if err != nil {
+			return "", err
+		}
+		builder.WriteByte(byte('0' + value.Int64()))
+	}
+	return builder.String(), nil
 }
 
 func normalizeHotspotPurchaseMAC(value string) (string, error) {
@@ -270,4 +299,55 @@ func normalizeHotspotPurchaseMAC(value string) (string, error) {
 		parts = append(parts, hex[i:i+2])
 	}
 	return strings.Join(parts, ":"), nil
+}
+
+func normalizeUgandaPhone(value string) (string, error) {
+	var digits strings.Builder
+	for _, r := range strings.TrimSpace(value) {
+		if r >= '0' && r <= '9' {
+			digits.WriteRune(r)
+		}
+	}
+	phone := digits.String()
+	switch {
+	case strings.HasPrefix(phone, "0") && len(phone) == 10:
+		phone = "256" + phone[1:]
+	case strings.HasPrefix(phone, "7") && len(phone) == 9:
+		phone = "256" + phone
+	case strings.HasPrefix(phone, "256") && len(phone) == 12:
+	default:
+		return "", errors.New("phone must be a valid Uganda mobile money number")
+	}
+	if len(phone) != 12 || !strings.HasPrefix(phone, "2567") {
+		return "", errors.New("phone must be a valid Uganda mobile money number")
+	}
+	return phone, nil
+}
+
+func extractIotecCustomerName(payload map[string]any) string {
+	for _, key := range []string{
+		"customerName",
+		"customer_name",
+		"payerName",
+		"payer_name",
+		"accountName",
+		"account_name",
+		"name",
+	} {
+		if value, ok := payload[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+
+	for _, key := range []string{"customer", "payer", "account", "data"} {
+		nested, ok := payload[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		if value := extractIotecCustomerName(nested); value != "" {
+			return value
+		}
+	}
+
+	return ""
 }

@@ -3,6 +3,7 @@ package routers
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -24,6 +25,7 @@ func (r *Repository) List() ([]Router, error) {
 	var routers []Router
 
 	err := r.db.
+		Where("deleted_at IS NULL").
 		Order("created_at desc").
 		Find(&routers).
 		Error
@@ -36,6 +38,7 @@ func (r *Repository) ListForUser(userID uuid.UUID) ([]Router, error) {
 
 	err := r.db.
 		Where("user_id = ?", userID).
+		Where("deleted_at IS NULL").
 		Order("created_at desc").
 		Find(&routers).
 		Error
@@ -51,6 +54,7 @@ func (r *Repository) Find(id uuid.UUID) (Router, error) {
 		Preload("PortAssignments").
 		Preload("SetupSession").
 		Preload("NetworkProfile").
+		Where("deleted_at IS NULL").
 		First(&router, "id = ?", id).
 		Error
 
@@ -66,6 +70,7 @@ func (r *Repository) FindForUser(id uuid.UUID, userID uuid.UUID) (Router, error)
 		Preload("SetupSession").
 		Preload("NetworkProfile").
 		Where("user_id = ?", userID).
+		Where("deleted_at IS NULL").
 		First(&router, "id = ?", id).
 		Error
 
@@ -79,10 +84,69 @@ func (r *Repository) FindByClaimToken(token string) (Router, error) {
 		Preload("PortAssignments").
 		Preload("SetupSession").
 		Preload("NetworkProfile").
+		Where("deleted_at IS NULL").
 		First(&router, "claim_token = ?", token).
 		Error
 
 	return router, err
+}
+
+func (r *Repository) UpdateProvisioningStatus(token string, serial string, status string) (Router, error) {
+	token = strings.TrimSpace(token)
+	serial = strings.TrimSpace(serial)
+	status = strings.TrimSpace(status)
+
+	if token == "" {
+		return Router{}, errors.New("claim token is required")
+	}
+
+	var router Router
+	if err := r.db.
+		Where("claim_token = ?", token).
+		Where("deleted_at IS NULL").
+		First(&router).
+		Error; err != nil {
+		return Router{}, err
+	}
+
+	now := time.Now().UTC()
+	updates := map[string]any{
+		"last_seen_at": now,
+		"updated_at":   now,
+	}
+
+	if serial != "" {
+		updates["serial_number"] = serial
+	}
+
+	if status != "" {
+		switch strings.ToLower(status) {
+		case "installed":
+			updates["status"] = "provisioned"
+			updates["provisioned_at"] = now
+		case "failed":
+			updates["status"] = "failed"
+		default:
+			updates["status"] = status
+		}
+	}
+
+	if err := r.db.
+		Model(&Router{}).
+		Where("id = ?", router.ID).
+		Updates(updates).
+		Error; err != nil {
+		return Router{}, err
+	}
+
+	if err := r.db.
+		Where("id = ?", router.ID).
+		First(&router).
+		Error; err != nil {
+		return Router{}, err
+	}
+
+	return router, nil
 }
 
 func (r *Repository) Save(router *Router) error {

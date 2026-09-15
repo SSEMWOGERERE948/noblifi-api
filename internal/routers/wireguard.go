@@ -346,7 +346,7 @@ func RenderWireGuardRouterOS(router Router, cfg config.Config) string {
 }
 :if (!$keyReported) do={ :error "NobliFi could not register this router WireGuard key with the control plane" }
 
-:put "NobliFi WireGuard key registered; waiting for xneelo agent"
+:put "NobliFi WireGuard key registered; waiting for noblifi-agent"
 :local wgPeer [/interface wireguard peers find where interface="%s" comment="NobliFi VPS"]
 :local connected false
 :local lastHandshake ""
@@ -376,7 +376,7 @@ func RenderWireGuardRouterOS(router Router, cfg config.Config) string {
   :do {
     /tool fetch url="%s" mode=%s http-method=post http-header-field="Content-Type: application/json" http-data=$failedPayload keep-result=no
   } on-error={ :log warning "NobliFi failed status report failed" }
-  :error "NobliFi xneelo agent did not establish a WireGuard handshake within 120 seconds"
+  :error "NobliFi noblifi-agent did not establish a WireGuard handshake within 120 seconds"
 }`,
 		router.ClaimToken,
 		routerOSQuotedString(wgName),

@@ -25,6 +25,7 @@ const (
 	attrUserName          = 1
 	attrUserPassword      = 2
 	attrCHAPPassword      = 3
+	attrCallingStationID  = 31
 	attrReplyMessage      = 18
 	attrCHAPChallenge     = 60
 	attrSessionTimeout    = 27
@@ -88,22 +89,44 @@ func (s *Service) handleAccessPacket(packet radiusPacket, remote *net.UDPAddr, s
 		return encodeRadiusResponse(packet, radiusAccessReject, secret, replyMessage("Missing voucher code.")), nil
 	}
 	if !s.passwordMatches(packet, secret, username) {
-		log.Printf("radius: reject user=%s nas=%s reason=password", username, remote.IP)
+		log.Printf("radius: reject user=%s nas=%s reason=password", maskCredential(username), remote.IP)
 		return encodeRadiusResponse(packet, radiusAccessReject, secret, replyMessage("Invalid voucher code.")), nil
 	}
 
-	voucher, plan, err := s.voucherPlan(username)
-	if err != nil || !voucherUsable(voucher) {
-		log.Printf("radius: reject user=%s nas=%s reason=voucher err=%v", username, remote.IP, err)
-		return encodeRadiusResponse(packet, radiusAccessReject, secret, replyMessage("Invalid or expired voucher code.")), nil
+	callingMAC := strings.TrimSpace(string(firstAttribute(packet, attrCallingStationID)))
+	voucher, err := s.BindVoucherToDevice(username, callingMAC)
+	if err != nil {
+		log.Printf("radius: reject user=%s nas=%s mac=%s reason=bind err=%v", maskCredential(username), remote.IP, maskCredential(callingMAC), err)
+		return encodeRadiusResponse(packet, radiusAccessReject, secret, replyMessage(voucherBindRejectMessage(err))), nil
+	}
+
+	plan, err := s.planForVoucher(voucher)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	state := voucherRadiusState(voucher, plan, now)
+	if state.SessionTimeout <= 0 {
+		log.Printf("radius: reject user=%s nas=%s reason=expired", maskCredential(username), remote.IP)
+		return encodeRadiusResponse(packet, radiusAccessReject, secret, replyMessage("Voucher time has expired.")), nil
+	}
+	remainingBytes, limited, err := remainingVoucherDataBytes(s.db, voucher.Code, plan)
+	if err != nil {
+		return nil, err
+	}
+	if limited && remainingBytes <= 0 {
+		log.Printf("radius: reject user=%s nas=%s reason=data-exhausted", maskCredential(username), remote.IP)
+		return encodeRadiusResponse(packet, radiusAccessReject, secret, replyMessage("Voucher data is exhausted.")), nil
 	}
 
 	attrs := [][]byte{
-		uint32Attribute(attrSessionTimeout, uint32(max(plan.DurationMinutes, 1)*60)),
-		mikrotikRateLimitAttribute(mikrotikRateLimit(plan.UploadSpeed, plan.DownloadSpeed)),
+		uint32Attribute(attrSessionTimeout, uint32(state.SessionTimeout)),
 		replyMessage("Welcome to NobliFi WiFi."),
 	}
-	log.Printf("radius: accept user=%s nas=%s plan=%s", username, remote.IP, plan.Name)
+	if state.RateLimit != "" {
+		attrs = append(attrs, mikrotikRateLimitAttribute(state.RateLimit))
+	}
+	log.Printf("radius: accept user=%s nas=%s plan=%s remaining_seconds=%d", maskCredential(username), remote.IP, plan.Name, state.SessionTimeout)
 	return encodeRadiusResponse(packet, radiusAccessAccept, secret, attrs...), nil
 }
 
@@ -130,14 +153,19 @@ func (s *Service) voucherPlan(code string) (vouchers.Voucher, plans.Plan, error)
 	if err := s.db.First(&voucher, "code = ?", code).Error; err != nil {
 		return voucher, plans.Plan{}, err
 	}
+	plan, err := s.planForVoucher(voucher)
+	return voucher, plan, err
+}
+
+func (s *Service) planForVoucher(voucher vouchers.Voucher) (plans.Plan, error) {
 	var plan plans.Plan
 	if err := s.db.First(&plan, "id = ?", voucher.PlanID).Error; err != nil {
-		return voucher, plan, err
+		return plan, err
 	}
 	if !plan.IsActive {
-		return voucher, plan, errors.New("plan is inactive")
+		return plan, errors.New("plan is inactive")
 	}
-	return voucher, plan, nil
+	return plan, nil
 }
 
 func voucherUsable(voucher vouchers.Voucher) bool {
@@ -145,6 +173,21 @@ func voucherUsable(voucher vouchers.Voucher) bool {
 		return false
 	}
 	return voucher.ExpiresAt == nil || voucher.ExpiresAt.After(time.Now())
+}
+
+func voucherBindRejectMessage(err error) string {
+	switch {
+	case errors.Is(err, ErrInvalidDeviceMAC):
+		return "Missing device MAC address."
+	case errors.Is(err, ErrVoucherBoundToAnotherDevice):
+		return "Voucher is already linked to another device."
+	case errors.Is(err, ErrVoucherExpired):
+		return "Voucher time has expired."
+	case errors.Is(err, ErrVoucherDataExhausted):
+		return "Voucher data is exhausted."
+	default:
+		return "Invalid or expired voucher code."
+	}
 }
 
 func (s *Service) passwordMatches(packet radiusPacket, secret, expected string) bool {

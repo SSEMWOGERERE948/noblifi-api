@@ -8,11 +8,13 @@ import (
 )
 
 type Voucher struct {
-	ID      uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
-	UserID  *uuid.UUID `gorm:"type:uuid;index" json:"user_id,omitempty"`
-	Code    string     `gorm:"uniqueIndex" json:"code"`
-	PlanID  uuid.UUID  `gorm:"type:uuid;index" json:"plan_id"`
-	Channel string     `gorm:"default:physical;index" json:"channel"`
+	ID         uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
+	UserID     *uuid.UUID `gorm:"type:uuid;index" json:"user_id,omitempty"`
+	Code       string     `gorm:"uniqueIndex" json:"code"`
+	PlanID     uuid.UUID  `gorm:"type:uuid;index" json:"plan_id"`
+	Channel    string     `gorm:"default:physical;index" json:"channel"`
+	RouterID   *uuid.UUID `gorm:"type:uuid;index" json:"router_id,omitempty"`
+	PurchaseID *uuid.UUID `gorm:"type:uuid;uniqueIndex" json:"purchase_id,omitempty"`
 
 	BatchID  *string `gorm:"index" json:"batch_id"`
 	Template *string `json:"template"`
@@ -32,8 +34,9 @@ type Voucher struct {
 	ExpiresAt *time.Time `json:"expires_at"`
 	UsedAt    *time.Time `json:"used_at"`
 
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // BeforeCreate generates the UUID in Go.

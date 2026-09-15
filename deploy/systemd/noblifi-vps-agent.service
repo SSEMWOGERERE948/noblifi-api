@@ -1,5 +1,5 @@
 [Unit]
-Description=NobliFi xneelo WireGuard control-plane agent
+Description=NobliFi WireGuard control-plane agent
 Wants=network-online.target
 After=network-online.target wg-quick@wg0.service
 

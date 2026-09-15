@@ -3,6 +3,7 @@ package wireguard
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+
 	"errors"
 	"fmt"
 	"net/url"
@@ -26,18 +27,18 @@ type Service struct {
 }
 
 type RemoteAccessConfig struct {
-	RouterID   uuid.UUID `json:"router_id"`
-	RouterIP   string    `json:"router_ip"`
-	WebPort    int       `json:"web_port"`
-	WinboxPort int       `json:"winbox_port"`
+	RouterID    uuid.UUID `json:"router_id"`
+	RouterIP    string    `json:"router_ip"`
+	WinboxPort  int       `json:"winbox_port"`
+	VPNRequired bool      `json:"vpn_required"`
 }
 
 type RemoteAccessTarget struct {
-	RouterID   uuid.UUID `json:"router_id"`
-	Name       string    `json:"name"`
-	RouterIP   string    `json:"router_ip"`
-	WebPort    int       `json:"web_port"`
-	WinboxPort int       `json:"winbox_port"`
+	RouterID    uuid.UUID `json:"router_id"`
+	Name        string    `json:"name"`
+	RouterIP    string    `json:"router_ip"`
+	WinboxPort  int       `json:"winbox_port"`
+	VPNRequired bool      `json:"vpn_required"`
 }
 
 type TelemetryTarget struct {
@@ -65,6 +66,7 @@ type AgentTelemetryReport struct {
 	Model              string                    `json:"model"`
 	RouterOSVersion    string                    `json:"routeros_version"`
 	Uptime             string                    `json:"uptime"`
+	UptimeSeconds      *int64                    `json:"uptime_seconds"`
 	CPULoad            string                    `json:"cpu_load"`
 	FreeMemory         string                    `json:"free_memory"`
 	TotalMemory        string                    `json:"total_memory"`
@@ -137,6 +139,21 @@ func (s *Service) QueueRemoteAccess(router routers.Router) (WireGuardJob, error)
 	return s.QueueJob(router.ID, OperationUpsertRemoteAccess, "", "")
 }
 
+func (s *Service) QueueRemoteAccessRemoval(router routers.Router) (WireGuardJob, error) {
+	if router.ID == uuid.Nil {
+		return WireGuardJob{}, errors.New("router ID is required")
+	}
+	port := ""
+	if router.RemoteWinboxPort != nil {
+		port = fmt.Sprintf("%d", *router.RemoteWinboxPort)
+	}
+	routerIP := ""
+	if router.WireGuardTunnelIP != nil {
+		routerIP = hostOnly(strings.TrimSpace(*router.WireGuardTunnelIP))
+	}
+	return s.QueueJob(router.ID, OperationRemoveRemoteAccess, port, routerIP)
+}
+
 func (s *Service) DesiredRemoteAccess(routerID uuid.UUID) (RemoteAccessConfig, error) {
 	var router routers.Router
 	if err := s.db.First(&router, "id = ?", routerID).Error; err != nil {
@@ -145,18 +162,11 @@ func (s *Service) DesiredRemoteAccess(routerID uuid.UUID) (RemoteAccessConfig, e
 	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
 		return RemoteAccessConfig{}, errors.New("router WireGuard tunnel IP is missing")
 	}
-	if router.RemoteWebPort == nil && router.RemoteWinboxPort == nil {
-		return RemoteAccessConfig{}, errors.New("router remote access ports are not assigned")
-	}
 	cfg := RemoteAccessConfig{
-		RouterID: router.ID,
-		RouterIP: strings.TrimSpace(*router.WireGuardTunnelIP),
-	}
-	if router.RemoteWebPort != nil {
-		cfg.WebPort = *router.RemoteWebPort
-	}
-	if router.RemoteWinboxPort != nil {
-		cfg.WinboxPort = *router.RemoteWinboxPort
+		RouterID:    router.ID,
+		RouterIP:    hostOnly(strings.TrimSpace(*router.WireGuardTunnelIP)),
+		WinboxPort:  8291,
+		VPNRequired: true,
 	}
 	return cfg, nil
 }
@@ -166,8 +176,7 @@ func (s *Service) RemoteAccessTargets() ([]RemoteAccessTarget, error) {
 	if err := s.db.
 		Where("deleted_at IS NULL").
 		Where("wire_guard_tunnel_ip IS NOT NULL AND wire_guard_tunnel_ip <> ''").
-		Where("remote_access_status IN ?", []string{"queued", "ready", "failed"}).
-		Where("remote_winbox_port IS NOT NULL").
+		Where("remote_access_status IN ?", []string{"queued", "active", "ready", "failed"}).
 		Order("created_at desc").
 		Find(&records).Error; err != nil {
 		return nil, err
@@ -180,12 +189,11 @@ func (s *Service) RemoteAccessTargets() ([]RemoteAccessTarget, error) {
 			continue
 		}
 		target := RemoteAccessTarget{
-			RouterID: router.ID,
-			Name:     router.Name,
-			RouterIP: routerIP,
-		}
-		if router.RemoteWinboxPort != nil {
-			target.WinboxPort = *router.RemoteWinboxPort
+			RouterID:    router.ID,
+			Name:        router.Name,
+			RouterIP:    routerIP,
+			WinboxPort:  8291,
+			VPNRequired: true,
 		}
 		targets = append(targets, target)
 	}
@@ -197,7 +205,7 @@ func (s *Service) RecordRemoteAccessReady(routerID uuid.UUID) error {
 	return s.db.Model(&routers.Router{}).
 		Where("id = ?", routerID).
 		Updates(map[string]any{
-			"remote_access_status":  "ready",
+			"remote_access_status":  "active",
 			"wire_guard_last_error": nil,
 			"updated_at":            now,
 		}).Error
@@ -280,6 +288,9 @@ func (s *Service) RecordAgentTelemetry(routerID uuid.UUID, input AgentTelemetryR
 	}
 	if value := strings.TrimSpace(input.Uptime); value != "" {
 		updates["uptime"] = value
+	}
+	if input.UptimeSeconds != nil && *input.UptimeSeconds >= 0 {
+		updates["uptime_seconds"] = *input.UptimeSeconds
 	}
 	if value := strings.TrimSpace(input.CPULoad); value != "" {
 		updates["cpu_load"] = value
@@ -372,37 +383,39 @@ func renderOptionsForRouter(router routers.Router, cfg config.Config) portprofil
 		profile := *router.NetworkProfile
 		routers.NormalizeNetworkProfile(&profile, cfg)
 		options := profile.RenderOptions()
+		options.WireGuardManagementSubnet = strings.TrimSpace(cfg.WireGuardSubnetCIDR)
 		options.WalledGardenHosts = cfg.HotspotWalledGardenHosts
 		return options
 	}
 	return portprofiles.RenderOptions{
-		RadiusServer:        cfg.RadiusServer,
-		RadiusSecret:        cfg.RadiusSecret,
-		RouterIdentity:      cfg.RouterIdentityPrefix + "-Router",
-		APIUsername:         cfg.RouterAPIUsername,
-		APIPassword:         cfg.RouterAPIPassword,
-		HotspotBridge:       cfg.HotspotBridgeName,
-		StaffBridge:         cfg.StaffBridgeName,
-		POSBridge:           cfg.POSBridgeName,
-		CCTVBridge:          cfg.CCTVBridgeName,
-		HotspotSubnet:       cfg.HotspotSubnetCIDR,
-		HotspotGateway:      cfg.HotspotGatewayCIDR,
-		HotspotPool:         cfg.HotspotPoolRange,
-		StaffSubnet:         cfg.StaffSubnetCIDR,
-		StaffGateway:        cfg.StaffGatewayCIDR,
-		StaffPool:           cfg.StaffPoolRange,
-		POSSubnet:           cfg.POSSubnetCIDR,
-		POSGateway:          cfg.POSGatewayCIDR,
-		POSPool:             cfg.POSPoolRange,
-		CCTVSubnet:          cfg.CCTVSubnetCIDR,
-		CCTVGateway:         cfg.CCTVGatewayCIDR,
-		CCTVPool:            cfg.CCTVPoolRange,
-		HotspotDNSName:      cfg.HotspotDNSName,
-		HotspotPortalName:   cfg.HotspotPortalName,
-		WalledGardenHosts:   cfg.HotspotWalledGardenHosts,
-		DisableWWWService:   cfg.DisableWWWService,
-		EnableAPIService:    cfg.EnableAPIService,
-		EnableAPISSLService: cfg.EnableAPISSLService,
+		RadiusServer:              cfg.RadiusServer,
+		RadiusSecret:              cfg.RadiusSecret,
+		RouterIdentity:            cfg.RouterIdentityPrefix + "-Router",
+		APIUsername:               cfg.RouterAPIUsername,
+		APIPassword:               cfg.RouterAPIPassword,
+		HotspotBridge:             cfg.HotspotBridgeName,
+		StaffBridge:               cfg.StaffBridgeName,
+		POSBridge:                 cfg.POSBridgeName,
+		CCTVBridge:                cfg.CCTVBridgeName,
+		HotspotSubnet:             cfg.HotspotSubnetCIDR,
+		HotspotGateway:            cfg.HotspotGatewayCIDR,
+		HotspotPool:               cfg.HotspotPoolRange,
+		StaffSubnet:               cfg.StaffSubnetCIDR,
+		StaffGateway:              cfg.StaffGatewayCIDR,
+		StaffPool:                 cfg.StaffPoolRange,
+		POSSubnet:                 cfg.POSSubnetCIDR,
+		POSGateway:                cfg.POSGatewayCIDR,
+		POSPool:                   cfg.POSPoolRange,
+		CCTVSubnet:                cfg.CCTVSubnetCIDR,
+		CCTVGateway:               cfg.CCTVGatewayCIDR,
+		CCTVPool:                  cfg.CCTVPoolRange,
+		HotspotDNSName:            cfg.HotspotDNSName,
+		HotspotPortalName:         cfg.HotspotPortalName,
+		WireGuardManagementSubnet: strings.TrimSpace(cfg.WireGuardSubnetCIDR),
+		WalledGardenHosts:         cfg.HotspotWalledGardenHosts,
+		DisableWWWService:         cfg.DisableWWWService,
+		EnableAPIService:          cfg.EnableAPIService,
+		EnableAPISSLService:       cfg.EnableAPISSLService,
 	}
 }
 
@@ -486,6 +499,7 @@ func (s *Service) ClaimJob(agentID string, lease time.Duration) (WireGuardJob, b
 	now := time.Now().UTC()
 	expiredBefore := now.Add(-lease)
 	var job WireGuardJob
+	found := false
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 			Where(
@@ -495,19 +509,26 @@ func (s *Service) ClaimJob(agentID string, lease time.Duration) (WireGuardJob, b
 			).
 			Order("available_at asc, created_at asc").
 			First(&job).Error
-		if err != nil {
-			return err
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
 		}
+		if err != nil {
+			return fmt.Errorf("claim next WireGuard job: %w", err)
+		}
+		found = true
 		job.Status = StatusClaimed
 		job.LockedBy = strings.TrimSpace(agentID)
 		job.LockedAt = &now
 		job.AttemptCount++
 		return tx.Save(&job).Error
 	})
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil {
+		return WireGuardJob{}, false, err
+	}
+	if !found {
 		return WireGuardJob{}, false, nil
 	}
-	return job, err == nil, err
+	return job, true, nil
 }
 
 func (s *Service) MarkApplying(jobID uuid.UUID, agentID string) error {
@@ -679,7 +700,7 @@ func (s *Service) applyRouterJobStatus(job WireGuardJob, message string) error {
 		}
 	case OperationUpsertRemoteAccess:
 		if job.Status == StatusSucceeded {
-			updates["remote_access_status"] = "ready"
+			updates["remote_access_status"] = "active"
 			updates["wire_guard_last_error"] = nil
 		} else if job.Status == StatusFailed {
 			updates["remote_access_status"] = "failed"
@@ -687,7 +708,7 @@ func (s *Service) applyRouterJobStatus(job WireGuardJob, message string) error {
 		}
 	case OperationRemoveRemoteAccess:
 		if job.Status == StatusSucceeded {
-			updates["remote_access_status"] = "disabled"
+			updates["remote_access_status"] = "revoked"
 			updates["remote_web_port"] = nil
 			updates["remote_winbox_port"] = nil
 		}

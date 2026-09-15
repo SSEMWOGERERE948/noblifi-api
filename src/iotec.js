@@ -9,7 +9,6 @@ function requireConfig() {
   if (!TOKEN_URL) missing.push("IOTEC_TOKEN_URL");
   if (!process.env.IOTEC_CLIENT_ID) missing.push("IOTEC_CLIENT_ID");
   if (!process.env.IOTEC_CLIENT_SECRET) missing.push("IOTEC_CLIENT_SECRET");
-  if (!process.env.IOTEC_WALLET_ID) missing.push("IOTEC_WALLET_ID");
   if (missing.length) throw new Error(`ioTec is not configured. Missing: ${missing.join(", ")}`);
 }
 
@@ -61,7 +60,7 @@ async function submitOrder({ merchantReference, amount, description, phone }) {
     body: JSON.stringify({
       category: "MobileMoney",
       currency: process.env.IOTEC_CURRENCY || "UGX",
-      walletId: process.env.IOTEC_WALLET_ID,
+      walletId: process.env.IOTEC_WALLET_ID || "01a023f3-c9d7-7103-b774-b83336aa4699",
       externalId: merchantReference,
       payer: phone,
       amount,

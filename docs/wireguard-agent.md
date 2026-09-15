@@ -2,7 +2,7 @@
 
 ## Architecture
 
-Dashboard creates a router, the backend allocates a unique WireGuard client IP, and the MikroTik reports its interface public key to `/api/v1/provisioning/wireguard-key`. The backend queues a WireGuard job. The xneelo agent polls `/api/v1/internal/wireguard/jobs/claim`, updates `wg0`, persists `/etc/wireguard/wg0.conf`, verifies runtime state, and reports completion.
+Dashboard creates a router, the backend allocates a unique WireGuard client IP, and the MikroTik reports its interface public key to `/api/v1/provisioning/wireguard-key`. The backend queues a WireGuard job. The noblifi-agent service polls `/api/v1/internal/wireguard/jobs/claim`, updates `wg0`, persists `/etc/wireguard/wg0.conf`, verifies runtime state, and reports completion.
 
 The agent also owns scheduled telemetry for WireGuard-managed routers. App
 Engine and hosted GitHub Actions cannot route to private `10.77.0.x` tunnel
@@ -33,7 +33,7 @@ NOBLIFI_REMOTE_ACCESS_HOST=vpn.your-domain.example
 NOBLIFI_REMOTE_WEB_PORT_BASE=21000
 NOBLIFI_REMOTE_WINBOX_PORT_BASE=22000
 NOBLIFI_AGENT_TOKEN=<long-random-secret>
-NOBLIFI_AGENT_ID=xneelo-wg-agent-01
+NOBLIFI_AGENT_ID=noblifi-agent-01
 ```
 
 ## Agent Installation
@@ -64,7 +64,7 @@ sudo systemctl enable --now noblifi-vps-agent.service
 ```bash
 NOBLIFI_CONTROL_PLANE_URL=https://api.example.com/api/v1
 NOBLIFI_AGENT_TOKEN=<same backend token>
-NOBLIFI_AGENT_ID=xneelo-wg-agent-01
+NOBLIFI_AGENT_ID=noblifi-agent-01
 NOBLIFI_WIREGUARD_INTERFACE=wg0
 NOBLIFI_WIREGUARD_CONFIG=/etc/wireguard/wg0.conf
 NOBLIFI_WIREGUARD_BACKUP_DIR=/etc/wireguard/backups

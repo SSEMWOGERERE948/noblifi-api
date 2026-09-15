@@ -18,6 +18,10 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Post("/routers", h.create)
 	router.Get("/routers", h.list)
 	router.Get("/routers/:id", h.get)
+	router.Post("/routers/:id/remote-access/winbox", h.enableWinBox)
+	router.Delete("/routers/:id/remote-access", h.disableRemoteAccess)
+	router.Post("/routers/:id/delete-challenge", h.deleteChallenge)
+	router.Delete("/routers/:id", h.deleteRouter)
 
 	router.Post(
 		"/routers/:id/regenerate-claim-token",
@@ -91,6 +95,60 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 		"/routers/:id/apply-config",
 		h.applyConfig,
 	)
+}
+
+func (h *Handler) enableWinBox(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
+	}
+	userID, isSuperadmin := currentUserScope(c)
+	out, err := h.service.EnableWinBoxAccess(id, userID, isSuperadmin)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	return c.JSON(out)
+}
+
+func (h *Handler) disableRemoteAccess(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
+	}
+	userID, isSuperadmin := currentUserScope(c)
+	if err := h.service.DisableRemoteAccess(id, userID, isSuperadmin); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+func (h *Handler) deleteChallenge(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
+	}
+	userID, isSuperadmin := currentUserScope(c)
+	out, err := h.service.RequestDeleteChallenge(id, userID, isSuperadmin)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	return c.JSON(out)
+}
+
+func (h *Handler) deleteRouter(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
+	}
+	var input DeleteRouterInput
+	if err := c.BodyParser(&input); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	}
+	userID, isSuperadmin := currentUserScope(c)
+	if err := h.service.DeleteRouter(id, input, userID, isSuperadmin); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	return c.SendStatus(fiber.StatusNoContent)
 }
 
 func (h *Handler) create(c *fiber.Ctx) error {
@@ -186,6 +244,11 @@ func (h *Handler) interfaces(
 			fiber.StatusBadRequest,
 			"invalid router id",
 		)
+	}
+
+	userID, isSuperadmin := currentUserScope(c)
+	if _, err := h.service.Find(id, userID, isSuperadmin); err != nil {
+		return err
 	}
 
 	interfaces, err := h.service.Interfaces(id)
@@ -342,6 +405,11 @@ func (h *Handler) method(
 		)
 	}
 
+	userID, isSuperadmin := currentUserScope(c)
+	if _, err := h.service.Find(id, userID, isSuperadmin); err != nil {
+		return err
+	}
+
 	session, err := h.service.SaveMethod(
 		id,
 		input,
@@ -436,6 +504,11 @@ func (h *Handler) bootstrapScript(
 		)
 	}
 
+	userID, isSuperadmin := currentUserScope(c)
+	if _, err := h.service.Find(id, userID, isSuperadmin); err != nil {
+		return err
+	}
+
 	script, err := h.service.BootstrapScript(id)
 
 	if err != nil {
@@ -461,6 +534,11 @@ func (h *Handler) configPreview(
 		)
 	}
 
+	userID, isSuperadmin := currentUserScope(c)
+	if _, err := h.service.Find(id, userID, isSuperadmin); err != nil {
+		return err
+	}
+
 	preview, err := h.service.ConfigPreview(id)
 
 	if err != nil {
@@ -483,6 +561,11 @@ func (h *Handler) configInstallCommand(
 			fiber.StatusBadRequest,
 			"invalid router id",
 		)
+	}
+
+	userID, isSuperadmin := currentUserScope(c)
+	if _, err := h.service.Find(id, userID, isSuperadmin); err != nil {
+		return err
 	}
 
 	command, err := h.service.ConfigInstallCommand(id)
@@ -513,6 +596,11 @@ func (h *Handler) deploy(
 		)
 	}
 
+	userID, isSuperadmin := currentUserScope(c)
+	if _, err := h.service.Find(id, userID, isSuperadmin); err != nil {
+		return err
+	}
+
 	result, err := h.service.Deploy(id)
 
 	if err != nil {
@@ -535,6 +623,11 @@ func (h *Handler) applyConfig(
 			fiber.StatusBadRequest,
 			"invalid router id",
 		)
+	}
+
+	userID, isSuperadmin := currentUserScope(c)
+	if _, err := h.service.Find(id, userID, isSuperadmin); err != nil {
+		return err
 	}
 
 	if _, err := h.service.Deploy(id); err != nil {

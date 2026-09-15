@@ -53,9 +53,12 @@ func (s *Service) List(
 	var items []Plan
 	var err error
 
-	if isSuperadmin || userID == nil {
+	if isSuperadmin {
 		items, err = s.repo.List()
 	} else {
+		if userID == nil || *userID == uuid.Nil {
+			return nil, errors.New("authenticated user is required")
+		}
 		items, err = s.repo.ListForUser(*userID)
 	}
 
@@ -91,9 +94,12 @@ func (s *Service) Find(
 	var plan Plan
 	var err error
 
-	if isSuperadmin || userID == nil {
+	if isSuperadmin {
 		plan, err = s.repo.Find(id)
 	} else {
+		if userID == nil || *userID == uuid.Nil {
+			return Plan{}, errors.New("authenticated user is required")
+		}
 		plan, err = s.repo.FindForUser(id, *userID)
 	}
 
@@ -175,6 +181,19 @@ func (s *Service) Patch(
 	}
 
 	return hydratePlanDurationPresentation(plan), nil
+}
+
+func (s *Service) Delete(
+	id uuid.UUID,
+	userID *uuid.UUID,
+	isSuperadmin bool,
+) error {
+	plan, err := s.Find(id, userID, isSuperadmin)
+	if err != nil {
+		return err
+	}
+
+	return s.repo.Delete(&plan)
 }
 
 func normalizePlanForCreate(plan *Plan) error {
@@ -343,13 +362,15 @@ func normalizeDurationUnit(value string) (string, error) {
 		return DurationUnitMinutes, nil
 	case "hour", "hours", "hr", "hrs":
 		return DurationUnitHours, nil
+	case "day", "days":
+		return DurationUnitDays, nil
 	case "week", "weeks", "wk", "wks":
 		return DurationUnitWeeks, nil
 	case "month", "months", "mo", "mos":
 		return DurationUnitMonths, nil
 	default:
 		return "", errors.New(
-			"duration unit must be minutes, hours, weeks, or months",
+			"duration unit must be minutes, hours, days, weeks, or months",
 		)
 	}
 }
@@ -366,6 +387,8 @@ func durationToMinutes(value int, unit string) (int, error) {
 		multiplier = 1
 	case DurationUnitHours:
 		multiplier = 60
+	case DurationUnitDays:
+		multiplier = 24 * 60
 	case DurationUnitWeeks:
 		multiplier = 7 * 24 * 60
 	case DurationUnitMonths:
@@ -389,6 +412,7 @@ func deriveDurationPresentation(minutes int) (int, string) {
 
 	monthMinutes := 30 * 24 * 60
 	weekMinutes := 7 * 24 * 60
+	dayMinutes := 24 * 60
 
 	if minutes >= monthMinutes && minutes%monthMinutes == 0 {
 		return minutes / monthMinutes, DurationUnitMonths
@@ -396,6 +420,10 @@ func deriveDurationPresentation(minutes int) (int, string) {
 
 	if minutes >= weekMinutes && minutes%weekMinutes == 0 {
 		return minutes / weekMinutes, DurationUnitWeeks
+	}
+
+	if minutes >= dayMinutes && minutes%dayMinutes == 0 {
+		return minutes / dayMinutes, DurationUnitDays
 	}
 
 	if minutes >= 60 && minutes%60 == 0 {

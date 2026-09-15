@@ -2,16 +2,21 @@ package vouchers
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 const (
-	ChannelMobileMoneyOnline = "mobile_money_online"
-	ChannelPhysical          = "physical"
+	VoucherChannelPhysical = "physical"
+	VoucherChannelOnline   = "online"
+
+	ChannelMobileMoneyOnline = VoucherChannelOnline
+	ChannelPhysical          = VoucherChannelPhysical
 
 	MaxVoucherBatchSize   = 500
 	DefaultOnlinePoolSize = 500
@@ -26,6 +31,8 @@ const (
 )
 
 var (
+	ErrAuthenticationRequired = errors.New("authenticated user is required")
+
 	templates = map[string]bool{
 		"compact":      true,
 		"receipt":      true,
@@ -85,6 +92,26 @@ type GenerateInput struct {
 		Default: 8
 	*/
 	CodeLength int
+}
+
+type ListItem struct {
+	ID                uuid.UUID  `json:"id"`
+	Code              string     `json:"code"`
+	Status            string     `json:"status"`
+	PlanID            uuid.UUID  `json:"plan_id"`
+	PlanName          string     `json:"plan_name"`
+	Channel           string     `json:"channel"`
+	BatchID           *string    `json:"batch_id,omitempty"`
+	Template          *string    `json:"template,omitempty"`
+	Pattern           *string    `json:"pattern,omitempty"`
+	Payer             string     `json:"payer"`
+	PayerName         string     `json:"payer_name"`
+	UseCase           string     `json:"use_case"`
+	ProviderReference string     `json:"provider_reference"`
+	MerchantReference string     `json:"merchant_reference"`
+	FirstLogin        *time.Time `json:"first_login,omitempty"`
+	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
 }
 
 /*
@@ -210,6 +237,27 @@ func (s *Service) generate(
 	userID *uuid.UUID,
 	isSuperadmin bool,
 ) ([]Voucher, error) {
+	if isSuperadmin {
+		exists, err := s.repo.PlanExists(input.PlanID)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, fmt.Errorf("plan not found")
+		}
+	} else {
+		if userID == nil || *userID == uuid.Nil {
+			return nil, ErrAuthenticationRequired
+		}
+		ownsPlan, err := s.repo.PlanBelongsToUser(input.PlanID, *userID)
+		if err != nil {
+			return nil, err
+		}
+		if !ownsPlan {
+			return nil, fmt.Errorf("plan not found")
+		}
+	}
+
 	quantity := input.Quantity
 
 	if quantity < 1 {
@@ -309,7 +357,7 @@ func (s *Service) generate(
 			Status: "unused",
 		}
 
-		if !isSuperadmin && userID != nil {
+		if !isSuperadmin {
 			item.UserID = userID
 		}
 
@@ -413,8 +461,11 @@ func (s *Service) List(
 	userID *uuid.UUID,
 	isSuperadmin bool,
 ) ([]Voucher, error) {
-	if isSuperadmin || userID == nil {
+	if isSuperadmin {
 		return s.repo.List()
+	}
+	if userID == nil || *userID == uuid.Nil {
+		return nil, ErrAuthenticationRequired
 	}
 
 	return s.repo.ListForUser(
@@ -422,9 +473,72 @@ func (s *Service) List(
 	)
 }
 
+func (s *Service) Delete(
+	id uuid.UUID,
+	userID *uuid.UUID,
+	isSuperadmin bool,
+) error {
+	var voucher Voucher
+	var err error
+
+	if isSuperadmin {
+		voucher, err = s.repo.Find(id)
+	} else {
+		if userID == nil || *userID == uuid.Nil {
+			return ErrAuthenticationRequired
+		}
+		voucher, err = s.repo.FindForUser(id, *userID)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	return s.repo.Delete(&voucher)
+}
+
+func (s *Service) ListDetailed(userID *uuid.UUID, isSuperadmin bool) ([]ListItem, error) {
+	var rows []ListItem
+	query := s.repo.db.
+		Table("vouchers").
+		Select(`vouchers.id,
+			vouchers.code,
+			vouchers.status,
+			vouchers.plan_id,
+			COALESCE(plans.name, '') AS plan_name,
+			vouchers.channel,
+			vouchers.batch_id,
+			vouchers.template,
+			vouchers.pattern,
+			COALESCE(hotspot_purchases.phone, '') AS payer,
+			COALESCE(hotspot_purchases.customer_name, '') AS payer_name,
+			CASE
+				WHEN vouchers.channel = ? THEN 'Mobile Money Sale'
+				ELSE 'Physical Voucher'
+			END AS use_case,
+			COALESCE(hotspot_purchases.order_tracking_id, '') AS provider_reference,
+			COALESCE(hotspot_purchases.merchant_reference, '') AS merchant_reference,
+			vouchers.used_at AS first_login,
+			vouchers.expires_at,
+			vouchers.created_at`, VoucherChannelOnline).
+		Joins("LEFT JOIN plans ON plans.id = vouchers.plan_id").
+		Joins("LEFT JOIN hotspot_purchases ON hotspot_purchases.id = vouchers.purchase_id").
+		Where("vouchers.deleted_at IS NULL").
+		Order("vouchers.created_at desc")
+
+	if !isSuperadmin {
+		if userID == nil || *userID == uuid.Nil {
+			return nil, ErrAuthenticationRequired
+		}
+		query = query.Where("vouchers.user_id = ?", *userID)
+	}
+
+	return rows, query.Scan(&rows).Error
+}
+
 /*
 normalizeCodeLength applies the default when the frontend
-does not provide a length and otherwise requires 4–9.
+does not provide a length and otherwise requires 4-9.
 */
 func normalizeCodeLength(
 	length int,

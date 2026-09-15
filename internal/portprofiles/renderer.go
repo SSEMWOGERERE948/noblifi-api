@@ -33,31 +33,33 @@ type RenderOptions struct {
 	StatusPageURL string
 	LogoutPageURL string
 
-	RouterIdentity      string
-	APIUsername         string
-	APIPassword         string
-	HotspotBridge       string
-	StaffBridge         string
-	POSBridge           string
-	CCTVBridge          string
-	HotspotSubnet       string
-	HotspotGateway      string
-	HotspotPool         string
-	StaffSubnet         string
-	StaffGateway        string
-	StaffPool           string
-	POSSubnet           string
-	POSGateway          string
-	POSPool             string
-	CCTVSubnet          string
-	CCTVGateway         string
-	CCTVPool            string
-	HotspotDNSName      string
-	HotspotPortalName   string
-	DisableWWWService   bool
-	EnableAPIService    bool
-	EnableAPISSLService bool
-	WalledGardenHosts   []string
+	RouterIdentity            string
+	APIUsername               string
+	APIPassword               string
+	HotspotBridge             string
+	StaffBridge               string
+	POSBridge                 string
+	CCTVBridge                string
+	HotspotSubnet             string
+	HotspotGateway            string
+	HotspotPool               string
+	StaffSubnet               string
+	StaffGateway              string
+	StaffPool                 string
+	POSSubnet                 string
+	POSGateway                string
+	POSPool                   string
+	CCTVSubnet                string
+	CCTVGateway               string
+	CCTVPool                  string
+	HotspotDNSName            string
+	HotspotPortalName         string
+	PublicSiteURL             string
+	WireGuardManagementSubnet string
+	DisableWWWService         bool
+	EnableAPIService          bool
+	EnableAPISSLService       bool
+	WalledGardenHosts         []string
 }
 
 func DefaultAssignments() []Assignment {
@@ -133,8 +135,9 @@ func RenderRouterOS(assignments []Assignment) (string, error) {
 		CCTVSubnet:          "10.40.40.0/24",
 		CCTVGateway:         "10.40.40.1/24",
 		CCTVPool:            "10.40.40.10-10.40.40.254",
-		HotspotDNSName:      "noblifi.login",
+		HotspotDNSName:      "login.noblifi.local",
 		HotspotPortalName:   "NobliFi WiFi",
+		PublicSiteURL:       "https://noblifi-frontend.vercel.app",
 		DisableWWWService:   true,
 		EnableAPIService:    true,
 		EnableAPISSLService: true,
@@ -226,6 +229,9 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	builder.WriteString(":put \"NobliFi SAFE INSTALL: preserving WebFig/WinBox/SSH management services\"\n")
 	if options.EnableAPIService {
 		writeSafe(&builder, "/ip service set api disabled=no", "enable api service")
+		if subnet := strings.TrimSpace(options.WireGuardManagementSubnet); subnet != "" {
+			writeSafe(&builder, fmt.Sprintf("/ip service set api address=%q", subnet), "restrict api service to WireGuard management subnet")
+		}
 	}
 	if options.EnableAPISSLService {
 		writeSafe(&builder, "/ip service set api-ssl disabled=no", "enable api-ssl service")
@@ -297,8 +303,9 @@ func withDefaults(options RenderOptions) RenderOptions {
 		CCTVSubnet:          "10.40.40.0/24",
 		CCTVGateway:         "10.40.40.1/24",
 		CCTVPool:            "10.40.40.10-10.40.40.254",
-		HotspotDNSName:      "noblifi.login",
+		HotspotDNSName:      "login.noblifi.local",
 		HotspotPortalName:   "NobliFi WiFi",
+		PublicSiteURL:       "https://noblifi-frontend.vercel.app",
 		DisableWWWService:   true,
 		EnableAPIService:    true,
 		EnableAPISSLService: true,
@@ -366,6 +373,9 @@ func withDefaults(options RenderOptions) RenderOptions {
 	}
 	if options.HotspotPortalName == "" {
 		options.HotspotPortalName = defaults.HotspotPortalName
+	}
+	if options.PublicSiteURL == "" {
+		options.PublicSiteURL = defaults.PublicSiteURL
 	}
 	if len(options.WalledGardenHosts) == 0 {
 		options.WalledGardenHosts = defaults.WalledGardenHosts
@@ -624,6 +634,40 @@ func writeHotspotDHCPFinalization(builder *strings.Builder, options RenderOption
 	builder.WriteString(":put \"NobliFi DHCP ACTIVE: hotspot clients can now request addresses\"\n\n")
 }
 
+// writeHotspotShaping makes RADIUS package speed limits enforceable.
+//
+// MikroTik's Mikrotik-Rate-Limit reply attribute creates dynamic HotSpot
+// simple queues. FastTrack can bypass the normal queue/HotSpot processing path,
+// which makes a capped package behave like an unlimited package.
+//
+// NobliFi therefore treats "FastTrack disabled" as a provisioning invariant on
+// routers that provide the managed HotSpot. The disable command is intentionally
+// idempotent and affects every fasttrack-connection filter rule, including the
+// common factory rule whose comment is "defconf: fasttrack".
+//
+// We disable first and then verify. The verification is critical: provisioning
+// must not report success if any FastTrack rule remains enabled because package
+// speed enforcement could not then be guaranteed.
+func writeHotspotShaping(builder *strings.Builder) {
+	builder.WriteString("# HotSpot shaping guard - FastTrack must be disabled for RADIUS speed caps\n")
+
+	writeSafe(
+		builder,
+		`/ip firewall filter disable [find where action=fasttrack-connection]`,
+		"disable FastTrack for HotSpot shaping",
+	)
+
+	writeCritical(
+		builder,
+		`:if ([:len [/ip firewall filter find where action=fasttrack-connection disabled=no]] > 0) do={ :error "NobliFi FastTrack verification failed: an enabled FastTrack rule remains" }`,
+		"NobliFi failed to verify FastTrack is disabled for HotSpot shaping",
+	)
+
+	builder.WriteString(`:local noblifiFastTrackRules [/ip firewall filter find where action=fasttrack-connection]` + "\n")
+	builder.WriteString(`:if ([:len $noblifiFastTrackRules] = 0) do={ :put "NobliFi shaping: no FastTrack rules found" } else={ :put "NobliFi shaping: FastTrack rules found and disabled" }` + "\n")
+	builder.WriteString(`:put "NobliFi shaping verified: RADIUS Mikrotik-Rate-Limit can use dynamic HotSpot queues"` + "\n")
+}
+
 func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotspotGateway string) {
 	builder.WriteString("# DNS, NAT, RADIUS, and HotSpot captive portal setup\n")
 	builder.WriteString(":put \"============================================================\"\n")
@@ -637,11 +681,14 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	builder.WriteString(`:do { :local dm [/system/device-mode get hotspot]; :if ($dm = false) do={ :set hotspotDeviceModeAllowed false } } on-error={}` + "\n")
 	builder.WriteString(`:if (!$hotspotDeviceModeAllowed) do={ :error "NobliFi HotSpot is disabled by RouterOS device-mode; enable hotspot=yes and physically confirm the device-mode change" }` + "\n")
 
-	builder.WriteString(":put \"[1/12] Configuring DNS and NAT...\"\n")
+	builder.WriteString(":put \"[1/13] Configuring DNS and NAT...\"\n")
 	writeSafe(builder, "/ip dns set allow-remote-requests=yes", "enable dns forwarding")
 	builder.WriteString(`:if ([:len [/ip firewall nat find where comment="NobliFi client NAT"]] = 0) do={ :do { /ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="NobliFi client NAT" } on-error={ :error "NobliFi failed to create client NAT" } }` + "\n")
 
-	builder.WriteString(":put \"[2/12] Configuring RADIUS client...\"\n")
+	builder.WriteString(":put \"[2/13] Disabling FastTrack for HotSpot speed enforcement...\"\n")
+	writeHotspotShaping(builder)
+
+	builder.WriteString(":put \"[3/13] Configuring RADIUS client...\"\n")
 	builder.WriteString(`:local noblifiRadius [/radius find where comment="NobliFi RADIUS"]` + "\n")
 	builder.WriteString(fmt.Sprintf(`:if ([:len $noblifiRadius] = 0) do={ :do { /radius add service=hotspot address=%q secret=%q authentication-port=1812 accounting-port=1813 timeout=3s comment="NobliFi RADIUS" } on-error={ :error "NobliFi failed to create RADIUS client" } } else={ :foreach r in=$noblifiRadius do={ :do { /radius set $r service=hotspot address=%q secret=%q authentication-port=1812 accounting-port=1813 timeout=3s } on-error={ :error "NobliFi failed to update RADIUS client" } } }`+"\n", options.RadiusServer, options.RadiusSecret, options.RadiusServer, options.RadiusSecret))
 	writeSafe(builder, "/radius incoming set accept=yes", "enable radius incoming")
@@ -654,7 +701,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	//   /file add name=/flash/<directory> type=directory
 	//
 	// Do not use `/file make-directory`; it is not the RouterOS file command.
-	builder.WriteString(":put \"[3/12] Preparing persistent captive portal directory /flash/noblifi...\"\n")
+	builder.WriteString(":put \"[4/13] Preparing persistent captive portal directory /flash/noblifi...\"\n")
 	builder.WriteString(`:if ([:len [/file find where name="flash"]] = 0) do={ :error "NobliFi requires persistent flash storage but /flash was not found" }` + "\n")
 
 	// File-list lookup names do not include the leading slash, while the full
@@ -672,18 +719,18 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	)
 
 	builder.WriteString(`:if ([:len [/file find where name=$hotspotDirLookup]] = 0) do={ :error "NobliFi /flash/noblifi directory is still missing after creation" }` + "\n")
-	builder.WriteString(":put \"[3/12] OK - /flash/noblifi directory is ready\"\n")
+	builder.WriteString(":put \"[4/13] OK - /flash/noblifi directory is ready\"\n")
 
-	// Create branded local supporting servlet files first. The tenant login page
-	// is fetched from the backend, while RouterOS-native status/logout/error
-	// pages use the same NobliFi visual language.
-	builder.WriteString(":put \"[4/12] Installing branded RouterOS captive portal support files...\"\n")
+	// Create local supporting servlet files first. They make the portal usable
+	// even before dedicated tenant status/logout endpoints are available.
+	// login.html itself is always fetched from the tenant-scoped backend URL.
+	builder.WriteString(":put \"[5/13] Installing branded RouterOS captive portal support files...\"\n")
 
 	writeStaticHotspotFile(
 		builder,
 		"/flash/noblifi/status.html",
 		"flash/noblifi/status.html",
-		hotspotStatusPageHTML(options.HotspotPortalName),
+		hotspotStatusPageHTML(options.HotspotPortalName, options.PublicSiteURL),
 		"status.html",
 	)
 
@@ -691,17 +738,21 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		builder,
 		"/flash/noblifi/logout.html",
 		"flash/noblifi/logout.html",
-		hotspotLogoutPageHTML(options.HotspotPortalName),
+		hotspotLogoutPageHTML(options.HotspotPortalName, options.PublicSiteURL),
 		"logout.html",
 	)
 
-	// rlogin/redirect must continue to emit a real HTTP 302 Location header.
+	// Windows NCSI and other captive-detection requests must receive a real
+	// RouterOS-generated absolute HotSpot login URL. Never use a relative
+	// "/login" redirect here: when Windows requests msftconnecttest.com, a
+	// relative redirect becomes www.msftconnecttest.com/login.
 	writeStaticHotspotFile(
 		builder,
 		"/flash/noblifi/redirect.html",
 		"flash/noblifi/redirect.html",
 		hotspotRedirectPageHTML(
 			options.HotspotPortalName,
+			options.PublicSiteURL,
 			"WiFi login required",
 			"Continue to WiFi",
 			"$(link-login)",
@@ -715,6 +766,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		"flash/noblifi/rlogin.html",
 		hotspotRedirectPageHTML(
 			options.HotspotPortalName,
+			options.PublicSiteURL,
 			"WiFi login required",
 			"Continue to WiFi",
 			"$(link-login)",
@@ -728,6 +780,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		"flash/noblifi/rstatus.html",
 		hotspotRedirectPageHTML(
 			options.HotspotPortalName,
+			options.PublicSiteURL,
 			"Your session is active",
 			"View connection status",
 			"$(link-status)",
@@ -741,6 +794,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		"flash/noblifi/fstatus.html",
 		hotspotRedirectPageHTML(
 			options.HotspotPortalName,
+			options.PublicSiteURL,
 			"You are not connected",
 			"Go to WiFi login",
 			"$(link-login-only)",
@@ -754,6 +808,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		"flash/noblifi/flogout.html",
 		hotspotRedirectPageHTML(
 			options.HotspotPortalName,
+			options.PublicSiteURL,
 			"You are already disconnected",
 			"Return to WiFi login",
 			"$(link-login-only)",
@@ -765,7 +820,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		builder,
 		"/flash/noblifi/flogin.html",
 		"flash/noblifi/flogin.html",
-		hotspotFailedLoginPageHTML(options.HotspotPortalName),
+		hotspotFailedLoginPageHTML(options.HotspotPortalName, options.PublicSiteURL),
 		"flogin.html",
 	)
 
@@ -773,7 +828,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		builder,
 		"/flash/noblifi/error.html",
 		"flash/noblifi/error.html",
-		hotspotErrorPageHTML(options.HotspotPortalName),
+		hotspotErrorPageHTML(options.HotspotPortalName, options.PublicSiteURL),
 		"error.html",
 	)
 
@@ -781,11 +836,13 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		builder,
 		"/flash/noblifi/alogin.html",
 		"flash/noblifi/alogin.html",
-		hotspotAfterLoginPageHTML(options.HotspotPortalName),
+		hotspotAfterLoginPageHTML(options.HotspotPortalName, options.PublicSiteURL),
 		"alogin.html",
 	)
 
-	// Captive-portal API stays machine-readable JSON.
+	// Keep the captive portal API machine-readable. RouterOS expands the
+	// HotSpot variables when serving the file; routerOSQuotedLiteral keeps them
+	// literal while importing the generated .rsc.
 	writeStaticHotspotFile(
 		builder,
 		"/flash/noblifi/api.json",
@@ -804,13 +861,14 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		"api.json",
 	)
 
-	builder.WriteString(":put \"[5/12] Creating NobliFi voucher profile...\"\n")
+	builder.WriteString(":put \"[6/13] Creating NobliFi voucher profile...\"\n")
 	builder.WriteString(`:if ([:len [/ip hotspot user profile find where name="noblifi-voucher-profile"]] = 0) do={ :do { /ip hotspot user profile add name=noblifi-voucher-profile } on-error={ :error "NobliFi failed to create HotSpot voucher profile" } }` + "\n")
 	writeCritical(builder, "/ip hotspot user profile set noblifi-voucher-profile shared-users=1", "NobliFi failed to set HotSpot shared-users")
-	writeCritical(builder, "/ip hotspot user profile set noblifi-voucher-profile keepalive-timeout=2m", "NobliFi failed to set HotSpot keepalive")
+	writeCritical(builder, "/ip hotspot user profile set noblifi-voucher-profile idle-timeout=none", "NobliFi failed to disable HotSpot idle logout")
+	writeCritical(builder, "/ip hotspot user profile set noblifi-voucher-profile keepalive-timeout=10m", "NobliFi failed to set HotSpot keepalive")
 	writeCritical(builder, "/ip hotspot user profile set noblifi-voucher-profile status-autorefresh=1m", "NobliFi failed to set HotSpot status refresh")
 
-	builder.WriteString(":put \"[6/12] Creating HotSpot server profile...\"\n")
+	builder.WriteString(":put \"[7/13] Creating HotSpot server profile...\"\n")
 
 	// Create the profile with the smallest possible valid command first.
 	// Do not put dns-name/login-by/html-directory/use-radius in one command:
@@ -824,7 +882,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	))
 	builder.WriteString(`:set noblifiHotspotProfile [/ip hotspot profile find where name="noblifi-hotspot-profile"]` + "\n")
 	builder.WriteString(`:if ([:len $noblifiHotspotProfile] = 0) do={ :error "NobliFi HotSpot profile does not exist after base creation" }` + "\n")
-	builder.WriteString(":put \"[6/12] OK - base HotSpot profile exists\"\n")
+	builder.WriteString(":put \"[7/13] OK - base HotSpot profile exists\"\n")
 
 	// Apply required properties individually so an error identifies the exact
 	// setting instead of collapsing everything into a generic profile failure.
@@ -849,7 +907,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	// The HotSpot DNS name is tenant-specific and required. NobliFi derives it
 	// from the router owner's HotspotName, for example:
 	//
-	//   "Mukama WiFi" -> "mukama-wifi.login"
+	//   "Mukama WiFi" -> "mukama-wifi.login.noblifi.local"
 	//
 	// Do not silently continue with an empty DNS name because that hides a
 	// broken tenant/profile mapping and prevents the expected branded HotSpot
@@ -885,34 +943,29 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		`:foreach p in=$noblifiHotspotProfile do={ :do { /ip hotspot profile set $p html-directory="/flash/noblifi" } on-error={ :do { /ip hotspot profile set $p html-directory="flash/noblifi" } on-error={ :error "NobliFi failed to set HotSpot HTML directory to flash/noblifi" } } }` + "\n",
 	)
 
-	// Do not emit https-redirect=no in the RouterOS import script.
-	//
-	// Although current RouterOS documentation exposes the HotSpot profile
-	// https-redirect property, older RouterOS builds reject the property while
-	// parsing /import. A parser error occurs before on-error can handle it, so
-	// this optional setting must not be present in the generated .rsc.
-	//
-	// Captive portal detection still works through ordinary HTTP interception
-	// (including Windows NCSI/msftconnecttest). HTTPS redirect behavior can be
-	// configured separately on RouterOS versions that support the property.
-	builder.WriteString(":put \"      HTTPS redirect policy left at RouterOS default for compatibility\"\n")
+	builder.WriteString(":put \"      enabling RADIUS accounting...\"\n")
+	builder.WriteString(
+		`:foreach p in=$noblifiHotspotProfile do={ :do { /ip hotspot profile set $p radius-accounting=yes } on-error={ :error "NobliFi failed to enable HotSpot RADIUS accounting" } }` + "\n",
+	)
+	builder.WriteString(
+		`:foreach p in=$noblifiHotspotProfile do={ :do { /ip hotspot profile set $p radius-interim-update=5m } on-error={ :error "NobliFi failed to set HotSpot RADIUS interim update" } }` + "\n",
+	)
 
-	// Do not explicitly set radius-accounting or radius-interim-update here.
-	//
-	// Some RouterOS builds reject those properties during scripted profile
-	// updates even though newer RouterOS documentation exposes them. They are
-	// not required for NobliFi authentication:
-	//   - use-radius=yes is already enabled above;
-	//   - RouterOS HotSpot defaults radius-accounting to yes;
-	//   - radius-interim-update can remain at the RouterOS/RADIUS default.
-	//
-	// Keeping these optional properties out of the bootstrap script prevents
-	// a version-specific parser failure from aborting the entire installation.
-	builder.WriteString(":put \"      RADIUS authentication enabled; accounting uses RouterOS defaults\"\n")
+	builder.WriteString(":put \"[7/13] OK - HotSpot server profile configured\"\n")
 
-	builder.WriteString(":put \"[6/12] OK - HotSpot server profile configured\"\n")
-
-	builder.WriteString(":put \"[7/12] Configuring captive portal walled garden...\"\n")
+	builder.WriteString(":put \"[8/13] Configuring captive portal walled garden...\"\n")
+	for _, host := range captiveDetectionHosts() {
+		writeSafe(
+			builder,
+			fmt.Sprintf(`/ip hotspot walled-garden remove [find where dst-host=%q comment="NobliFi captive portal"]`, host),
+			"remove captive detection walled garden",
+		)
+		writeSafe(
+			builder,
+			fmt.Sprintf(`/ip hotspot walled-garden remove [find where dst-host=%q comment="NobliFi captive detection"]`, host),
+			"remove captive detection walled garden",
+		)
+	}
 	for _, host := range options.WalledGardenHosts {
 		writeSafe(
 			builder,
@@ -928,7 +981,7 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	}
 
 	// login.html is mandatory and tenant-scoped.
-	builder.WriteString(":put \"[8/12] Downloading tenant login.html -> /flash/noblifi/login.html...\"\n")
+	builder.WriteString(":put \"[9/13] Downloading tenant login.html -> /flash/noblifi/login.html...\"\n")
 	writeCritical(
 		builder,
 		fmt.Sprintf(
@@ -938,14 +991,18 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 		),
 		"NobliFi failed to download tenant captive portal login page",
 	)
-	builder.WriteString(":put \"[8/12] OK - tenant login.html downloaded\"\n")
+	builder.WriteString(":put \"[9/13] OK - tenant login.html downloaded\"\n")
 
-	// Keep status/logout/error pages local. They need RouterOS servlet variables
-	// such as $(username), $(mac), $(ip), $(uptime), and $(session-timeout).
-	// Only login.html is refreshed from the backend because packages and payment
-	// options are dynamic there.
-	builder.WriteString(":put \"[9/12] Branded local status/logout/error pages retained\"\n")
-	builder.WriteString(":put \"[10/12] Installing captive portal login refresh scheduler...\"\n")
+	// status.html, logout.html, error.html and the other RouterOS servlet pages
+	// intentionally remain LOCAL branded pages. Do not fetch/refresh them from
+	// the backend: doing so can overwrite the design with a plain fallback page.
+	// Only login.html is dynamic because it contains tenant packages/payment
+	// options that may change while the router remains deployed.
+	builder.WriteString(":put \"[10/13] Keeping branded status/logout/error pages local...\"\n")
+
+	// Refresh login.html periodically so tenant branding, packages and payment
+	// options update without touching the styled RouterOS support pages.
+	builder.WriteString(":put \"[11/13] Installing captive portal login refresh scheduler...\"\n")
 
 	refreshCommand := fmt.Sprintf(
 		`/tool fetch url="%s" mode=%s dst-path="flash/noblifi/login.html" idle-timeout=30s duration=1m`,
@@ -956,11 +1013,11 @@ func writeHotspotServices(builder *strings.Builder, options RenderOptions, hotsp
 	builder.WriteString(`:local noblifiPortalScheduler [/system scheduler find where name="noblifi-hotspot-portal-refresh"]` + "\n")
 	builder.WriteString(fmt.Sprintf(`:if ([:len $noblifiPortalScheduler] = 0) do={ :do { /system scheduler add name=noblifi-hotspot-portal-refresh interval=10m on-event=%q comment="NobliFi tenant HotSpot portal refresh" } on-error={ :error "NobliFi failed to create portal refresh scheduler" } } else={ :foreach s in=$noblifiPortalScheduler do={ :do { /system scheduler set $s interval=10m on-event=%q disabled=no comment="NobliFi tenant HotSpot portal refresh" } on-error={ :error "NobliFi failed to update portal refresh scheduler" } } }`+"\n", refreshCommand, refreshCommand))
 
-	builder.WriteString(":put \"[11/12] Creating and enabling NobliFi HotSpot server...\"\n")
+	builder.WriteString(":put \"[12/13] Creating and enabling NobliFi HotSpot server...\"\n")
 	builder.WriteString(`:local noblifiHotspotServer [/ip hotspot find where name="noblifi-hotspot"]` + "\n")
 	builder.WriteString(fmt.Sprintf(`:if ([:len $noblifiHotspotServer] = 0) do={ :do { /ip hotspot add name=noblifi-hotspot interface=%q address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no } on-error={ :error "NobliFi failed to create HotSpot server" } } else={ :foreach h in=$noblifiHotspotServer do={ :do { /ip hotspot set $h interface=%q address-pool=pool-hotspot profile=noblifi-hotspot-profile disabled=no } on-error={ :error "NobliFi failed to update HotSpot server" } } }`+"\n", options.HotspotBridge, options.HotspotBridge))
 
-	builder.WriteString(":put \"[12/12] Captive portal installation completed\"\n")
+	builder.WriteString(":put \"[13/13] Captive portal installation completed\"\n")
 	builder.WriteString(":put \"Files installed under /flash/noblifi:\"\n")
 	builder.WriteString(":put \"  - login.html\"\n")
 	builder.WriteString(":put \"  - status.html\"\n")
@@ -985,28 +1042,45 @@ func hotspotPortalName(value string) string {
 func hotspotPortalStyles() string {
 	return `<style>
 :root{color-scheme:dark;--bg:#06111f;--panel:#0b1727;--line:#24384f;--text:#f8fbff;--muted:#9fb0c5;--brand:#7dd3fc;--accent:#34d399;--danger:#fca5a5}
-*{box-sizing:border-box}html,body{min-height:100%}
+*{box-sizing:border-box}
+html,body{min-height:100%}
 body{margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(145deg,#06111f 0%,#0b1727 52%,#102033 100%);color:var(--text)}
 main{min-height:100vh;display:grid;place-items:center;padding:24px 16px}
-.card{width:min(420px,100%);border:1px solid var(--line);background:rgba(11,23,39,.94);border-radius:12px;padding:26px;box-shadow:0 18px 50px rgba(0,0,0,.32)}
-.mark{width:48px;height:48px;display:grid;place-items:center;margin:0 auto 16px;border-radius:10px;background:var(--brand);color:#06111f;font-weight:900;font-size:21px}
-.eyebrow{margin:0 0 7px;text-align:center;color:var(--brand);font-size:11px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}
+.card{width:min(440px,100%);border:1px solid var(--line);background:rgba(11,23,39,.96);border-radius:14px;padding:28px;box-shadow:0 18px 50px rgba(0,0,0,.34)}
+.mark{width:52px;height:52px;display:grid;place-items:center;margin:0 auto 16px;border-radius:12px;background:var(--brand);color:#06111f;font-weight:900;font-size:21px}
+.eyebrow{margin:0 0 8px;text-align:center;color:var(--brand);font-size:11px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}
 h1{margin:0;text-align:center;font-size:30px;line-height:1.1}
-.lead{margin:10px auto 22px;max-width:340px;color:var(--muted);line-height:1.5;text-align:center;font-size:14px}
+.lead{margin:10px auto 22px;max-width:360px;color:var(--muted);line-height:1.5;text-align:center;font-size:14px}
 .notice{margin:18px 0;padding:12px 14px;border:1px solid rgba(52,211,153,.25);background:rgba(52,211,153,.08);border-radius:10px;color:#c9fbe8;font-size:13px;line-height:1.45}
-.notice.error{border-color:rgba(252,165,165,.3);background:rgba(252,165,165,.08);color:#ffd8d8}
+.notice.error{border-color:rgba(252,165,165,.30);background:rgba(252,165,165,.08);color:#ffd8d8}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:18px 0}
 .stat{border:1px solid var(--line);background:rgba(6,17,31,.55);border-radius:10px;padding:12px;min-width:0}
 .stat-label{display:block;color:var(--muted);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:5px}
 .stat-value{display:block;color:var(--text);font-size:13px;font-weight:700;overflow-wrap:anywhere}
 .btn{display:block;width:100%;padding:13px 16px;border:0;border-radius:10px;background:var(--accent);color:#04150f;text-align:center;text-decoration:none;font-size:14px;font-weight:900;cursor:pointer}
 .btn.secondary{margin-top:10px;background:transparent;color:var(--text);border:1px solid var(--line)}
-.footer{margin:18px 0 0;color:var(--muted);font-size:11px;text-align:center;line-height:1.45}
+.footer{margin:20px 0 0;color:var(--muted);font-size:11px;text-align:center;line-height:1.45}
+.footer a{color:var(--brand);font-weight:800;text-decoration:none}
+.footer a:hover{text-decoration:underline}
 @media(max-width:380px){.card{padding:22px 18px}.grid{grid-template-columns:1fr}h1{font-size:26px}}
 </style>`
 }
 
-func hotspotPortalDocument(portalName, title, eyebrow, lead, body string) string {
+func poweredByNobliFiHTML(publicSiteURL string) string {
+	publicURL := html.EscapeString(normalizePublicSiteURL(publicSiteURL))
+	return `<p class="footer"><span>Powered by </span><a href="` +
+		publicURL +
+		`" target="_blank" rel="noopener noreferrer">NobliFi</a></p>`
+}
+
+func hotspotPortalDocument(
+	portalName string,
+	publicSiteURL string,
+	title string,
+	eyebrow string,
+	lead string,
+	body string,
+) string {
 	name := hotspotPortalName(portalName)
 	return `<!doctype html>
 <html><head>
@@ -1016,18 +1090,19 @@ func hotspotPortalDocument(portalName, title, eyebrow, lead, body string) string
 <title>` + html.EscapeString(title) + ` · ` + name + `</title>
 ` + hotspotPortalStyles() + `
 </head><body><main><section class="card">
-<div class="mark">N</div>
+<div class="mark">NF</div>
 <p class="eyebrow">` + html.EscapeString(eyebrow) + `</p>
 <h1>` + name + `</h1>
 <p class="lead">` + html.EscapeString(lead) + `</p>
 ` + body + `
-<p class="footer">Secure WiFi access powered by NobliFi</p>
+` + poweredByNobliFiHTML(publicSiteURL) + `
 </section></main></body></html>`
 }
 
-func hotspotStatusPageHTML(portalName string) string {
+func hotspotStatusPageHTML(portalName, publicSiteURL string) string {
 	return hotspotPortalDocument(
 		portalName,
+		publicSiteURL,
 		"Connection status",
 		"Connected",
 		"Your internet session is active.",
@@ -1040,13 +1115,14 @@ func hotspotStatusPageHTML(portalName string) string {
 <div class="stat"><span class="stat-label">Time remaining</span><span class="stat-value">$(session-timeout)</span></div>
 <div class="stat"><span class="stat-label">Login method</span><span class="stat-value">$(login-by)</span></div>
 </div>
-<a class="btn secondary" href="$(link-logout)">Disconnect</a>`,
+<a class="btn secondary" href="$(link-logout)?noblifi_manual=1">Disconnect</a>`,
 	)
 }
 
-func hotspotLogoutPageHTML(portalName string) string {
+func hotspotLogoutPageHTML(portalName, publicSiteURL string) string {
 	return hotspotPortalDocument(
 		portalName,
+		publicSiteURL,
 		"Disconnected",
 		"Session ended",
 		"You are no longer connected to the internet.",
@@ -1055,13 +1131,14 @@ func hotspotLogoutPageHTML(portalName string) string {
 <div class="stat"><span class="stat-label">Device</span><span class="stat-value">$(mac)</span></div>
 <div class="stat"><span class="stat-label">Session uptime</span><span class="stat-value">$(uptime)</span></div>
 </div>
-<a class="btn" href="$(link-login-only)">Reconnect to WiFi</a>`,
+<a class="btn" href="$(link-login-only)?noblifi_manual=1">Reconnect to WiFi</a>`,
 	)
 }
 
-func hotspotFailedLoginPageHTML(portalName string) string {
+func hotspotFailedLoginPageHTML(portalName, publicSiteURL string) string {
 	return hotspotPortalDocument(
 		portalName,
+		publicSiteURL,
 		"Login failed",
 		"Could not connect",
 		"We could not authorize this voucher on this device.",
@@ -1070,9 +1147,10 @@ func hotspotFailedLoginPageHTML(portalName string) string {
 	)
 }
 
-func hotspotErrorPageHTML(portalName string) string {
+func hotspotErrorPageHTML(portalName, publicSiteURL string) string {
 	return hotspotPortalDocument(
 		portalName,
+		publicSiteURL,
 		"WiFi error",
 		"Something went wrong",
 		"The hotspot could not complete this request.",
@@ -1081,11 +1159,12 @@ func hotspotErrorPageHTML(portalName string) string {
 	)
 }
 
-func hotspotAfterLoginPageHTML(portalName string) string {
+func hotspotAfterLoginPageHTML(portalName, publicSiteURL string) string {
 	return `$(if http-status == 302)NobliFi login successful$(endif)
 $(if http-header == "Location")$(link-orig)$(endif)
 ` + hotspotPortalDocument(
 		portalName,
+		publicSiteURL,
 		"Connected",
 		"Connected",
 		"Your WiFi session is ready.",
@@ -1095,34 +1174,23 @@ $(if http-header == "Location")$(link-orig)$(endif)
 	)
 }
 
-func hotspotRedirectPageHTML(portalName, message, buttonLabel, target string) string {
+func hotspotRedirectPageHTML(
+	portalName string,
+	publicSiteURL string,
+	message string,
+	buttonLabel string,
+	target string,
+) string {
 	return `$(if http-status == 302)` + message + `$(endif)
 $(if http-header == "Location")` + target + `$(endif)
 ` + hotspotPortalDocument(
 		portalName,
+		publicSiteURL,
 		"WiFi portal",
 		"NobliFi WiFi",
 		message,
 		`<a class="btn" href="`+target+`">`+html.EscapeString(buttonLabel)+`</a>`,
 	)
-}
-
-// routerOSQuotedLiteral returns a RouterOS double-quoted string that writes
-// the supplied value literally.
-//
-// fmt.Sprintf("%q", value) gives us compatible escapes for quotes, newlines,
-// tabs and backslashes. RouterOS additionally requires a literal dollar sign
-// inside a script string to be written as \$ because $ otherwise begins a
-// RouterOS variable reference.
-//
-// Example:
-//
-//	HTML input:  <a href="$(link-login)">Login</a>
-//	RSC output:  "<a href=\"\$(link-login)\">Login</a>"
-//	File result: <a href="$(link-login)">Login</a>
-func routerOSQuotedLiteral(value string) string {
-	quoted := fmt.Sprintf("%q", value)
-	return strings.ReplaceAll(quoted, "$", `\$`)
 }
 
 func writeStaticHotspotFile(
@@ -1134,29 +1202,26 @@ func writeStaticHotspotFile(
 ) {
 	builder.WriteString(fmt.Sprintf(":put \"      installing %s...\"\n", escape(label)))
 
+	// RouterOS HotSpot template variables such as $(link-login) must be written
+	// to the file literally. A plain Go %q only escapes quotes/newlines; it does
+	// not protect '$' from the RouterOS script parser. Without the backslash,
+	// RouterOS tries to evaluate $(...) while importing noblifi-config.rsc and
+	// can abort with a syntax error.
+	literalContents := routerOSQuotedLiteral(contents)
+
+	// For ordinary files, create them with contents= rather than type=file.
+	// RouterOS supports type=directory for directories, but type=file is not
+	// portable across RouterOS versions and can fail when a support file such as
+	// rlogin.html does not already exist.
 	writeSafe(
 		builder,
 		fmt.Sprintf(
-			`:if ([:len [/file find where name=%q]] = 0) do={ /file add name=%q type=file }`,
+			`:if ([:len [/file find where name=%q]] = 0) do={ /file add name=%q contents=%s } else={ /file set [find where name=%q] contents=%s }`,
 			lookupPath,
 			createPath,
-		),
-		"create "+label,
-	)
-
-	// HotSpot HTML variables use syntax such as $(link-login). When those
-	// templates are embedded inside a RouterOS .rsc string, the dollar sign
-	// MUST be escaped as \$; otherwise the RouterOS script parser tries to
-	// evaluate $(link-login) during /import and fails before the file is written.
-	//
-	// routerOSQuotedLiteral() preserves RouterOS string escapes while making
-	// the HotSpot variables literal file content.
-	writeSafe(
-		builder,
-		fmt.Sprintf(
-			`/file set [find where name=%q] contents=%s`,
+			literalContents,
 			lookupPath,
-			routerOSQuotedLiteral(contents),
+			literalContents,
 		),
 		"write "+label,
 	)
@@ -1164,11 +1229,33 @@ func writeStaticHotspotFile(
 	builder.WriteString(fmt.Sprintf(":put \"      OK - %s installed\"\n", escape(label)))
 }
 
+// routerOSQuotedLiteral returns a RouterOS-safe quoted string. In addition to
+// normal quoting, '$' is escaped so MikroTik HotSpot template variables remain
+// literal text inside login/status/redirect support files until the HotSpot
+// servlet renders them for a client.
+func routerOSQuotedLiteral(value string) string {
+	quoted := fmt.Sprintf("%q", value)
+	return strings.ReplaceAll(quoted, "$", `\$`)
+}
+
 func portalFetchMode(rawURL string) string {
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(rawURL)), "https://") {
 		return "https"
 	}
 	return "http"
+}
+
+func normalizePublicSiteURL(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	rawURL = strings.TrimRight(rawURL, "/")
+	if rawURL == "" {
+		return "https://noblifi-frontend.vercel.app"
+	}
+	lower := strings.ToLower(rawURL)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return "https://" + rawURL
+	}
+	return rawURL
 }
 
 func writeHotspotVerification(builder *strings.Builder, options RenderOptions, interfaces []string) {
@@ -1197,9 +1284,6 @@ func writeHotspotVerification(builder *strings.Builder, options RenderOptions, i
 	builder.WriteString(`:if ([:len [/file find where name="flash/noblifi/login.html"]] = 0) do={ :error "NobliFi tenant captive portal login.html missing from flash" }` + "\n")
 	builder.WriteString(`:if ([:len [/file find where name="flash/noblifi/status.html"]] = 0) do={ :error "NobliFi captive portal status.html missing from flash" }` + "\n")
 	builder.WriteString(`:if ([:len [/file find where name="flash/noblifi/logout.html"]] = 0) do={ :error "NobliFi captive portal logout.html missing from flash" }` + "\n")
-	builder.WriteString(`:if ([:len [/file find where name="flash/noblifi/flogin.html"]] = 0) do={ :error "NobliFi captive portal flogin.html missing from flash" }` + "\n")
-	builder.WriteString(`:if ([:len [/file find where name="flash/noblifi/error.html"]] = 0) do={ :error "NobliFi captive portal error.html missing from flash" }` + "\n")
-	builder.WriteString(`:if ([:len [/file find where name="flash/noblifi/rstatus.html"]] = 0) do={ :error "NobliFi captive portal rstatus.html missing from flash" }` + "\n")
 
 	builder.WriteString(`:local verifyNobliFiDNS [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] dns-name]` + "\n")
 	builder.WriteString(fmt.Sprintf(
@@ -1209,6 +1293,12 @@ func writeHotspotVerification(builder *strings.Builder, options RenderOptions, i
 
 	builder.WriteString(`:local noblifiHtmlDir [/ip hotspot profile get [find where name="noblifi-hotspot-profile"] html-directory]` + "\n")
 	builder.WriteString(`:if (($noblifiHtmlDir != "/flash/noblifi") && ($noblifiHtmlDir != "flash/noblifi")) do={ :error "NobliFi HotSpot profile is not using flash/noblifi" }` + "\n")
+
+	// Final shaping invariant. If another configuration step or a RouterOS
+	// default re-enabled FastTrack during this import, fail rather than report
+	// success with package speed limits that may be bypassed.
+	builder.WriteString(`:if ([:len [/ip firewall filter find where action=fasttrack-connection disabled=no]] > 0) do={ :error "NobliFi verification failed: FastTrack is enabled and HotSpot package speed caps cannot be guaranteed" }` + "\n")
+	builder.WriteString(`:put "NobliFi shaping verification passed: FastTrack is disabled"` + "\n")
 
 	builder.WriteString(":put \"NobliFi tenant captive portal verified successfully in /flash/noblifi\"\n")
 	builder.WriteString(":put \"NobliFi SAFE INSTALL COMPLETE - WAN and management services were preserved\"\n\n")
@@ -1248,8 +1338,24 @@ func defaultWalledGardenHosts() []string {
 	}
 }
 
+func captiveDetectionHosts() []string {
+	return []string{
+		"www.msftconnecttest.com",
+		"msftconnecttest.com",
+		"dns.msftncsi.com",
+		"captive.apple.com",
+		"connectivitycheck.gstatic.com",
+		"connectivitycheck.android.com",
+		"clients3.google.com",
+	}
+}
+
 func cleanHosts(hosts []string) []string {
 	seen := map[string]bool{}
+	captiveDetection := map[string]bool{}
+	for _, host := range captiveDetectionHosts() {
+		captiveDetection[strings.ToLower(host)] = true
+	}
 	cleaned := make([]string, 0, len(hosts))
 	for _, host := range hosts {
 		host = strings.TrimSpace(host)
@@ -1258,7 +1364,8 @@ func cleanHosts(hosts []string) []string {
 		if slash := strings.Index(host, "/"); slash >= 0 {
 			host = host[:slash]
 		}
-		if host == "" || seen[host] {
+		host = strings.ToLower(host)
+		if host == "" || captiveDetection[host] || seen[host] {
 			continue
 		}
 		seen[host] = true

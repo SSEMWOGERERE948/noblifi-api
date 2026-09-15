@@ -17,13 +17,13 @@ func NewHandler(service *Service) *Handler {
 
 func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Get("/payments/config", h.config)
-	router.Get("/payments/orders/:id/status", h.status)
 	router.Get("/payments/iotec/callback", h.callback)
 	router.Post("/payments/iotec/callback", h.callback)
 }
 
 func (h *Handler) RegisterProtectedRoutes(router fiber.Router) {
 	router.Post("/payments/orders", h.startOrderProtected)
+	router.Get("/payments/orders/:id/status", h.statusProtected)
 }
 
 func (h *Handler) config(c *fiber.Ctx) error {
@@ -72,6 +72,19 @@ func (h *Handler) startOrder(c *fiber.Ctx) error {
 
 func (h *Handler) status(c *fiber.Ctx) error {
 	result, err := h.service.CheckOrder(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "message": err.Error()})
+	}
+	return c.JSON(result)
+}
+
+func (h *Handler) statusProtected(c *fiber.Ctx) error {
+	user, ok := c.Locals("user").(database.User)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"success": false, "message": "unauthorized"})
+	}
+
+	result, err := h.service.CheckOrderForUser(c.Params("id"), user.ID, strings.EqualFold(strings.TrimSpace(user.Role), "superadmin"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "message": err.Error()})
 	}

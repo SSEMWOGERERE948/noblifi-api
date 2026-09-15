@@ -64,3 +64,7 @@ func (r *Repository) FindForUser(id uuid.UUID, userID uuid.UUID) (Plan, error) {
 func (r *Repository) Save(plan *Plan) error {
 	return r.db.Save(plan).Error
 }
+
+func (r *Repository) Delete(plan *Plan) error {
+	return r.db.Delete(plan).Error
+}

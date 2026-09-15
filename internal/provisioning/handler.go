@@ -213,9 +213,10 @@ func (h *Handler) hotspotLogin(c *fiber.Ctx) error {
 
 func (h *Handler) hotspotAutoConnect(c *fiber.Ctx) error {
 	input := HotspotAutoConnectInput{
-		MAC:       strings.TrimSpace(c.FormValue("mac")),
-		LinkLogin: strings.TrimSpace(c.FormValue("link_login")),
-		LinkOrig:  strings.TrimSpace(c.FormValue("link_orig")),
+		MAC:         strings.TrimSpace(c.FormValue("mac")),
+		LinkLogin:   strings.TrimSpace(c.FormValue("link_login")),
+		LinkOrig:    strings.TrimSpace(c.FormValue("link_orig")),
+		ForceManual: strings.TrimSpace(c.FormValue("force_manual")) == "1",
 	}
 
 	pageHTML, err := h.service.HotspotAutoConnect(c.Params("token"), input)

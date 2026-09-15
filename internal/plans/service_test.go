@@ -1,6 +1,10 @@
 package plans
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/google/uuid"
+)
 
 func TestDurationToMinutes(t *testing.T) {
 	tests := []struct {
@@ -10,6 +14,7 @@ func TestDurationToMinutes(t *testing.T) {
 	}{
 		{30, DurationUnitMinutes, 30},
 		{2, DurationUnitHours, 120},
+		{1, DurationUnitDays, 1440},
 		{1, DurationUnitWeeks, 10080},
 		{1, DurationUnitMonths, 43200},
 	}
@@ -106,5 +111,21 @@ func TestZeroDataLimitMeansUnlimited(t *testing.T) {
 			"DataLimitMB = %v, want nil",
 			plan.DataLimitMB,
 		)
+	}
+}
+
+func TestPlanServiceRequiresAuthenticatedTenant(t *testing.T) {
+	service := NewService(nil)
+	if _, err := service.List(nil, false); err == nil {
+		t.Fatal("normal list without user did not fail closed")
+	}
+	if _, err := service.Find(uuid.Nil, nil, false); err == nil {
+		t.Fatal("normal find without user did not fail closed")
+	}
+	if _, err := service.Create(Plan{Name: "A", Price: 1000, DurationMinutes: 60, MaxDevices: 1}, nil, false); err == nil {
+		t.Fatal("normal create without user did not fail closed")
+	}
+	if err := service.Delete(uuid.Nil, nil, false); err == nil {
+		t.Fatal("normal delete without user did not fail closed")
 	}
 }

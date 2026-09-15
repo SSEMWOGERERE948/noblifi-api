@@ -685,6 +685,17 @@ func normalizeVoucherCode(code string) string {
 	return strings.ToUpper(strings.TrimSpace(code))
 }
 
+func maskCredential(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 4 {
+		return "****"
+	}
+	if len(value) <= 8 {
+		return value[:2] + "****" + value[len(value)-2:]
+	}
+	return value[:4] + "****" + value[len(value)-2:]
+}
+
 func normalizeMAC(value string) (string, error) {
 	value = strings.ToUpper(strings.TrimSpace(value))
 	if value == "" {
@@ -725,8 +736,24 @@ func stringPtr(value string) *string {
 }
 
 func (s *Service) AccountingSummary() (map[string]any, error) {
+	return s.accountingSummary(s.db)
+}
+
+func (s *Service) AccountingSummaryForUser(userID uuid.UUID) (map[string]any, error) {
+	if userID == uuid.Nil {
+		return nil, errors.New("authenticated user is required")
+	}
+
+	scoped := s.db.
+		Joins("JOIN vouchers ON vouchers.code = radacct.username").
+		Where("vouchers.user_id = ?", userID)
+
+	return s.accountingSummary(scoped)
+}
+
+func (s *Service) accountingSummary(query *gorm.DB) (map[string]any, error) {
 	var active int64
-	if err := s.db.
+	if err := query.
 		Model(&RadAcct{}).
 		Where("acctstoptime IS NULL").
 		Count(&active).
@@ -739,7 +766,7 @@ func (s *Service) AccountingSummary() (map[string]any, error) {
 		Output int64
 	}
 
-	if err := s.db.
+	if err := query.
 		Model(&RadAcct{}).
 		Select(
 			"COALESCE(SUM(acctinputoctets),0) as input, " +

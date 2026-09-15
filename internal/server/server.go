@@ -1,18 +1,22 @@
 package server
 
 import (
+	"context"
 	"log"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/google/uuid"
 
 	"github.com/noblifi/noblifi/backend/internal/auth"
 	"github.com/noblifi/noblifi/backend/internal/config"
 	"github.com/noblifi/noblifi/backend/internal/database"
+	"github.com/noblifi/noblifi/backend/internal/finance"
 	"github.com/noblifi/noblifi/backend/internal/payments"
 	"github.com/noblifi/noblifi/backend/internal/plans"
 	"github.com/noblifi/noblifi/backend/internal/provisioning"
 	"github.com/noblifi/noblifi/backend/internal/radius"
+	"github.com/noblifi/noblifi/backend/internal/revenue"
 	"github.com/noblifi/noblifi/backend/internal/routers"
 	"github.com/noblifi/noblifi/backend/internal/vouchers"
 	"github.com/noblifi/noblifi/backend/internal/wireguard"
@@ -23,7 +27,10 @@ func Run() {
 	// CONFIGURATION
 	// ---------------------------------------------------------
 
-	cfg := config.Load()
+	cfg, err := config.LoadWithContext(context.Background())
+	if err != nil {
+		log.Printf("load optional config failed: %v", err)
+	}
 
 	// ---------------------------------------------------------
 	// DATABASE
@@ -54,7 +61,26 @@ func Run() {
 
 	api := app.Group("/api/v1")
 
-	api.Get("/dashboard/stats", func(c *fiber.Ctx) error {
+	authService := auth.NewService(
+		db,
+		cfg.JWTSecret,
+	)
+
+	if err := authService.SeedAdmin(); err != nil {
+		log.Printf("seed admin failed: %v", err)
+	}
+
+	authHandler := auth.NewHandler(
+		authService,
+	)
+	authHandler.RegisterRoutes(api)
+
+	api.Get("/dashboard/stats", authHandler.RequireAuth, func(c *fiber.Ctx) error {
+		user, ok := c.Locals("user").(database.User)
+		if !ok || user.ID == uuid.Nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing authenticated user"})
+		}
+		isSuperadmin := user.Role == "superadmin"
 		var routerCount int64
 		var activeRouterCount int64
 		var userCount int64
@@ -64,11 +90,24 @@ func Run() {
 			DownloadBytes int64
 		}
 
-		_ = db.Model(&routers.Router{}).Where("deleted_at IS NULL").Count(&routerCount).Error
-		_ = db.Model(&routers.Router{}).Where("deleted_at IS NULL AND last_seen_at IS NOT NULL").Count(&activeRouterCount).Error
-		_ = db.Model(&database.User{}).Count(&userCount).Error
-		_ = db.Model(&database.Session{}).Where("status = ? AND stopped_at IS NULL", "active").Count(&activeSessionCount).Error
-		_ = db.Model(&database.Session{}).Select("COALESCE(SUM(upload_bytes), 0) AS upload_bytes, COALESCE(SUM(download_bytes), 0) AS download_bytes").Scan(&dataUsage).Error
+		routerQuery := db.Model(&routers.Router{}).Where("deleted_at IS NULL")
+		activeRouterQuery := db.Model(&routers.Router{}).Where("deleted_at IS NULL AND last_seen_at IS NOT NULL")
+		sessionQuery := db.Model(&database.Session{}).Where("status = ? AND stopped_at IS NULL", "active")
+		usageQuery := db.Model(&database.Session{})
+		if !isSuperadmin {
+			routerQuery = routerQuery.Where("user_id = ?", user.ID)
+			activeRouterQuery = activeRouterQuery.Where("user_id = ?", user.ID)
+			sessionQuery = sessionQuery.Joins("JOIN vouchers ON vouchers.id = sessions.voucher_id").Where("vouchers.user_id = ?", user.ID)
+			usageQuery = usageQuery.Joins("JOIN vouchers ON vouchers.id = sessions.voucher_id").Where("vouchers.user_id = ?", user.ID)
+			userCount = 1
+		} else {
+			_ = db.Model(&database.User{}).Count(&userCount).Error
+		}
+
+		_ = routerQuery.Count(&routerCount).Error
+		_ = activeRouterQuery.Count(&activeRouterCount).Error
+		_ = sessionQuery.Count(&activeSessionCount).Error
+		_ = usageQuery.Select("COALESCE(SUM(upload_bytes), 0) AS upload_bytes, COALESCE(SUM(download_bytes), 0) AS download_bytes").Scan(&dataUsage).Error
 
 		return c.JSON(fiber.Map{
 			"routers": fiber.Map{
@@ -91,19 +130,6 @@ func Run() {
 	// ---------------------------------------------------------
 	// AUTH
 	// ---------------------------------------------------------
-
-	authService := auth.NewService(
-		db,
-		cfg.JWTSecret,
-	)
-
-	if err := authService.SeedAdmin(); err != nil {
-		log.Printf("seed admin failed: %v", err)
-	}
-
-	auth.NewHandler(
-		authService,
-	).RegisterRoutes(api)
 
 	// ---------------------------------------------------------
 	// RADIUS
@@ -153,10 +179,7 @@ func Run() {
 
 	wireGuardControlPlane := wireguard.NewService(db, cfg)
 	routerService.SetWireGuardServerPublicKeyResolver(wireGuardControlPlane)
-
-	routers.NewHandler(
-		routerService,
-	).RegisterRoutes(api)
+	routerService.SetRuntimeWireGuardManager(routerWireGuardRuntime{svc: wireGuardControlPlane})
 
 	// ---------------------------------------------------------
 	// PLANS / PACKAGES
@@ -175,11 +198,6 @@ func Run() {
 
 	// Online hotspot purchases create their voucher after payment succeeds, so
 	// no pre-generated online-voucher pool is required here.
-	plans.NewHandler(
-		planService,
-		nil,
-	).RegisterRoutes(api)
-
 	// ---------------------------------------------------------
 	// VOUCHERS
 	// ---------------------------------------------------------
@@ -196,10 +214,6 @@ func Run() {
 		voucherRepo,
 	)
 
-	vouchers.NewHandler(
-		voucherService,
-	).RegisterRoutes(api)
-
 	paymentService := payments.NewService(
 		db,
 		cfg,
@@ -212,6 +226,13 @@ func Run() {
 			err,
 		)
 	}
+
+	financeService := finance.NewService(db, cfg, radiusService)
+	financeService.SetPayoutProvider(paymentService)
+	if err := finance.AutoMigrate(db); err != nil {
+		log.Fatalf("migrate finance: %v", err)
+	}
+	paymentService.SetHotspotSettlementService(financeService)
 
 	payments.NewHandler(
 		paymentService,
@@ -246,6 +267,37 @@ func Run() {
 	)
 	provisioningHandler.RegisterRoutes(api)
 
+	wireguard.NewHandler(
+		wireGuardControlPlane,
+	).RegisterRoutes(api)
+
+	protectedAPI := api.Group("", authHandler.RequireAuth)
+
+	routers.NewHandler(
+		routerService,
+	).RegisterRoutes(protectedAPI)
+
+	plans.NewHandler(
+		planService,
+		nil,
+	).RegisterRoutes(protectedAPI)
+
+	vouchers.NewHandler(
+		voucherService,
+	).RegisterRoutes(protectedAPI)
+
+	payments.NewHandler(
+		paymentService,
+	).RegisterProtectedRoutes(protectedAPI)
+
+	finance.NewHandler(
+		financeService,
+	).RegisterRoutes(protectedAPI)
+
+	revenue.NewHandler(
+		revenue.NewService(db),
+	).RegisterRoutes(protectedAPI)
+
 	// ---------------------------------------------------------
 	// RADIUS MANAGEMENT API
 	// ---------------------------------------------------------
@@ -260,11 +312,7 @@ func Run() {
 
 	radius.NewHandler(
 		radiusService,
-	).RegisterRoutes(api)
-
-	wireguard.NewHandler(
-		wireGuardControlPlane,
-	).RegisterRoutes(api)
+	).RegisterRoutes(protectedAPI)
 
 	// ---------------------------------------------------------
 	// EXISTING DATA RADIUS SYNC
@@ -355,4 +403,20 @@ func Run() {
 	log.Fatal(
 		app.Listen(":" + cfg.Port),
 	)
+}
+
+type routerWireGuardRuntime struct {
+	svc *wireguard.Service
+}
+
+func (r routerWireGuardRuntime) QueueRemoteAccess(router routers.Router) (any, error) {
+	return r.svc.QueueRemoteAccess(router)
+}
+
+func (r routerWireGuardRuntime) QueueRemoteAccessRemoval(router routers.Router) (any, error) {
+	return r.svc.QueueRemoteAccessRemoval(router)
+}
+
+func (r routerWireGuardRuntime) QueuePeerRemoval(router routers.Router) (any, error) {
+	return r.svc.QueuePeerRemoval(router)
 }

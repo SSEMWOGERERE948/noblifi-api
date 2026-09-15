@@ -26,11 +26,20 @@ type RadiusVoucherSyncer interface {
 	SyncVoucherForVoucher(code string) error
 }
 
+type HotspotSettlementService interface {
+	SettlePaidHotspotPurchase(purchaseID uuid.UUID) (HotspotSettlementResult, error)
+}
+
+type HotspotSettlementResult struct {
+	VoucherCode string
+}
+
 type Service struct {
-	db     *gorm.DB
-	cfg    config.Config
-	radius RadiusVoucherSyncer
-	client *http.Client
+	db                *gorm.DB
+	cfg               config.Config
+	radius            RadiusVoucherSyncer
+	hotspotSettlement HotspotSettlementService
+	client            *http.Client
 }
 
 type StartOrderInput struct {
@@ -38,6 +47,10 @@ type StartOrderInput struct {
 	PlanID string `json:"plan_id"`
 	Phone  string `json:"phone"`
 	Email  string `json:"email"`
+}
+
+func (s *Service) SetHotspotSettlementService(service HotspotSettlementService) {
+	s.hotspotSettlement = service
 }
 
 type StartOrderResult struct {
@@ -154,16 +167,31 @@ func (s *Service) StartOrder(input StartOrderInput) (StartOrderResult, error) {
 }
 
 func (s *Service) CheckOrder(id string) (OrderStatusResult, error) {
+	return s.checkOrder(id, nil)
+}
+
+func (s *Service) CheckOrderForUser(id string, userID uuid.UUID, isSuperadmin bool) (OrderStatusResult, error) {
+	if isSuperadmin {
+		return s.CheckOrder(id)
+	}
+	if userID == uuid.Nil {
+		return OrderStatusResult{}, errors.New("authenticated user is required")
+	}
+	return s.checkOrder(id, &userID)
+}
+
+func (s *Service) checkOrder(id string, userID *uuid.UUID) (OrderStatusResult, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return OrderStatusResult{}, errors.New("payment order id is required")
 	}
 
 	var order PaymentOrder
-	err := s.db.
-		Where("order_tracking_id = ? OR merchant_reference = ?", id, id).
-		First(&order).
-		Error
+	query := s.db.Where("order_tracking_id = ? OR merchant_reference = ?", id, id)
+	if userID != nil {
+		query = query.Where("email = ?", userID.String())
+	}
+	err := query.First(&order).Error
 	if err != nil {
 		return OrderStatusResult{}, errors.New("payment order not found")
 	}
@@ -391,15 +419,9 @@ func (s *Service) submitIotecCollection(order PaymentOrder, plan plans.Plan) (io
 		return iotecOrderResponse{}, err
 	}
 
-	body := map[string]any{
-		"category":   "MobileMoney",
-		"currency":   order.Currency,
-		"walletId":   s.cfg.IotecWalletID,
-		"externalId": order.MerchantReference,
-		"payer":      order.Phone,
-		"amount":     order.Amount,
-		"payerNote":  "NobliFi - " + plan.Name,
-		"payeeNote":  "NobliFi voucher " + order.MerchantReference,
+	body, err := s.iotecCollectionRequestBody(order, plan)
+	if err != nil {
+		return iotecOrderResponse{}, err
 	}
 
 	var payload map[string]any
@@ -416,6 +438,28 @@ func (s *Service) submitIotecCollection(order PaymentOrder, plan plans.Plan) (io
 		OrderTrackingID: trackingID,
 		RedirectURL:     "",
 		raw:             payload,
+	}, nil
+}
+
+func (s *Service) iotecCollectionRequestBody(order PaymentOrder, plan plans.Plan) (map[string]any, error) {
+	payer, err := normalizeUgandaMSISDN(order.Phone)
+	if err != nil {
+		return nil, fmt.Errorf("invalid ioTec collection payer: %w", err)
+	}
+	currency := strings.ToUpper(strings.TrimSpace(order.Currency))
+	if currency == "" {
+		currency = strings.ToUpper(strings.TrimSpace(s.currency()))
+	}
+
+	return map[string]any{
+		"category":   "MobileMoney",
+		"currency":   currency,
+		"walletId":   s.cfg.IotecWalletID,
+		"externalId": order.MerchantReference,
+		"payer":      payer,
+		"amount":     order.Amount,
+		"payerNote":  "NobliFi - " + plan.Name,
+		"payeeNote":  "NobliFi voucher " + order.MerchantReference,
 	}, nil
 }
 

@@ -11,10 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/noblifi/noblifi/backend/internal/config"
 	"github.com/noblifi/noblifi/backend/internal/portprofiles"
+	"github.com/noblifi/noblifi/backend/internal/radius"
 	"github.com/noblifi/noblifi/backend/internal/routers"
+	"github.com/noblifi/noblifi/backend/internal/vouchers"
 	"github.com/noblifi/noblifi/backend/internal/wireguard"
+	"gorm.io/gorm"
 )
 
 type RadiusRegistrar interface {
@@ -34,9 +38,17 @@ type VoucherDeviceAuthorizer interface {
 	AuthorizeVoucherForDevice(code, deviceMAC string) (bool, error)
 }
 
+type VoucherDeviceBinder interface {
+	BindVoucherToDevice(code, deviceMAC string) (vouchers.Voucher, error)
+}
+
 // VoucherAutoConnector resolves an already-active voucher bound to a client MAC.
 type VoucherAutoConnector interface {
 	ValidVoucherForDevice(deviceMAC string) (string, bool, error)
+}
+
+type TenantVoucherAutoConnector interface {
+	ValidVoucherForDeviceForUser(deviceMAC string, userID string) (string, bool, error)
 }
 
 type WireGuardJobQueuer interface {
@@ -102,6 +114,7 @@ func (s *Service) HotspotLoginPage(token string) (string, error) {
 		options.HotspotPortalName,
 		authURL,
 		autoURL,
+		s.publicSiteURL(),
 	), nil
 }
 
@@ -129,9 +142,10 @@ type HotspotAuthenticateInput struct {
 // This is what allows a valid voucher to reconnect from the SAME device after
 // manual logout while rejecting use from a different device.
 type HotspotAutoConnectInput struct {
-	MAC       string
-	LinkLogin string
-	LinkOrig  string
+	MAC         string
+	LinkLogin   string
+	LinkOrig    string
+	ForceManual bool
 }
 
 // HotspotAutoConnect automatically reuses a still-valid voucher that is
@@ -169,16 +183,27 @@ func (s *Service) HotspotAutoConnect(token string, input HotspotAutoConnectInput
 		)
 	}
 
+	if input.ForceManual {
+		return manual("Enter a voucher code to start a new session.")
+	}
+
 	if deviceMAC == "" || s.radius == nil {
 		return manual("")
 	}
 
-	autoConnector, ok := s.radius.(VoucherAutoConnector)
-	if !ok {
+	if router.UserID == nil || *router.UserID == uuid.Nil {
 		return manual("")
 	}
 
-	voucherCode, found, err := autoConnector.ValidVoucherForDevice(deviceMAC)
+	var voucherCode string
+	var found bool
+	if scopedConnector, ok := s.radius.(TenantVoucherAutoConnector); ok {
+		voucherCode, found, err = scopedConnector.ValidVoucherForDeviceForUser(deviceMAC, router.UserID.String())
+	} else if autoConnector, ok := s.radius.(VoucherAutoConnector); ok {
+		voucherCode, found, err = autoConnector.ValidVoucherForDevice(deviceMAC)
+	} else {
+		return manual("")
+	}
 	if err != nil {
 		log.Printf("provisioning: hotspot auto-connect lookup failed token=%q mac=%q: %v", token, deviceMAC, err)
 		return manual("Automatic reconnect is temporarily unavailable. Enter your voucher code.")
@@ -201,6 +226,7 @@ func (s *Service) HotspotAutoConnect(token string, input HotspotAutoConnectInput
 		linkLogin,
 		input.LinkOrig,
 		strings.ToUpper(strings.TrimSpace(voucherCode)),
+		s.publicSiteURL(),
 	), nil
 }
 
@@ -253,6 +279,7 @@ func (s *Service) HotspotAuthenticate(
 			portalName,
 			input.LinkLogin,
 			"Enter a valid voucher code.",
+			s.publicSiteURL(),
 		), nil
 	}
 
@@ -261,14 +288,54 @@ func (s *Service) HotspotAuthenticate(
 			portalName,
 			input.LinkLogin,
 			"Could not identify this device. Reconnect to the WiFi and try again.",
+			s.publicSiteURL(),
 		), nil
 	}
 
-	allowed, err := authorizer.AuthorizeVoucherForDevice(
-		voucherCode,
-		deviceMAC,
-	)
+	allowed := false
+	if binder, ok := s.radius.(VoucherDeviceBinder); ok {
+		_, err = binder.BindVoucherToDevice(voucherCode, deviceMAC)
+		allowed = err == nil
+	} else {
+		allowed, err = authorizer.AuthorizeVoucherForDevice(
+			voucherCode,
+			deviceMAC,
+		)
+	}
 	if err != nil {
+		if errors.Is(err, radius.ErrVoucherDataExhausted) {
+			return renderHotspotExternalAuthError(
+				portalName,
+				input.LinkLogin,
+				"Your data bundle is used up. You have been logged out. Enter another token to continue.",
+				s.publicSiteURL(),
+			), nil
+		}
+		if errors.Is(err, radius.ErrVoucherExpired) {
+			return renderHotspotExternalAuthError(
+				portalName,
+				input.LinkLogin,
+				"This voucher has expired. Enter another token to continue.",
+				s.publicSiteURL(),
+			), nil
+		}
+		if errors.Is(err, radius.ErrVoucherBoundToAnotherDevice) {
+			return renderHotspotExternalAuthError(
+				portalName,
+				input.LinkLogin,
+				"This voucher is already assigned to another device.",
+				s.publicSiteURL(),
+			), nil
+		}
+		if errors.Is(err, radius.ErrVoucherUnavailable) {
+			return renderHotspotExternalAuthError(
+				portalName,
+				input.LinkLogin,
+				"This voucher is invalid or no longer available.",
+				s.publicSiteURL(),
+			), nil
+		}
+
 		log.Printf(
 			"provisioning: voucher authorization failed token=%q voucher=%q mac=%q: %v",
 			token,
@@ -281,6 +348,7 @@ func (s *Service) HotspotAuthenticate(
 			portalName,
 			input.LinkLogin,
 			"Could not validate this voucher. Please try again.",
+			s.publicSiteURL(),
 		), nil
 	}
 
@@ -289,6 +357,7 @@ func (s *Service) HotspotAuthenticate(
 			portalName,
 			input.LinkLogin,
 			"This voucher is invalid, expired, or already assigned to another device.",
+			s.publicSiteURL(),
 		), nil
 	}
 
@@ -306,6 +375,7 @@ func (s *Service) HotspotAuthenticate(
 		linkLogin,
 		input.LinkOrig,
 		voucherCode,
+		s.publicSiteURL(),
 	), nil
 }
 
@@ -391,42 +461,56 @@ func (s *Service) renderOptionsForRouter(router routers.Router) portprofiles.Ren
 	if router.NetworkProfile != nil {
 		profile := *router.NetworkProfile
 		routers.NormalizeNetworkProfile(&profile, s.cfg)
-		return profile.RenderOptions()
+		options := profile.RenderOptions()
+		options.PublicSiteURL = s.cfg.PublicSiteURL
+		options.WireGuardManagementSubnet = strings.TrimSpace(s.cfg.WireGuardSubnetCIDR)
+		options.WalledGardenHosts = s.cfg.HotspotWalledGardenHosts
+		return options
 	}
 	profile, err := s.repo.NetworkProfile(router.ID)
 	if err == nil {
 		routers.NormalizeNetworkProfile(&profile, s.cfg)
-		return profile.RenderOptions()
+		options := profile.RenderOptions()
+		options.PublicSiteURL = s.cfg.PublicSiteURL
+		options.WireGuardManagementSubnet = strings.TrimSpace(s.cfg.WireGuardSubnetCIDR)
+		options.WalledGardenHosts = s.cfg.HotspotWalledGardenHosts
+		return options
 	}
 	return portprofiles.RenderOptions{
-		RadiusServer:        s.cfg.RadiusServer,
-		RadiusSecret:        s.cfg.RadiusSecret,
-		RouterIdentity:      s.cfg.RouterIdentityPrefix + "-Router",
-		APIUsername:         s.cfg.RouterAPIUsername,
-		APIPassword:         s.cfg.RouterAPIPassword,
-		HotspotBridge:       s.cfg.HotspotBridgeName,
-		StaffBridge:         s.cfg.StaffBridgeName,
-		POSBridge:           s.cfg.POSBridgeName,
-		CCTVBridge:          s.cfg.CCTVBridgeName,
-		HotspotSubnet:       s.cfg.HotspotSubnetCIDR,
-		HotspotGateway:      s.cfg.HotspotGatewayCIDR,
-		HotspotPool:         s.cfg.HotspotPoolRange,
-		StaffSubnet:         s.cfg.StaffSubnetCIDR,
-		StaffGateway:        s.cfg.StaffGatewayCIDR,
-		StaffPool:           s.cfg.StaffPoolRange,
-		POSSubnet:           s.cfg.POSSubnetCIDR,
-		POSGateway:          s.cfg.POSGatewayCIDR,
-		POSPool:             s.cfg.POSPoolRange,
-		CCTVSubnet:          s.cfg.CCTVSubnetCIDR,
-		CCTVGateway:         s.cfg.CCTVGatewayCIDR,
-		CCTVPool:            s.cfg.CCTVPoolRange,
-		HotspotDNSName:      s.cfg.HotspotDNSName,
-		HotspotPortalName:   s.cfg.HotspotPortalName,
-		WalledGardenHosts:   s.cfg.HotspotWalledGardenHosts,
-		DisableWWWService:   s.cfg.DisableWWWService,
-		EnableAPIService:    s.cfg.EnableAPIService,
-		EnableAPISSLService: s.cfg.EnableAPISSLService,
+		RadiusServer:              s.cfg.RadiusServer,
+		RadiusSecret:              s.cfg.RadiusSecret,
+		RouterIdentity:            s.cfg.RouterIdentityPrefix + "-Router",
+		APIUsername:               s.cfg.RouterAPIUsername,
+		APIPassword:               s.cfg.RouterAPIPassword,
+		HotspotBridge:             s.cfg.HotspotBridgeName,
+		StaffBridge:               s.cfg.StaffBridgeName,
+		POSBridge:                 s.cfg.POSBridgeName,
+		CCTVBridge:                s.cfg.CCTVBridgeName,
+		HotspotSubnet:             s.cfg.HotspotSubnetCIDR,
+		HotspotGateway:            s.cfg.HotspotGatewayCIDR,
+		HotspotPool:               s.cfg.HotspotPoolRange,
+		StaffSubnet:               s.cfg.StaffSubnetCIDR,
+		StaffGateway:              s.cfg.StaffGatewayCIDR,
+		StaffPool:                 s.cfg.StaffPoolRange,
+		POSSubnet:                 s.cfg.POSSubnetCIDR,
+		POSGateway:                s.cfg.POSGatewayCIDR,
+		POSPool:                   s.cfg.POSPoolRange,
+		CCTVSubnet:                s.cfg.CCTVSubnetCIDR,
+		CCTVGateway:               s.cfg.CCTVGatewayCIDR,
+		CCTVPool:                  s.cfg.CCTVPoolRange,
+		HotspotDNSName:            s.cfg.HotspotDNSName,
+		HotspotPortalName:         s.cfg.HotspotPortalName,
+		PublicSiteURL:             s.cfg.PublicSiteURL,
+		WireGuardManagementSubnet: strings.TrimSpace(s.cfg.WireGuardSubnetCIDR),
+		WalledGardenHosts:         s.cfg.HotspotWalledGardenHosts,
+		DisableWWWService:         s.cfg.DisableWWWService,
+		EnableAPIService:          s.cfg.EnableAPIService,
+		EnableAPISSLService:       s.cfg.EnableAPISSLService,
 	}
+}
+
+func (s *Service) publicSiteURL() string {
+	return normalizePublicSiteURL(s.cfg.PublicSiteURL)
 }
 
 func (s *Service) WireGuardScript(token string) (string, error) {
@@ -513,7 +597,7 @@ func (s *Service) WireGuardKey(input WireGuardKeyInput) error {
 		return errors.New("WireGuard job service is unavailable")
 	}
 	if _, err := s.wg.QueuePeerUpsert(router); err != nil {
-		return fmt.Errorf("queue xneelo WireGuard peer installation: %w", err)
+		return fmt.Errorf("queue noblifi-agent WireGuard peer installation: %w", err)
 	}
 	return nil
 }
@@ -706,36 +790,46 @@ func parseRouterOSBool(value string) bool {
 	}
 }
 func (s *Service) Status(token, serial, status string) error {
-	router, err := s.repo.FindByClaimToken(token)
-	if err != nil {
+	token = strings.TrimSpace(token)
+	serial = strings.TrimSpace(serial)
+	status = strings.TrimSpace(status)
+
+	if token == "" {
+		return errors.New("claim token is required")
+	}
+
+	router, err := s.repo.UpdateProvisioningStatus(token, serial, status)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return errors.New("invalid claim token")
 	}
-	if serial != "" {
-		router.SerialNumber = &serial
+	if err != nil {
+		return fmt.Errorf("update provisioning status: %w", err)
 	}
-	now := time.Now()
-	router.LastSeenAt = &now
-	if status != "" {
-		switch status {
-		case "installed":
-			router.Status = "provisioned"
-			router.ProvisionedAt = &now
-		case "failed":
-			router.Status = "failed"
-		default:
-			router.Status = status
-		}
+
+	payload, err := json.Marshal(map[string]string{
+		"serial": serial,
+		"status": status,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal provisioning status log: %w", err)
 	}
-	if err := s.repo.Save(&router); err != nil {
-		return err
-	}
-	payload, _ := json.Marshal(map[string]string{"serial": serial, "status": status})
-	return s.repo.CreateConfigLog(&routers.RouterConfigLog{
+
+	if err := s.repo.CreateConfigLog(&routers.RouterConfigLog{
 		RouterID:        router.ID,
 		Action:          "provisioning_status",
 		Status:          router.Status,
 		ResponsePayload: payload,
-	})
+	}); err != nil {
+		log.Printf(
+			"provisioning: status log insert failed router=%s token=%q status=%q: %v",
+			router.ID,
+			token,
+			status,
+			err,
+		)
+	}
+
+	return nil
 }
 
 func renderBootstrapScript(token, baseURL string) string {
@@ -816,7 +910,7 @@ func hotspotAutoConnectURL(token, baseURL string) string {
 // compatibility with existing tests. Runtime provisioning uses this function.
 // renderHotspotLoginPageWithAutoConnect is the RouterOS-served entry page.
 // It immediately asks NobliFi whether this MAC already owns a valid voucher.
-func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL string) string {
+func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL, publicSiteURL string) string {
 	portalName = strings.TrimSpace(portalName)
 	if portalName == "" {
 		portalName = "NobliFi WiFi"
@@ -838,7 +932,7 @@ func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL string) 
     *{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(145deg,#06111f 0%,#0b1727 52%,#102033 100%);color:var(--text)}
     main{min-height:100vh;display:grid;place-items:center;padding:24px 16px}.card{width:min(420px,100%);border:1px solid var(--line);background:rgba(11,23,39,.94);border-radius:12px;padding:26px;text-align:center;box-shadow:0 18px 50px rgba(0,0,0,.32)}
     .mark{width:48px;height:48px;display:grid;place-items:center;margin:0 auto 16px;border-radius:10px;background:var(--brand);color:#06111f;font-weight:900}.eyebrow{margin:0 0 7px;color:var(--brand);font-size:11px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}h1{margin:0;font-size:30px}p{color:var(--muted);line-height:1.5}
-    .pulse{width:42px;height:42px;margin:22px auto 0;border-radius:50%;border:4px solid rgba(52,211,153,.2);border-top-color:var(--accent);animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+    .pulse{width:42px;height:42px;margin:22px auto 0;border-radius:50%;border:4px solid rgba(52,211,153,.2);border-top-color:var(--accent);animation:spin .8s linear infinite}.powered{margin:18px 0 0;color:var(--muted);font-size:12px;text-align:center}.powered a{color:var(--brand);font-weight:800;text-decoration:none}.powered a:hover{text-decoration:underline}@keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
 <body>
@@ -848,6 +942,7 @@ func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL string) 
   <h1>` + html.EscapeString(portalName) + `</h1>
   <p id="noblifi-status">Checking whether this device already has valid access…</p>
   <div class="pulse" aria-hidden="true"></div>
+  ` + poweredByNobliFiHTML(publicSiteURL) + `
 
   <!--
     This form goes from the LOCAL HTTP HotSpot page to NobliFi HTTPS.
@@ -857,6 +952,7 @@ func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL string) 
     <input type="hidden" name="mac" value="$(mac)">
     <input type="hidden" name="link_login" value="$(link-login-only)">
     <input type="hidden" name="link_orig" value="$(link-orig)">
+    <input id="noblifi-force-manual" type="hidden" name="force_manual" value="">
     <noscript><button type="submit">Continue</button></noscript>
   </form>
 
@@ -927,6 +1023,17 @@ func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL string) 
   if (localRouterLoginFromFragment()) {
     return;
   }
+
+  var query = "";
+  try {
+    query = window.location.search || "";
+    var search = new URLSearchParams(query);
+    if (search.get("noblifi_manual") === "1") {
+      document.getElementById("noblifi-status").textContent =
+        "Loading voucher login...";
+      document.getElementById("noblifi-force-manual").value = "1";
+    }
+  } catch (_) {}
 
   // Throttle rapid reloads so one browser cannot create a burst of identical
   // voucher lookup requests. This does not disable reconnect; it only spaces
@@ -1318,7 +1425,20 @@ func validateHotspotReturnURL(
 	return parsed.String(), nil
 }
 
-func hotspotLocalBridgeURL(
+// hotspotDirectLoginURL creates a normal MikroTik HotSpot HTTP-PAP login URL.
+//
+// We intentionally use a top-level browser navigation to this URL instead of:
+//
+//  1. submitting an HTTPS page form to HTTP, which triggers Chromium's
+//     "information you're about to submit is not secure" interstitial; or
+//  2. carrying the voucher in a URL fragment and relying on JavaScript in the
+//     RouterOS-served login.html to perform the final POST.
+//
+// RouterOS HotSpot accepts username/password as /login request parameters when
+// HTTP-PAP is enabled. NobliFi provisioning enables http-pap on the HotSpot
+// profile. The browser therefore goes directly to the HotSpot servlet and
+// RouterOS immediately performs the RADIUS Access-Request.
+func hotspotDirectLoginURL(
 	linkLogin string,
 	linkOrig string,
 	voucherCode string,
@@ -1328,18 +1448,20 @@ func hotspotLocalBridgeURL(
 		return strings.TrimSpace(linkLogin)
 	}
 
-	fragment := url.Values{}
-	fragment.Set("noblifi", "1")
-	fragment.Set(
-		"voucher",
-		strings.ToUpper(strings.TrimSpace(voucherCode)),
-	)
+	code := strings.ToUpper(strings.TrimSpace(voucherCode))
+
+	query := parsed.Query()
+	query.Set("username", code)
+	query.Set("password", code)
+	query.Set("popup", "true")
 
 	if destination := strings.TrimSpace(linkOrig); destination != "" {
-		fragment.Set("dst", destination)
+		query.Set("dst", destination)
 	}
 
-	parsed.Fragment = fragment.Encode()
+	parsed.RawQuery = query.Encode()
+	parsed.Fragment = ""
+
 	return parsed.String()
 }
 
@@ -1348,19 +1470,20 @@ func renderHotspotAutoLoginPage(
 	linkLogin string,
 	linkOrig string,
 	voucherCode string,
+	publicSiteURL string,
 ) string {
 	portalName = strings.TrimSpace(portalName)
 	if portalName == "" {
 		portalName = "NobliFi WiFi"
 	}
 
-	bridgeURL := hotspotLocalBridgeURL(
+	directLoginURL := hotspotDirectLoginURL(
 		linkLogin,
 		linkOrig,
 		voucherCode,
 	)
 
-	bridgeJSON, _ := json.Marshal(bridgeURL)
+	directLoginJSON, _ := json.Marshal(directLoginURL)
 
 	return `<!doctype html>
 <html>
@@ -1380,6 +1503,7 @@ func renderHotspotAutoLoginPage(
     h1{margin:0;font-size:30px}
     p{color:var(--muted);line-height:1.5}
     .pulse{width:42px;height:42px;margin:22px auto 0;border-radius:50%;border:4px solid rgba(52,211,153,.2);border-top-color:var(--accent);animation:spin .8s linear infinite}
+    .powered{margin:18px 0 0;color:var(--muted);font-size:12px;text-align:center}.powered a{color:var(--brand);font-weight:800;text-decoration:none}.powered a:hover{text-decoration:underline}
     @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
@@ -1391,6 +1515,7 @@ func renderHotspotAutoLoginPage(
     <h1>` + html.EscapeString(portalName) + `</h1>
     <p>Your voucher is valid. Connecting this device to the internet…</p>
     <div class="pulse" aria-hidden="true"></div>
+    ` + poweredByNobliFiHTML(publicSiteURL) + `
   </section>
 </main>
 
@@ -1398,16 +1523,17 @@ func renderHotspotAutoLoginPage(
 (function () {
   /*
    * IMPORTANT:
-   * Do NOT create an HTTPS-page form whose action is the HTTP MikroTik login
-   * URL. Chromium displays "The information you're about to submit is not
-   * secure" for that HTTPS -> HTTP form submission.
    *
-   * We perform a top-level navigation back to the local HotSpot page instead.
-   * The voucher is carried in the URL fragment, which is not sent to the
-   * router. The local RouterOS-served login.html reads it, clears it, and then
-   * performs the final same-origin HTTP POST to the MikroTik login servlet.
+   * This is a top-level navigation, not an HTTPS -> HTTP form submission.
+   * Chromium therefore does not show the insecure-form interstitial.
+   *
+   * The destination is the MikroTik /login servlet itself, with username and
+   * password query parameters. RouterOS processes the HTTP-PAP login directly
+   * and asks RADIUS to authorize the voucher.
+   *
+   * No JavaScript on the RouterOS login.html page is required for this step.
    */
-  window.location.replace(` + string(bridgeJSON) + `);
+  window.location.replace(` + string(directLoginJSON) + `);
 })();
 </script>
 </body>
@@ -1418,6 +1544,7 @@ func renderHotspotExternalAuthError(
 	portalName string,
 	linkLogin string,
 	message string,
+	publicSiteURL string,
 ) string {
 	portalName = strings.TrimSpace(portalName)
 	if portalName == "" {
@@ -1551,6 +1678,16 @@ func renderHotspotExternalAuthError(
       font-size:11px;
       text-align:center;
     }
+
+    .footer a {
+      color:var(--brand);
+      font-weight:800;
+      text-decoration:none;
+    }
+
+    .footer a:hover {
+      text-decoration:underline;
+    }
   </style>
 </head>
 
@@ -1580,13 +1717,30 @@ func renderHotspotExternalAuthError(
       Try again
     </a>
 
-    <p class="footer">
-      Secure WiFi access powered by NobliFi
-    </p>
+    ` + poweredByNobliFiHTML(publicSiteURL) + `
   </section>
 </main>
 </body>
 </html>`
+}
+
+func poweredByNobliFiHTML(publicSiteURL string) string {
+	return `<p class="footer powered"><span>Powered by </span><a href="` +
+		html.EscapeString(normalizePublicSiteURL(publicSiteURL)) +
+		`" target="_blank" rel="noopener noreferrer">NobliFi</a></p>`
+}
+
+func normalizePublicSiteURL(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	rawURL = strings.TrimRight(rawURL, "/")
+	if rawURL == "" {
+		return "http://localhost:3000"
+	}
+	lower := strings.ToLower(rawURL)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return "https://" + rawURL
+	}
+	return rawURL
 }
 
 func normalizeProvisioningBaseURL(baseURL string) string {

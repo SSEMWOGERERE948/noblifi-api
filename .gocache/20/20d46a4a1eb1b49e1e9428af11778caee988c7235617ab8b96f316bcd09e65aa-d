@@ -1,0 +1,15 @@
+=== RUN   TestVoucherUsageStateMarksUnusedAsActive
+--- PASS: TestVoucherUsageStateMarksUnusedAsActive (0.00s)
+=== RUN   TestVoucherUsageStatePreservesExistingActiveState
+--- PASS: TestVoucherUsageStatePreservesExistingActiveState (0.00s)
+=== RUN   TestRemainingVoucherSecondsUsesWallClockExpiry
+--- PASS: TestRemainingVoucherSecondsUsesWallClockExpiry (0.00s)
+=== RUN   TestRemainingVoucherSecondsRejectsExpiredVoucher
+--- PASS: TestRemainingVoucherSecondsRejectsExpiredVoucher (0.00s)
+=== RUN   TestHandleAccessPacketBindsVoucherToCallingStationID
+    service_test.go:72: sqlite driver unavailable: Binary was compiled with 'CGO_ENABLED=0', go-sqlite3 requires cgo to work. This is a stub
+--- SKIP: TestHandleAccessPacketBindsVoucherToCallingStationID (0.00s)
+=== RUN   TestEncryptUserPasswordHelperMatchesDecrypt
+--- PASS: TestEncryptUserPasswordHelperMatchesDecrypt (0.00s)
+PASS
+ok  	github.com/noblifi/noblifi/backend/internal/radius	1.890s

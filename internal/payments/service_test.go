@@ -76,3 +76,35 @@ func TestApplyStatusActivatesUserSubscription(t *testing.T) {
 		t.Fatalf("expected trial to be cleared, got non-nil value %v", *updated.TrialEndsAt)
 	}
 }
+
+func TestIotecCollectionRequestBodyNormalizesPayerAndUsesConfiguredFields(t *testing.T) {
+	svc := &Service{cfg: config.Config{
+		IotecWalletID: "wallet-123",
+		IotecCurrency: "UGX",
+	}}
+	body, err := svc.iotecCollectionRequestBody(PaymentOrder{
+		MerchantReference: "NOBLIFI-TEST",
+		Phone:             "0757251514",
+		Amount:            25000,
+	}, plans.Plan{Name: "Day Pass"})
+	if err != nil {
+		t.Fatalf("iotecCollectionRequestBody: %v", err)
+	}
+
+	want := map[string]any{
+		"category":   "MobileMoney",
+		"currency":   "UGX",
+		"walletId":   "wallet-123",
+		"externalId": "NOBLIFI-TEST",
+		"payer":      "256757251514",
+		"amount":     25000,
+		"payerNote":  "NobliFi - Day Pass",
+		"payeeNote":  "NobliFi voucher NOBLIFI-TEST",
+	}
+
+	for key, expected := range want {
+		if got := body[key]; got != expected {
+			t.Fatalf("%s = %#v, want %#v", key, got, expected)
+		}
+	}
+}

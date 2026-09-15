@@ -15,34 +15,43 @@ type Router struct {
 	SiteName                 *string                `json:"site_name"`
 	ExpectedModel            *string                `json:"expected_model"`
 	Model                    *string                `json:"model"`
-	SerialNumber             *string                `gorm:"uniqueIndex" json:"serial_number"`
-	MacAddress               *string                `json:"mac_address"`
+	SerialNumber             *string                `json:"-"`
+	MacAddress               *string                `json:"-"`
 	RouterOSVersion          *string                `json:"routeros_version"`
-	ManagementIP             *string                `json:"management_ip"`
+	ManagementIP             *string                `json:"-"`
 	WireGuardTunnelIP        *string                `gorm:"type:inet" json:"wireguard_tunnel_ip"`
-	WireGuardPublicKey       *string                `json:"wireguard_public_key"`
+	WireGuardPublicKey       *string                `json:"-"`
 	WireGuardStatus          string                 `gorm:"default:''" json:"wireguard_status"`
 	WireGuardPeerStatus      string                 `gorm:"default:waiting_for_router_key" json:"wire_guard_peer_status"`
-	WireGuardPeerUpdatedAt   *time.Time             `json:"wire_guard_peer_updated_at"`
+	WireGuardPeerUpdatedAt   *time.Time              `json:"wire_guard_peer_updated_at"`
 	WireGuardLastHandshakeAt *time.Time             `json:"wire_guard_last_handshake_at"`
 	WireGuardLastError       *string                `json:"wire_guard_last_error"`
 	ProvisioningStatus       string                 `gorm:"default:pending" json:"provisioning_status"`
 	ProvisioningError        *string                `json:"provisioning_error"`
-	APIUsername              *string                `json:"api_username"`
-	APIPasswordEncrypted     *string                `json:"api_password_encrypted"`
-	RadiusSecretEncrypted    *string                `json:"radius_secret_encrypted"`
+	APIUsername              *string                `json:"-"`
+	APIPasswordEncrypted     *string                `json:"-"`
+	RadiusSecretEncrypted    *string                `json:"-"`
 	Status                   string                 `gorm:"default:pending" json:"status"`
-	ClaimToken               string                 `gorm:"uniqueIndex" json:"claim_token"`
+	ClaimToken               string                 `json:"claim_token"`
 	ClaimTokenExpiresAt      *time.Time             `json:"claim_token_expires_at"`
 	LastSeenAt               *time.Time             `json:"last_seen_at"`
 	TelemetryUpdatedAt       *time.Time             `json:"telemetry_updated_at"`
 	TelemetryLastError       *string                `json:"telemetry_last_error"`
+	Uptime                   *string                `json:"uptime"`
+	UptimeSeconds            *int64                 `json:"uptime_seconds"`
+	CPULoad                  *string                `json:"cpu_load"`
+	FreeMemory               *string                `json:"free_memory"`
+	TotalMemory              *string                `json:"total_memory"`
+	ActiveHotspotUsers       *int                   `json:"active_hotspot_users"`
+	HealthStatus             string                 `gorm:"-" json:"health_status"`
+	HealthReason             string                 `gorm:"-" json:"health_reason"`
 	ProvisionedAt            *time.Time             `json:"provisioned_at"`
 	DeleteRequestedAt        *time.Time             `json:"delete_requested_at"`
 	DeletedAt                *time.Time             `gorm:"index" json:"deleted_at"`
-	RemoteWebPort            *int                   `json:"remote_web_port,omitempty"`
-	RemoteWinboxPort         *int                   `json:"remote_winbox_port,omitempty"`
+	RemoteWebPort            *int                   `json:"-"`
+	RemoteWinboxPort         *int                   `json:"-"`
 	RemoteAccessStatus       string                 `gorm:"default:disabled" json:"remote_access_status"`
+	RemoteAccessExpiresAt    *time.Time             `json:"-"`
 	CreatedAt                time.Time              `json:"created_at"`
 	UpdatedAt                time.Time              `json:"updated_at"`
 	Interfaces               []RouterInterface      `gorm:"foreignKey:RouterID" json:"interfaces,omitempty"`
@@ -105,7 +114,7 @@ type RouterInterface struct {
 	RouterID     uuid.UUID `gorm:"type:uuid;index" json:"router_id"`
 	Name         string    `json:"name"`
 	Type         *string   `json:"type"`
-	MacAddress   *string   `json:"mac_address"`
+	MacAddress   *string   `json:"-"`
 	Running      bool      `gorm:"default:false" json:"running"`
 	Disabled     bool      `gorm:"default:false" json:"disabled"`
 	DiscoveredAt time.Time `json:"discovered_at"`
@@ -130,4 +139,15 @@ type RouterConfigLog struct {
 	ResponsePayload datatypes.JSON `json:"response_payload"`
 	ErrorMessage    *string        `json:"error_message"`
 	CreatedAt       time.Time      `json:"created_at"`
+}
+
+type RouterDeleteChallenge struct {
+	ID              uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	RouterID        uuid.UUID  `gorm:"type:uuid;index;not null" json:"router_id"`
+	ActorUserID     uuid.UUID  `gorm:"type:uuid;index;not null" json:"actor_user_id"`
+	ExpectedHash    string     `gorm:"not null" json:"-"`
+	ExpectedPreview string     `gorm:"-" json:"expected_confirmation"`
+	ExpiresAt       time.Time  `gorm:"index;not null" json:"expires_at"`
+	UsedAt          *time.Time `json:"used_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
 }

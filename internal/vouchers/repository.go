@@ -85,6 +85,12 @@ func (r *Repository) ListForUser(
 	return vouchers, err
 }
 
+func (r *Repository) Find(id uuid.UUID) (Voucher, error) {
+	var voucher Voucher
+	err := r.db.First(&voucher, "id = ?", id).Error
+	return voucher, err
+}
+
 // FindForUser returns a single voucher only when it belongs
 // to the supplied user.
 func (r *Repository) FindForUser(
@@ -103,4 +109,30 @@ func (r *Repository) FindForUser(
 		Error
 
 	return voucher, err
+}
+
+func (r *Repository) Delete(voucher *Voucher) error {
+	return r.db.Delete(voucher).Error
+}
+
+func (r *Repository) PlanExists(id uuid.UUID) (bool, error) {
+	var count int64
+	err := r.db.
+		Table("plans").
+		Where("id = ?", id).
+		Where("deleted_at IS NULL").
+		Count(&count).
+		Error
+	return count > 0, err
+}
+
+func (r *Repository) PlanBelongsToUser(id uuid.UUID, userID uuid.UUID) (bool, error) {
+	var count int64
+	err := r.db.
+		Table("plans").
+		Where("id = ? AND user_id = ?", id, userID).
+		Where("deleted_at IS NULL").
+		Count(&count).
+		Error
+	return count > 0, err
 }

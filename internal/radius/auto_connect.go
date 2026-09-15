@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/noblifi/noblifi/backend/internal/vouchers"
 )
 
@@ -68,16 +69,31 @@ func (s *Service) syncReusableVoucher(
 // ValidVoucherForDevice finds an already-active, unexpired voucher bound to
 // this MAC and refreshes its RADIUS reply before automatic reconnect.
 func (s *Service) ValidVoucherForDevice(deviceMAC string) (string, bool, error) {
+	return s.validVoucherForDevice(deviceMAC, uuid.Nil)
+}
+
+func (s *Service) ValidVoucherForDeviceForUser(deviceMAC string, userID string) (string, bool, error) {
+	parsedUserID, err := uuid.Parse(strings.TrimSpace(userID))
+	if err != nil || parsedUserID == uuid.Nil {
+		return "", false, nil
+	}
+	return s.validVoucherForDevice(deviceMAC, parsedUserID)
+}
+
+func (s *Service) validVoucherForDevice(deviceMAC string, userID uuid.UUID) (string, bool, error) {
 	mac, err := normalizeAutoConnectMAC(deviceMAC)
 	if err != nil {
 		return "", false, nil
 	}
 
 	var items []vouchers.Voucher
-	if err := s.db.
+	query := s.db.
 		Where("device_mac = ? AND LOWER(status) IN ?", mac, []string{"active", "used"}).
-		Order("updated_at DESC").
-		Find(&items).Error; err != nil {
+		Order("updated_at DESC")
+	if userID != uuid.Nil {
+		query = query.Where("user_id = ?", userID)
+	}
+	if err := query.Find(&items).Error; err != nil {
 		return "", false, err
 	}
 

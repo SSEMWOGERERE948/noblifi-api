@@ -25,7 +25,7 @@ type HotspotPaymentService interface {
 func (s *Service) SetPlanLister(value TenantPlanLister)                 { s.plans = value }
 func (s *Service) SetHotspotPaymentService(value HotspotPaymentService) { s.hotspotPayments = value }
 
-type HotspotBuyInput struct{ PlanID, Phone, Email, DeviceMAC string }
+type HotspotBuyInput struct{ PlanID, CustomerName, Phone, Email, DeviceMAC string }
 
 func (s *Service) HotspotBuy(token string, input HotspotBuyInput) (payments.HotspotOrderResult, error) {
 	router, ownerID, err := s.hotspotPurchaseScope(token)
@@ -41,7 +41,7 @@ func (s *Service) HotspotBuy(token string, input HotspotBuyInput) (payments.Hots
 	}
 	return s.hotspotPayments.StartHotspotOrder(payments.HotspotOrderInput{
 		OwnerUserID: ownerID, RouterID: router.ID, PlanID: planID,
-		DeviceMAC: strings.TrimSpace(input.DeviceMAC), Phone: strings.TrimSpace(input.Phone), Email: strings.TrimSpace(input.Email),
+		DeviceMAC: strings.TrimSpace(input.DeviceMAC), CustomerName: strings.TrimSpace(input.CustomerName), Phone: strings.TrimSpace(input.Phone), Email: strings.TrimSpace(input.Email),
 	})
 }
 
@@ -106,10 +106,10 @@ func (s *Service) renderHotspotManualCommercePage(router routers.Router, token, 
 	return renderHotspotCommercePage(portalName, authURL,
 		normalizeProvisioningBaseURL(s.cfg.ProvisioningBaseURL)+"/hotspot-buy/"+strings.TrimSpace(token),
 		normalizeProvisioningBaseURL(s.cfg.ProvisioningBaseURL)+"/hotspot-buy/"+strings.TrimSpace(token)+"/",
-		deviceMAC, linkLogin, linkOrig, message, items, s.hotspotPayments != nil), nil
+		deviceMAC, linkLogin, linkOrig, message, items, s.hotspotPayments != nil, s.publicSiteURL()), nil
 }
 
-func renderHotspotCommercePage(portalName, authURL, buyURL, statusBase, deviceMAC, linkLogin, linkOrig, message string, items []plans.Plan, paymentsEnabled bool) string {
+func renderHotspotCommercePage(portalName, authURL, buyURL, statusBase, deviceMAC, linkLogin, linkOrig, message string, items []plans.Plan, paymentsEnabled bool, publicSiteURL string) string {
 	if strings.TrimSpace(portalName) == "" {
 		portalName = "NobliFi WiFi"
 	}
@@ -166,7 +166,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
 .purchase{display:none;margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}
 .purchase.open{display:block}
 .payment-message{min-height:18px;margin-top:12px;color:var(--muted);font-size:13px}
-.secure{text-align:center;color:var(--muted);font-size:11px;margin-top:20px}
+.secure,.powered{text-align:center;color:var(--muted);font-size:12px;margin-top:20px}.powered a{color:var(--brand);font-weight:800;text-decoration:none}.powered a:hover{text-decoration:underline}
 @media(max-width:760px){.grid{grid-template-columns:1fr}.package{grid-template-columns:1fr}.buy{width:100%}}
 </style>
 </head>
@@ -182,15 +182,15 @@ button:disabled{opacity:.55;cursor:not-allowed}
 
 <div class="grid">
 <section class="panel">
-<h2>Have a voucher?</h2>
+<h2>Have a voucher or transaction ID?</h2>
 <p class="hint">Enter it once. It stays assigned to this device until time or data expires.</p>
 ` + notice + `
 <form id="voucher-form" action="` + html.EscapeString(authURL) + `" method="post">
 <input type="hidden" name="mac" value="` + html.EscapeString(deviceMAC) + `">
 <input type="hidden" name="link_login" value="` + html.EscapeString(linkLogin) + `">
 <input type="hidden" name="link_orig" value="` + html.EscapeString(linkOrig) + `">
-<label for="voucher_code">Voucher code</label>
-<input id="voucher_code" name="voucher_code" autocomplete="one-time-code" placeholder="NF-XXXXXXXX" required>
+<label for="voucher_code">Voucher or transaction ID</label>
+<input id="voucher_code" name="voucher_code" autocomplete="one-time-code" placeholder="Transaction ID" required>
 <button class="primary" id="voucher-connect-button" type="submit">Connect</button>
 </form>
 </section>
@@ -213,7 +213,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
 </section>
 </div>
 
-<p class="secure">Secure WiFi access powered by NobliFi</p>
+` + poweredByNobliFiHTML(publicSiteURL) + `
 </div>
 </main>
 
@@ -267,7 +267,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
       .then(readJSON)
       .catch(function (error) {
         if (error && error.name === "AbortError") {
-          throw new Error("The request took too long. Retrying…");
+          throw new Error("The request took too long. Retrying...");
         }
         throw error;
       })
@@ -393,7 +393,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
         // retrieval. Retry after 3 seconds.
         msg(
           error.message ||
-          "Checking payment again…"
+          "Checking payment again..."
         );
 
         schedulePoll(
@@ -529,6 +529,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
         )
           .then(function (order) {
             if (
+              !order.transaction_id &&
               !order.order_tracking_id
             ) {
               throw new Error(
@@ -546,6 +547,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
             );
 
             startPolling(
+              order.transaction_id ||
               order.order_tracking_id
             );
           })

@@ -31,8 +31,11 @@ func NewHandler(
 }
 
 func (h *Handler) RegisterRoutes(router fiber.Router) {
+	router.Get("/plans", h.list)
+	router.Get("/plans/:id", h.get)
 	router.Post("/plans", h.create)
 	router.Patch("/plans/:id", h.patch)
+	router.Delete("/plans/:id", h.delete)
 }
 
 func (h *Handler) RegisterPublicRoutes(router fiber.Router) {
@@ -165,6 +168,28 @@ func (h *Handler) patch(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(plan)
+}
+
+func (h *Handler) delete(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(
+			fiber.StatusBadRequest,
+			"invalid plan id",
+		)
+	}
+
+	userID, isSuperadmin := currentUserScope(c)
+
+	if err := h.service.Delete(
+		id,
+		userID,
+		isSuperadmin,
+	); err != nil {
+		return err
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
 }
 
 func currentUserScope(c *fiber.Ctx) (*uuid.UUID, bool) {

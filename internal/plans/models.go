@@ -4,11 +4,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 const (
 	DurationUnitMinutes = "minutes"
 	DurationUnitHours   = "hours"
+	DurationUnitDays    = "days"
 	DurationUnitWeeks   = "weeks"
 	DurationUnitMonths  = "months"
 )
@@ -34,8 +36,9 @@ type Plan struct {
 
 	OnlineVouchersCreated int `gorm:"-" json:"online_vouchers_created,omitempty"`
 
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 type PatchInput struct {

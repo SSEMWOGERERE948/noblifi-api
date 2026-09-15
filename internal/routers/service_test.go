@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/noblifi/noblifi/backend/internal/config"
 )
 
@@ -80,5 +81,37 @@ func TestRenderWireGuardRouterOSCreatesInterfacePeerAndAddress(t *testing.T) {
 		if !strings.Contains(script, expected) {
 			t.Fatalf("expected WireGuard script to contain %q, got:\n%s", expected, script)
 		}
+	}
+}
+
+func TestRouterServiceRequiresAuthenticatedTenant(t *testing.T) {
+	service := NewService(nil, config.Config{})
+
+	if _, err := service.List(nil, false); err == nil {
+		t.Fatal("normal list without user did not fail closed")
+	}
+	if _, err := service.Create(CreateRouterInput{Name: "router"}, nil, false); err == nil {
+		t.Fatal("normal create without user did not fail closed")
+	}
+	if _, err := service.Find(uuid.Nil, nil, false); err == nil {
+		t.Fatal("normal find without user did not fail closed")
+	}
+}
+
+func TestDeleteConfirmationTextUsesRouterNameOnly(t *testing.T) {
+	if got := deleteConfirmationText("  Mukama Router  "); got != "Mukama Router" {
+		t.Fatalf("deleteConfirmationText() = %q, want router name only", got)
+	}
+}
+
+func TestDeleteRouterInputAcceptsOneRouterNameConfirmation(t *testing.T) {
+	input := DeleteRouterInput{
+		RouterName:      "Mukama Router",
+		ConfirmationOne: "legacy duplicate confirmation",
+		ConfirmationTwo: "legacy duplicate confirmation",
+	}
+
+	if got := input.deleteConfirmation(); got != "Mukama Router" {
+		t.Fatalf("deleteConfirmation() = %q, want router_name field", got)
 	}
 }

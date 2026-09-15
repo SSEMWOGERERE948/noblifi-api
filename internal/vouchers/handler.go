@@ -18,6 +18,7 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Post("/vouchers/generate", h.generate)
 	router.Get("/vouchers", h.list)
+	router.Delete("/vouchers/:id", h.delete)
 }
 
 func (h *Handler) generate(c *fiber.Ctx) error {
@@ -108,7 +109,7 @@ func (h *Handler) generate(c *fiber.Ctx) error {
 func (h *Handler) list(c *fiber.Ctx) error {
 	userID, isSuperadmin := currentUserScope(c)
 
-	vouchers, err := h.service.List(
+	vouchers, err := h.service.ListDetailed(
 		userID,
 		isSuperadmin,
 	)
@@ -118,6 +119,28 @@ func (h *Handler) list(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(vouchers)
+}
+
+func (h *Handler) delete(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(
+			fiber.StatusBadRequest,
+			"invalid voucher id",
+		)
+	}
+
+	userID, isSuperadmin := currentUserScope(c)
+
+	if err := h.service.Delete(
+		id,
+		userID,
+		isSuperadmin,
+	); err != nil {
+		return err
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
 }
 
 func currentUserScope(

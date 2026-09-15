@@ -60,6 +60,13 @@ type desiredRouterConfig struct {
 	RouterOSScript string `json:"routeros_script"`
 }
 
+type remoteAccessConfig struct {
+	RouterID    string `json:"router_id"`
+	RouterIP    string `json:"router_ip"`
+	WinboxPort  int    `json:"winbox_port"`
+	VPNRequired bool   `json:"vpn_required"`
+}
+
 func runWireGuardWorker(ctx context.Context, client *http.Client, cfg config) {
 	worker := wireGuardWorker{cfg: cfg, client: client, runner: execRunner{}}
 	if err := worker.heartbeat(ctx, true); err != nil {
@@ -126,8 +133,10 @@ func (w wireGuardWorker) applyJob(ctx context.Context, job wireGuardJob) error {
 		return w.removePeer(ctx, job)
 	case "configure_router":
 		return w.configureRouter(ctx, job)
-	case "upsert_remote_access", "remove_remote_access":
-		return nil
+	case "upsert_remote_access":
+		return w.upsertRemoteAccess(ctx, job)
+	case "remove_remote_access":
+		return w.removeRemoteAccess(ctx, job)
 	default:
 		return fmt.Errorf("unsupported operation %q", job.Operation)
 	}
@@ -292,6 +301,27 @@ func (w wireGuardWorker) configureRouter(ctx context.Context, job wireGuardJob) 
 	}
 	defer conn.Close()
 	return applyRouterOSScript(conn, "noblifi-agent-config", desired.RouterOSScript)
+}
+
+func (w wireGuardWorker) upsertRemoteAccess(ctx context.Context, job wireGuardJob) error {
+	var cfg remoteAccessConfig
+	if err := w.get(ctx, "/internal/routers/"+job.RouterID+"/remote-access-config", &cfg); err != nil {
+		return fmt.Errorf("fetch remote access config: %w", err)
+	}
+	routerIP := strings.TrimSpace(cfg.RouterIP)
+	if routerIP == "" {
+		return errors.New("remote access config has no router_ip")
+	}
+	if cfg.WinboxPort <= 0 {
+		return errors.New("remote access config has no winbox_port")
+	}
+	log.Printf("remote WinBox access active through WireGuard router_id=%s router_ip=%s port=%d", job.RouterID, routerIP, cfg.WinboxPort)
+	return w.post(ctx, "/internal/routers/"+job.RouterID+"/remote-access-ready", nil, nil)
+}
+
+func (w wireGuardWorker) removeRemoteAccess(ctx context.Context, job wireGuardJob) error {
+	log.Printf("remote WinBox access revoked router_id=%s; WireGuard-only access has no public forwarding rule to remove", job.RouterID)
+	return nil
 }
 
 func applyRouterOSScript(conn *mikrotik.Conn, name, source string) error {

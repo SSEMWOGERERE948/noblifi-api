@@ -2,8 +2,16 @@ package config
 
 import (
 	"bufio"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/noblifi/noblifi/backend/internal/placeholders"
 )
@@ -16,6 +24,7 @@ type Config struct {
 	JWTSecret                string
 	AppEnv                   string
 	PublicAPIBaseURL         string
+	PublicSiteURL            string
 	ProvisioningBaseURL      string
 	AgentToken               string
 	RadiusServer             string
@@ -61,18 +70,28 @@ type Config struct {
 	IotecClientID            string
 	IotecClientSecret        string
 	IotecWalletID            string
+	IotecWalletCode          string
+	IotecPaymentLink         string
 	IotecCurrency            string
+	MobileMoneyCommissionBPS int
+	MinimumWithdrawalUGX     int
 }
 
 func Load() Config {
+	cfg, _ := LoadWithContext(context.Background())
+	return cfg
+}
+
+func LoadWithContext(ctx context.Context) (Config, error) {
 	loadDotEnv(".env")
 
-	return Config{
+	cfg := Config{
 		Port:                getEnv("PORT", "8080"),
 		DatabaseURL:         getEnv("DATABASE_URL", "postgres://noblifi:noblifi@localhost:5432/noblifi?sslmode=disable"),
 		JWTSecret:           getEnv("JWT_SECRET", "change-this-secret"),
 		AppEnv:              getEnv("APP_ENV", "development"),
 		PublicAPIBaseURL:    getEnv("PUBLIC_API_BASE_URL", "http://localhost:8080"),
+		PublicSiteURL:       getEnv("NOBLIFI_PUBLIC_SITE_URL", "http://localhost:3000"),
 		ProvisioningBaseURL: getEnv("NOBLIFI_PROVISIONING_BASE_URL", "http://localhost:8080/api/v1/provisioning"),
 		AgentToken:          getEnv("NOBLIFI_AGENT_TOKEN", ""),
 
@@ -208,9 +227,12 @@ func Load() Config {
 			"NOBLIFI_HOTSPOT_PORTAL_NAME",
 			"NobliFi WiFi",
 		),
-		HotspotWalledGardenHosts: getListEnv(
-			"NOBLIFI_HOTSPOT_WALLED_GARDEN_HOSTS",
-			"noblifi-frontend.vercel.app,noblifi.ew.r.appspot.com,noblifi.uc.r.appspot.com",
+		HotspotWalledGardenHosts: withURLHost(
+			getListEnv(
+				"NOBLIFI_HOTSPOT_WALLED_GARDEN_HOSTS",
+				"noblifi-frontend.vercel.app,noblifi.ew.r.appspot.com,noblifi.uc.r.appspot.com",
+			),
+			getEnv("NOBLIFI_PUBLIC_SITE_URL", "http://localhost:3000"),
 		),
 
 		DisableWWWService: getBoolEnv(
@@ -258,13 +280,185 @@ func Load() Config {
 		),
 		IotecWalletID: getEnv(
 			"IOTEC_WALLET_ID",
-			"",
+			"01a023f3-c9d7-7103-b774-b83336aa4699",
+		),
+		IotecWalletCode: getEnv(
+			"IOTEC_WALLET_CODE",
+			"02608627",
+		),
+		IotecPaymentLink: getEnv(
+			"IOTEC_PAYMENT_LINK",
+			"https://pay.iotec.io/p/02608627",
 		),
 		IotecCurrency: getEnv(
 			"IOTEC_CURRENCY",
 			"UGX",
 		),
+		MobileMoneyCommissionBPS: getIntEnv(
+			"NOBLIFI_MOBILE_MONEY_COMMISSION_BPS",
+			500,
+		),
+		MinimumWithdrawalUGX: getIntEnv(
+			"NOBLIFI_MINIMUM_WITHDRAWAL_UGX",
+			0,
+		),
 	}
+
+	if strings.EqualFold(cfg.AppEnv, "production") {
+		if err := loadProductionIotecSecrets(ctx, &cfg); err != nil {
+			return cfg, err
+		}
+	}
+
+	return cfg, nil
+}
+
+func loadProductionIotecSecrets(ctx context.Context, cfg *Config) error {
+	var err error
+
+	if cfg.IotecBaseURL, err = loadSecretOrEnv(ctx, "IOTEC_BASE_URL"); err != nil {
+		return err
+	}
+	if cfg.IotecClientID, err = loadSecretOrEnv(ctx, "IOTEC_CLIENT_ID"); err != nil {
+		return err
+	}
+	if cfg.IotecClientSecret, err = loadSecretOrEnv(ctx, "IOTEC_CLIENT_SECRET"); err != nil {
+		return err
+	}
+	if cfg.IotecPaymentLink, err = loadSecretOrEnv(ctx, "IOTEC_PAYMENT_LINK"); err != nil {
+		return err
+	}
+	if cfg.IotecTokenURL, err = loadSecretOrEnv(ctx, "IOTEC_TOKEN_URL"); err != nil {
+		return err
+	}
+	if cfg.IotecWalletCode, err = loadSecretOrEnv(ctx, "IOTEC_WALLET_CODE"); err != nil {
+		return err
+	}
+	if cfg.IotecWalletID, err = loadSecretOrEnv(ctx, "IOTEC_WALLET_ID"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func LoadIotecClientSecret(ctx context.Context) (string, error) {
+	return loadSecretOrEnv(ctx, "IOTEC_CLIENT_SECRET")
+}
+
+func loadSecretOrEnv(ctx context.Context, name string) (string, error) {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		return value, nil
+	}
+	return loadSecret(ctx, name)
+}
+
+func loadSecret(ctx context.Context, name string) (string, error) {
+	projectID := firstNonEmptyEnv("GCP_PROJECT_ID", "GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT")
+	if projectID == "" {
+		return "", fmt.Errorf("GCP_PROJECT_ID not set")
+	}
+
+	token, err := metadataAccessToken(ctx)
+	if err != nil {
+		return "", fmt.Errorf("metadata access token: %w", err)
+	}
+
+	secretName := url.PathEscape(name)
+	endpoint := fmt.Sprintf(
+		"https://secretmanager.googleapis.com/v1/projects/%s/secrets/%s/versions/latest:access",
+		url.PathEscape(projectID),
+		secretName,
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("access secret %s failed with %s: %s", name, resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	var out struct {
+		Payload struct {
+			Data string `json:"data"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return "", fmt.Errorf("decode secret %s response: %w", name, err)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(out.Payload.Data)
+	if err != nil {
+		return "", fmt.Errorf("decode secret %s payload: %w", name, err)
+	}
+	value := strings.TrimSpace(string(decoded))
+	if value == "" {
+		return "", fmt.Errorf("secret %s is empty", name)
+	}
+	return value, nil
+}
+
+func metadataAccessToken(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Metadata-Flavor", "Google")
+
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("metadata server returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	var out struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(out.AccessToken) == "" {
+		return "", fmt.Errorf("metadata server did not return an access token")
+	}
+	return strings.TrimSpace(out.AccessToken), nil
+}
+
+func withURLHost(hosts []string, rawURL string) []string {
+	host := strings.TrimSpace(rawURL)
+	host = strings.TrimPrefix(host, "https://")
+	host = strings.TrimPrefix(host, "http://")
+	if slash := strings.Index(host, "/"); slash >= 0 {
+		host = host[:slash]
+	}
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return hosts
+	}
+	for _, existing := range hosts {
+		clean := strings.TrimSpace(existing)
+		clean = strings.TrimPrefix(clean, "https://")
+		clean = strings.TrimPrefix(clean, "http://")
+		if slash := strings.Index(clean, "/"); slash >= 0 {
+			clean = clean[:slash]
+		}
+		if strings.EqualFold(clean, host) {
+			return hosts
+		}
+	}
+	return append(hosts, host)
 }
 
 func normalizeRadiusSecret(value string) string {
@@ -281,6 +475,15 @@ func getEnv(key, fallback string) string {
 	}
 
 	return fallback
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func getListEnv(key, fallback string) []string {

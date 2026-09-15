@@ -38,6 +38,13 @@ func (c *Client) WithPort(port int) *Client {
 	return c
 }
 
+func (c *Client) WithTimeout(timeout time.Duration) *Client {
+	if timeout > 0 {
+		c.Timeout = timeout
+	}
+	return c
+}
+
 func (c *Client) DialAndLogin() (*Conn, error) {
 	if strings.TrimSpace(c.Address) == "" {
 		return nil, errors.New("router address is required")
@@ -55,8 +62,9 @@ func (c *Client) DialAndLogin() (*Conn, error) {
 		return nil, err
 	}
 	api := &Conn{
-		conn: conn,
-		rw:   bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn)),
+		conn:    conn,
+		rw:      bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn)),
+		timeout: timeout,
 	}
 	if err := api.Login(c.Username, c.Password); err != nil {
 		_ = conn.Close()
@@ -80,8 +88,9 @@ func (c *Client) Apply(script string) error {
 }
 
 type Conn struct {
-	conn net.Conn
-	rw   *bufio.ReadWriter
+	conn    net.Conn
+	rw      *bufio.ReadWriter
+	timeout time.Duration
 }
 
 func (c *Conn) Close() error {
@@ -132,6 +141,9 @@ func (c *Conn) Command(path string, args map[string]string) ([]map[string]string
 }
 
 func (c *Conn) rawCommand(path string, args map[string]string) ([]map[string]string, error) {
+	if c.timeout > 0 && c.conn != nil {
+		_ = c.conn.SetDeadline(time.Now().Add(c.timeout))
+	}
 	if err := c.writeSentence(path, args); err != nil {
 		return nil, err
 	}

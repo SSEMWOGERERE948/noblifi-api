@@ -1,11 +1,14 @@
-﻿package routers
+package routers
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"net/url"
 	"strings"
 	"time"
 
@@ -13,16 +16,27 @@ import (
 	"github.com/noblifi/noblifi/backend/internal/config"
 	"github.com/noblifi/noblifi/backend/internal/placeholders"
 	"github.com/noblifi/noblifi/backend/internal/portprofiles"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+var ErrAuthenticationRequired = errors.New("authenticated user is required")
 
 type Service struct {
 	repo                    *Repository
 	cfg                     config.Config
 	serverPublicKeyResolver WireGuardServerPublicKeyResolver
+	runtimeWireGuardManager RuntimeWireGuardManager
 }
 
 type WireGuardServerPublicKeyResolver interface {
 	ActiveServerPublicKey() (string, error)
+}
+
+type RuntimeWireGuardManager interface {
+	QueueRemoteAccess(router Router) (any, error)
+	QueueRemoteAccessRemoval(router Router) (any, error)
+	QueuePeerRemoval(router Router) (any, error)
 }
 
 func NewService(repo *Repository, cfg config.Config) *Service {
@@ -33,6 +47,10 @@ func (s *Service) SetWireGuardServerPublicKeyResolver(resolver WireGuardServerPu
 	s.serverPublicKeyResolver = resolver
 }
 
+func (s *Service) SetRuntimeWireGuardManager(manager RuntimeWireGuardManager) {
+	s.runtimeWireGuardManager = manager
+}
+
 type CreateRouterInput struct {
 	Name          string `json:"name"`
 	SiteName      string `json:"site_name"`
@@ -41,6 +59,11 @@ type CreateRouterInput struct {
 }
 
 func (s *Service) Create(input CreateRouterInput, userID *uuid.UUID, isSuperadmin bool) (Router, error) {
+	if !isSuperadmin {
+		if userID == nil || *userID == uuid.Nil {
+			return Router{}, ErrAuthenticationRequired
+		}
+	}
 	expires := time.Now().Add(time.Duration(s.cfg.ProvisioningTokenTTLHour) * time.Hour)
 	var siteName *string
 	if strings.TrimSpace(input.SiteName) != "" {
@@ -63,7 +86,7 @@ func (s *Service) Create(input CreateRouterInput, userID *uuid.UUID, isSuperadmi
 		ClaimToken:          randomToken(),
 		ClaimTokenExpiresAt: &expires,
 	}
-	if !isSuperadmin && userID != nil {
+	if !isSuperadmin {
 		router.UserID = userID
 	}
 	err := s.repo.Create(&router)
@@ -74,17 +97,43 @@ func (s *Service) Create(input CreateRouterInput, userID *uuid.UUID, isSuperadmi
 }
 
 func (s *Service) List(userID *uuid.UUID, isSuperadmin bool) ([]Router, error) {
-	if isSuperadmin || userID == nil {
-		return s.repo.List()
+	var (
+		records []Router
+		err     error
+	)
+	if isSuperadmin {
+		records, err = s.repo.List()
+	} else {
+		if userID == nil || *userID == uuid.Nil {
+			return nil, ErrAuthenticationRequired
+		}
+		records, err = s.repo.ListForUser(*userID)
 	}
-	return s.repo.ListForUser(*userID)
+	if err != nil {
+		return nil, err
+	}
+	HydrateHealthStatuses(records, time.Now().UTC())
+	return records, nil
 }
 
 func (s *Service) Find(id uuid.UUID, userID *uuid.UUID, isSuperadmin bool) (Router, error) {
-	if isSuperadmin || userID == nil {
-		return s.repo.Find(id)
+	var (
+		router Router
+		err    error
+	)
+	if isSuperadmin {
+		router, err = s.repo.Find(id)
+	} else {
+		if userID == nil || *userID == uuid.Nil {
+			return Router{}, ErrAuthenticationRequired
+		}
+		router, err = s.repo.FindForUser(id, *userID)
 	}
-	return s.repo.FindForUser(id, *userID)
+	if err != nil {
+		return Router{}, err
+	}
+	HydrateHealthStatus(&router, time.Now().UTC())
+	return router, nil
 }
 
 func (s *Service) NetworkProfile(
@@ -92,7 +141,10 @@ func (s *Service) NetworkProfile(
 	userID *uuid.UUID,
 	isSuperadmin bool,
 ) (RouterNetworkProfile, error) {
-	if !isSuperadmin && userID != nil {
+	if !isSuperadmin {
+		if userID == nil || *userID == uuid.Nil {
+			return RouterNetworkProfile{}, ErrAuthenticationRequired
+		}
 		if _, err := s.repo.FindForUser(routerID, *userID); err != nil {
 			return RouterNetworkProfile{}, err
 		}
@@ -158,7 +210,10 @@ func (s *Service) RegenerateClaimToken(id uuid.UUID, userID *uuid.UUID, isSupera
 }
 
 func (s *Service) SavePortAssignments(routerID uuid.UUID, inputs []portprofiles.Assignment, userID *uuid.UUID, isSuperadmin bool) error {
-	if !isSuperadmin && userID != nil {
+	if !isSuperadmin {
+		if userID == nil || *userID == uuid.Nil {
+			return ErrAuthenticationRequired
+		}
 		if _, err := s.repo.FindForUser(routerID, *userID); err != nil {
 			return err
 		}
@@ -259,8 +314,207 @@ type RemoteAccessInput struct {
 	Password           string `json:"password"`
 }
 
+type WinBoxAccessResponse struct {
+	Status      string `json:"status"`
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	VPNRequired bool   `json:"vpn_required"`
+}
+
+type DeleteChallengeResponse struct {
+	ChallengeID          uuid.UUID `json:"challenge_id"`
+	ExpectedConfirmation string    `json:"expected_confirmation"`
+	RouterName           string    `json:"router_name"`
+	ExpiresAt            time.Time `json:"expires_at"`
+}
+
+type DeleteRouterInput struct {
+	ChallengeID     uuid.UUID `json:"challenge_id"`
+	RouterName      string    `json:"router_name"`
+	TypedName       string    `json:"typed_name"`
+	Confirmation    string    `json:"confirmation"`
+	ConfirmationOne string    `json:"confirmation_one"`
+	ConfirmationTwo string    `json:"confirmation_two"`
+}
+
 type MethodInput struct {
 	ConfigurationMethod string `json:"configuration_method"`
+}
+
+func (s *Service) EnableWinBoxAccess(routerID uuid.UUID, userID *uuid.UUID, isSuperadmin bool) (WinBoxAccessResponse, error) {
+	router, err := s.Find(routerID, userID, isSuperadmin)
+	if err != nil {
+		return WinBoxAccessResponse{}, err
+	}
+	health, _ := Health(router, time.Now().UTC())
+	if health == HealthOffline {
+		return WinBoxAccessResponse{}, errors.New("router must have recent WireGuard or telemetry activity before enabling WinBox access")
+	}
+	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
+		return WinBoxAccessResponse{}, errors.New("router WireGuard tunnel IP is required for WinBox access")
+	}
+
+	routerIP := hostOnly(strings.TrimSpace(*router.WireGuardTunnelIP))
+	if routerIP == "" {
+		return WinBoxAccessResponse{}, errors.New("router WireGuard tunnel IP is required for WinBox access")
+	}
+	now := time.Now().UTC()
+	err = s.repo.db.Transaction(func(tx *gorm.DB) error {
+		var locked Router
+		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("deleted_at IS NULL").
+			First(&locked, "id = ?", routerID)
+		if query.Error != nil {
+			return query.Error
+		}
+		return tx.Model(&Router{}).
+			Where("id = ?", routerID).
+			Updates(map[string]any{
+				"remote_access_status":     "active",
+				"remote_web_port":          nil,
+				"remote_winbox_port":       nil,
+				"remote_access_expires_at": nil,
+				"updated_at":               now,
+			}).Error
+	})
+	if err != nil {
+		return WinBoxAccessResponse{}, err
+	}
+
+	router.RemoteWinboxPort = nil
+	router.RemoteWebPort = nil
+	router.RemoteAccessStatus = "active"
+	router.RemoteAccessExpiresAt = nil
+	if s.runtimeWireGuardManager != nil {
+		if _, err := s.runtimeWireGuardManager.QueueRemoteAccess(router); err != nil {
+			_ = s.DisableRemoteAccess(routerID, userID, isSuperadmin)
+			return WinBoxAccessResponse{}, err
+		}
+	}
+	log.Printf("router=%s winbox access enabled via WireGuard host=%s port=8291", routerID, routerIP)
+	return WinBoxAccessResponse{Status: "active", Host: routerIP, Port: 8291, VPNRequired: true}, nil
+}
+
+func (s *Service) DisableRemoteAccess(routerID uuid.UUID, userID *uuid.UUID, isSuperadmin bool) error {
+	router, err := s.Find(routerID, userID, isSuperadmin)
+	if err != nil {
+		return err
+	}
+	if s.runtimeWireGuardManager != nil && remoteAccessMayNeedCleanup(router.RemoteAccessStatus) {
+		if _, err := s.runtimeWireGuardManager.QueueRemoteAccessRemoval(router); err != nil {
+			return err
+		}
+	}
+	now := time.Now().UTC()
+	return s.repo.db.Model(&Router{}).
+		Where("id = ?", routerID).
+		Updates(map[string]any{
+			"remote_access_status":     "revoked",
+			"remote_web_port":          nil,
+			"remote_winbox_port":       nil,
+			"remote_access_expires_at": nil,
+			"updated_at":               now,
+		}).Error
+}
+
+func (s *Service) ExpireRemoteAccess() error {
+	return nil
+}
+
+func (s *Service) RequestDeleteChallenge(routerID uuid.UUID, userID *uuid.UUID, isSuperadmin bool) (DeleteChallengeResponse, error) {
+	router, err := s.Find(routerID, userID, isSuperadmin)
+	if err != nil {
+		return DeleteChallengeResponse{}, err
+	}
+	if userID == nil || *userID == uuid.Nil {
+		return DeleteChallengeResponse{}, ErrAuthenticationRequired
+	}
+	expected := deleteConfirmationText(router.Name)
+	now := time.Now().UTC()
+	challenge := RouterDeleteChallenge{
+		RouterID:     router.ID,
+		ActorUserID:  *userID,
+		ExpectedHash: hashConfirmation(expected),
+		ExpiresAt:    now.Add(10 * time.Minute),
+		CreatedAt:    now,
+	}
+	if err := s.repo.db.Create(&challenge).Error; err != nil {
+		return DeleteChallengeResponse{}, err
+	}
+	log.Printf("router=%s delete challenge requested actor=%s", router.ID, *userID)
+	return DeleteChallengeResponse{
+		ChallengeID:          challenge.ID,
+		ExpectedConfirmation: expected,
+		RouterName:           router.Name,
+		ExpiresAt:            challenge.ExpiresAt,
+	}, nil
+}
+
+func (s *Service) DeleteRouter(routerID uuid.UUID, input DeleteRouterInput, userID *uuid.UUID, isSuperadmin bool) error {
+	router, err := s.Find(routerID, userID, isSuperadmin)
+	if err != nil {
+		return err
+	}
+	if userID == nil || *userID == uuid.Nil {
+		return ErrAuthenticationRequired
+	}
+
+	now := time.Now().UTC()
+	err = s.repo.db.Transaction(func(tx *gorm.DB) error {
+		var challenge RouterDeleteChallenge
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND router_id = ? AND actor_user_id = ?", input.ChallengeID, routerID, *userID).
+			First(&challenge).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("invalid or expired delete challenge")
+		}
+		if err != nil {
+			return err
+		}
+		if challenge.UsedAt != nil || now.After(challenge.ExpiresAt) {
+			return errors.New("invalid or expired delete challenge")
+		}
+		confirmation := input.deleteConfirmation()
+		if hashConfirmation(confirmation) != challenge.ExpectedHash {
+			return errors.New("delete confirmation must exactly match the router name")
+		}
+		challenge.UsedAt = &now
+		if err := tx.Save(&challenge).Error; err != nil {
+			return err
+		}
+		return tx.Model(&Router{}).
+			Where("id = ?", routerID).
+			Updates(map[string]any{
+				"delete_requested_at":      now,
+				"deleted_at":               now,
+				"status":                   "deleted",
+				"provisioning_status":      "deleted",
+				"remote_access_status":     "revoked",
+				"remote_web_port":          nil,
+				"remote_winbox_port":       nil,
+				"remote_access_expires_at": nil,
+				"serial_number":            nil,
+				"claim_token":              deletedClaimToken(routerID),
+				"claim_token_expires_at":   nil,
+				"updated_at":               now,
+			}).Error
+	})
+	if err != nil {
+		return err
+	}
+
+	if s.runtimeWireGuardManager != nil {
+		if router.RemoteWinboxPort != nil {
+			if _, err := s.runtimeWireGuardManager.QueueRemoteAccessRemoval(router); err != nil {
+				log.Printf("router=%s delete remote access cleanup failed: %v", router.ID, err)
+			}
+		}
+		if _, err := s.runtimeWireGuardManager.QueuePeerRemoval(router); err != nil {
+			log.Printf("router=%s delete WireGuard cleanup failed: %v", router.ID, err)
+		}
+	}
+	log.Printf("router=%s delete completed actor=%s", router.ID, *userID)
+	return nil
 }
 
 type ConfigPreview struct {
@@ -277,11 +531,9 @@ func (s *Service) SaveRemoteAccess(
 	// Require a valid scoped user for ordinary accounts.
 	// Superadmin is permitted to have userID == nil.
 	if !isSuperadmin {
-		if userID == nil {
+		if userID == nil || *userID == uuid.Nil {
 			return RouterSetupSession{},
-				errors.New(
-					"authenticated user is required",
-				)
+				ErrAuthenticationRequired
 		}
 
 		if _, err := s.repo.FindForUser(
@@ -572,6 +824,86 @@ func randomToken() string {
 	return fmt.Sprintf("NOB-%s-%s", strings.ToUpper(hex.EncodeToString(left)), strings.ToUpper(hex.EncodeToString(right)))
 }
 
+func deleteConfirmationText(routerName string) string {
+	return strings.TrimSpace(routerName)
+}
+
+func deletedClaimToken(routerID uuid.UUID) string {
+	if routerID == uuid.Nil {
+		return "deleted-" + uuid.NewString()
+	}
+	return "deleted-" + routerID.String()
+}
+
+func (input DeleteRouterInput) deleteConfirmation() string {
+	for _, value := range []string{
+		input.RouterName,
+		input.TypedName,
+		input.Confirmation,
+		input.ConfirmationOne,
+		input.ConfirmationTwo,
+	} {
+		if value != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func remoteAccessMayNeedCleanup(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "active", "queued", "ready", "failed":
+		return true
+	default:
+		return false
+	}
+}
+
+func hashConfirmation(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func hostFromURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err == nil && parsed.Hostname() != "" {
+		return parsed.Hostname()
+	}
+	raw = strings.TrimPrefix(raw, "https://")
+	raw = strings.TrimPrefix(raw, "http://")
+	if before, _, ok := strings.Cut(raw, "/"); ok {
+		raw = before
+	}
+	if before, _, ok := strings.Cut(raw, ":"); ok {
+		raw = before
+	}
+	return strings.TrimSpace(raw)
+}
+
+func hostOnly(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if strings.Contains(value, "/") {
+		return strings.TrimSpace(strings.SplitN(value, "/", 2)[0])
+	}
+	if parsed, err := url.Parse(value); err == nil && parsed.Hostname() != "" {
+		return parsed.Hostname()
+	}
+	if strings.Contains(value, ":") && !strings.Contains(value, "::") {
+		host, _, found := strings.Cut(value, ":")
+		if found && host != "" {
+			return host
+		}
+	}
+	return strings.Trim(value, "[]")
+}
+
 func bootstrapScript(token, baseURL string) string {
 	baseURL = normalizeProvisioningBaseURL(baseURL)
 	fetchMode := provisioningFetchMode(baseURL)
@@ -629,33 +961,35 @@ func provisioningFetchMode(baseURL string) string {
 
 func renderOptions(cfg config.Config) portprofiles.RenderOptions {
 	return portprofiles.RenderOptions{
-		RadiusServer:        cfg.RadiusServer,
-		RadiusSecret:        cfg.RadiusSecret,
-		RouterIdentity:      cfg.RouterIdentityPrefix + "-Router",
-		APIUsername:         cfg.RouterAPIUsername,
-		APIPassword:         cfg.RouterAPIPassword,
-		HotspotBridge:       cfg.HotspotBridgeName,
-		StaffBridge:         cfg.StaffBridgeName,
-		POSBridge:           cfg.POSBridgeName,
-		CCTVBridge:          cfg.CCTVBridgeName,
-		HotspotSubnet:       cfg.HotspotSubnetCIDR,
-		HotspotGateway:      cfg.HotspotGatewayCIDR,
-		HotspotPool:         cfg.HotspotPoolRange,
-		StaffSubnet:         cfg.StaffSubnetCIDR,
-		StaffGateway:        cfg.StaffGatewayCIDR,
-		StaffPool:           cfg.StaffPoolRange,
-		POSSubnet:           cfg.POSSubnetCIDR,
-		POSGateway:          cfg.POSGatewayCIDR,
-		POSPool:             cfg.POSPoolRange,
-		CCTVSubnet:          cfg.CCTVSubnetCIDR,
-		CCTVGateway:         cfg.CCTVGatewayCIDR,
-		CCTVPool:            cfg.CCTVPoolRange,
-		HotspotDNSName:      cfg.HotspotDNSName,
-		HotspotPortalName:   cfg.HotspotPortalName,
-		WalledGardenHosts:   cfg.HotspotWalledGardenHosts,
-		DisableWWWService:   cfg.DisableWWWService,
-		EnableAPIService:    cfg.EnableAPIService,
-		EnableAPISSLService: cfg.EnableAPISSLService,
+		RadiusServer:              cfg.RadiusServer,
+		RadiusSecret:              cfg.RadiusSecret,
+		RouterIdentity:            cfg.RouterIdentityPrefix + "-Router",
+		APIUsername:               cfg.RouterAPIUsername,
+		APIPassword:               cfg.RouterAPIPassword,
+		HotspotBridge:             cfg.HotspotBridgeName,
+		StaffBridge:               cfg.StaffBridgeName,
+		POSBridge:                 cfg.POSBridgeName,
+		CCTVBridge:                cfg.CCTVBridgeName,
+		HotspotSubnet:             cfg.HotspotSubnetCIDR,
+		HotspotGateway:            cfg.HotspotGatewayCIDR,
+		HotspotPool:               cfg.HotspotPoolRange,
+		StaffSubnet:               cfg.StaffSubnetCIDR,
+		StaffGateway:              cfg.StaffGatewayCIDR,
+		StaffPool:                 cfg.StaffPoolRange,
+		POSSubnet:                 cfg.POSSubnetCIDR,
+		POSGateway:                cfg.POSGatewayCIDR,
+		POSPool:                   cfg.POSPoolRange,
+		CCTVSubnet:                cfg.CCTVSubnetCIDR,
+		CCTVGateway:               cfg.CCTVGatewayCIDR,
+		CCTVPool:                  cfg.CCTVPoolRange,
+		HotspotDNSName:            cfg.HotspotDNSName,
+		HotspotPortalName:         cfg.HotspotPortalName,
+		PublicSiteURL:             cfg.PublicSiteURL,
+		WireGuardManagementSubnet: strings.TrimSpace(cfg.WireGuardSubnetCIDR),
+		WalledGardenHosts:         cfg.HotspotWalledGardenHosts,
+		DisableWWWService:         cfg.DisableWWWService,
+		EnableAPIService:          cfg.EnableAPIService,
+		EnableAPISSLService:       cfg.EnableAPISSLService,
 	}
 }
 
@@ -670,6 +1004,9 @@ func (s *Service) renderOptionsForRouter(
 	}
 
 	options := profile.RenderOptions()
+	options.PublicSiteURL = s.cfg.PublicSiteURL
+	options.WireGuardManagementSubnet = strings.TrimSpace(s.cfg.WireGuardSubnetCIDR)
+	options.WalledGardenHosts = s.cfg.HotspotWalledGardenHosts
 	options = ensureNobliFiDHCPOptions(options, s.cfg)
 
 	if strings.TrimSpace(options.HotspotPortalName) == "" {
@@ -875,32 +1212,34 @@ func (s *Service) defaultNetworkProfile(routerID uuid.UUID, routerName string) R
 
 func (p RouterNetworkProfile) RenderOptions() portprofiles.RenderOptions {
 	return portprofiles.RenderOptions{
-		RadiusServer:        p.RadiusServer,
-		RadiusSecret:        p.RadiusSecret,
-		RouterIdentity:      p.RouterIdentity,
-		APIUsername:         p.APIUsername,
-		APIPassword:         p.APIPassword,
-		HotspotBridge:       p.HotspotBridge,
-		StaffBridge:         p.StaffBridge,
-		POSBridge:           p.POSBridge,
-		CCTVBridge:          p.CCTVBridge,
-		HotspotSubnet:       p.HotspotSubnet,
-		HotspotGateway:      p.HotspotGateway,
-		HotspotPool:         p.HotspotPool,
-		StaffSubnet:         p.StaffSubnet,
-		StaffGateway:        p.StaffGateway,
-		StaffPool:           p.StaffPool,
-		POSSubnet:           p.POSSubnet,
-		POSGateway:          p.POSGateway,
-		POSPool:             p.POSPool,
-		CCTVSubnet:          p.CCTVSubnet,
-		CCTVGateway:         p.CCTVGateway,
-		CCTVPool:            p.CCTVPool,
-		HotspotDNSName:      p.HotspotDNSName,
-		HotspotPortalName:   p.HotspotPortalName,
-		DisableWWWService:   p.DisableWWWService,
-		EnableAPIService:    p.EnableAPIService,
-		EnableAPISSLService: p.EnableAPISSLService,
+		RadiusServer:              p.RadiusServer,
+		RadiusSecret:              p.RadiusSecret,
+		RouterIdentity:            p.RouterIdentity,
+		APIUsername:               p.APIUsername,
+		APIPassword:               p.APIPassword,
+		HotspotBridge:             p.HotspotBridge,
+		StaffBridge:               p.StaffBridge,
+		POSBridge:                 p.POSBridge,
+		CCTVBridge:                p.CCTVBridge,
+		HotspotSubnet:             p.HotspotSubnet,
+		HotspotGateway:            p.HotspotGateway,
+		HotspotPool:               p.HotspotPool,
+		StaffSubnet:               p.StaffSubnet,
+		StaffGateway:              p.StaffGateway,
+		StaffPool:                 p.StaffPool,
+		POSSubnet:                 p.POSSubnet,
+		POSGateway:                p.POSGateway,
+		POSPool:                   p.POSPool,
+		CCTVSubnet:                p.CCTVSubnet,
+		CCTVGateway:               p.CCTVGateway,
+		CCTVPool:                  p.CCTVPool,
+		HotspotDNSName:            p.HotspotDNSName,
+		HotspotPortalName:         p.HotspotPortalName,
+		PublicSiteURL:             "",
+		WireGuardManagementSubnet: "",
+		DisableWWWService:         p.DisableWWWService,
+		EnableAPIService:          p.EnableAPIService,
+		EnableAPISSLService:       p.EnableAPISSLService,
 	}
 }
 
