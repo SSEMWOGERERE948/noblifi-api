@@ -909,16 +909,13 @@ func hotspotAutoConnectURL(token, baseURL string) string {
 // The original one-argument renderHotspotLoginPage remains below for
 // compatibility with existing tests. Runtime provisioning uses this function.
 // renderHotspotLoginPageWithAutoConnect is the RouterOS-served entry page.
-// It immediately asks NobliFi whether this MAC already owns a valid voucher.
+// It keeps voucher entry available immediately, then checks for a reusable
+// device-bound voucher after a short grace period.
 func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL, publicSiteURL string) string {
 	portalName = strings.TrimSpace(portalName)
 	if portalName == "" {
 		portalName = "NobliFi WiFi"
 	}
-
-	// authURL is intentionally kept in the signature for compatibility with the
-	// existing renderer call. The RouterOS entry page only needs autoURL here.
-	_ = authURL
 
 	return `<!doctype html>
 <html>
@@ -928,40 +925,43 @@ func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL, publicS
   <meta name="theme-color" content="#06111f">
   <title>` + html.EscapeString(portalName) + ` Login</title>
   <style>
-    :root{color-scheme:dark;--bg:#06111f;--panel:#0b1727;--line:#24384f;--text:#f8fbff;--muted:#9fb0c5;--brand:#7dd3fc;--accent:#34d399}
+    :root{color-scheme:dark;--bg:#06111f;--panel:#0b1727;--line:#24384f;--text:#f8fbff;--muted:#9fb0c5;--brand:#7dd3fc;--accent:#34d399;--warning:#fcd34d}
     *{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(145deg,#06111f 0%,#0b1727 52%,#102033 100%);color:var(--text)}
-    main{min-height:100vh;display:grid;place-items:center;padding:24px 16px}.card{width:min(420px,100%);border:1px solid var(--line);background:rgba(11,23,39,.94);border-radius:12px;padding:26px;text-align:center;box-shadow:0 18px 50px rgba(0,0,0,.32)}
+    main{min-height:100vh;display:grid;place-items:center;padding:24px 16px}.card{width:min(420px,100%);border:1px solid var(--line);background:rgba(11,23,39,.94);border-radius:12px;padding:26px;box-shadow:0 18px 50px rgba(0,0,0,.32)}
     .mark{width:48px;height:48px;display:grid;place-items:center;margin:0 auto 16px;border-radius:10px;background:var(--brand);color:#06111f;font-weight:900}.eyebrow{margin:0 0 7px;color:var(--brand);font-size:11px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}h1{margin:0;font-size:30px}p{color:var(--muted);line-height:1.5}
-    .pulse{width:42px;height:42px;margin:22px auto 0;border-radius:50%;border:4px solid rgba(52,211,153,.2);border-top-color:var(--accent);animation:spin .8s linear infinite}.powered{margin:18px 0 0;color:var(--muted);font-size:12px;text-align:center}.powered a{color:var(--brand);font-weight:800;text-decoration:none}.powered a:hover{text-decoration:underline}@keyframes spin{to{transform:rotate(360deg)}}
+    .center{text-align:center}.field-label{display:block;margin:22px 0 8px;font-weight:700}input{width:100%;border:1px solid var(--line);background:#07111d;color:var(--text);border-radius:9px;padding:13px;font-size:16px;outline:none}input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(125,211,252,.12)}button{width:100%;margin-top:16px;border:0;border-radius:9px;padding:13px;background:var(--brand);color:#06111f;font-weight:800;font-size:16px;cursor:pointer}.hint{margin:14px 0 0;font-size:13px;text-align:center}.notice{margin:18px 0 0;padding:12px 14px;border:1px solid rgba(252,211,77,.28);background:rgba(252,211,77,.08);border-radius:10px;color:#fde68a;font-size:13px;line-height:1.45;text-align:center}.notice strong{color:#fff}.powered{margin:18px 0 0;color:var(--muted);font-size:12px;text-align:center}.powered a{color:var(--brand);font-weight:800;text-decoration:none}.powered a:hover{text-decoration:underline}@media (max-width:420px){.card{padding:22px}h1{font-size:26px}}
   </style>
 </head>
 <body>
 <main><section class="card">
-  <div class="mark">NF</div>
-  <p class="eyebrow">WiFi Access</p>
-  <h1>` + html.EscapeString(portalName) + `</h1>
-  <p id="noblifi-status">Checking whether this device already has valid access…</p>
-  <div class="pulse" aria-hidden="true"></div>
+  <div class="center">
+    <div class="mark">NF</div>
+    <p class="eyebrow">WiFi Access</p>
+    <h1>` + html.EscapeString(portalName) + `</h1>
+    <p>Enter your voucher code to connect.</p>
+  </div>
+
+  <form id="noblifi-manual-login" action="` + html.EscapeString(strings.TrimSpace(authURL)) + `" method="post">
+    <input type="hidden" name="mac" value="$(mac)">
+    <input type="hidden" name="link_login" value="$(link-login-only)">
+    <input type="hidden" name="link_orig" value="$(link-orig)">
+    <label class="field-label" for="voucher_code">Voucher code</label>
+    <input id="voucher_code" name="voucher_code" autocomplete="one-time-code" placeholder="NF-XXXXXXXX" autofocus required>
+    <button type="submit">Connect</button>
+    <p class="hint">If this device still has a valid token, NobliFi will reconnect it automatically.</p>
+  </form>
+
+  <div id="noblifi-status" class="notice" role="status" aria-live="polite">Automatic token check will start in 30 seconds.</div>
   ` + poweredByNobliFiHTML(publicSiteURL) + `
 
-  <!--
-    This form goes from the LOCAL HTTP HotSpot page to NobliFi HTTPS.
-    That direction is safe and does not trigger Chrome's insecure-form warning.
-  -->
   <form id="noblifi-auto-connect" action="` + html.EscapeString(strings.TrimSpace(autoURL)) + `" method="post">
     <input type="hidden" name="mac" value="$(mac)">
     <input type="hidden" name="link_login" value="$(link-login-only)">
     <input type="hidden" name="link_orig" value="$(link-orig)">
     <input id="noblifi-force-manual" type="hidden" name="force_manual" value="">
-    <noscript><button type="submit">Continue</button></noscript>
+    <noscript><button type="submit">Check saved token</button></noscript>
   </form>
 
-  <!--
-    The external HTTPS backend NEVER posts directly back to this HTTP endpoint.
-    Instead it navigates back here using a URL fragment. The fragment is not
-    sent to the router. This local page then performs the final same-origin
-    HTTP POST to the MikroTik HotSpot login servlet.
-  -->
   <form id="noblifi-router-login" action="$(link-login-only)" method="post" style="display:none">
     <input id="noblifi-router-username" type="hidden" name="username" value="">
     <input id="noblifi-router-password" type="hidden" name="password" value="">
@@ -973,6 +973,8 @@ func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL, publicS
 <script>
 (function () {
   var alreadySubmitting = false;
+  var autoDelayMs = 30000;
+  var autoCancelled = false;
 
   function localRouterLoginFromFragment() {
     var raw = window.location.hash ? window.location.hash.substring(1) : "";
@@ -992,9 +994,6 @@ func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL, publicS
 
     var dst = params.get("dst") || "$(link-orig)";
 
-    // Clear the credential-bearing fragment BEFORE submitting. Fragments are
-    // not sent to the HTTP server, and clearing it prevents refresh/back from
-    // submitting the same bridge request repeatedly.
     try {
       window.history.replaceState(
         null,
@@ -1003,8 +1002,8 @@ func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL, publicS
       );
     } catch (_) {}
 
-    document.getElementById("noblifi-status").textContent =
-      "Access approved. Connecting…";
+    document.getElementById("noblifi-status").innerHTML =
+      "Found token <strong>" + voucher + "</strong>. Connecting...";
 
     document.getElementById("noblifi-router-username").value = voucher;
     document.getElementById("noblifi-router-password").value = voucher;
@@ -1015,7 +1014,7 @@ func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL, publicS
 
     window.setTimeout(function () {
       document.getElementById("noblifi-router-login").submit();
-    }, 40);
+    }, 2200);
 
     return true;
   }
@@ -1024,35 +1023,55 @@ func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL, publicS
     return;
   }
 
-  var query = "";
+  var manualForm = document.getElementById("noblifi-manual-login");
+  var voucherInput = document.getElementById("voucher_code");
+  var status = document.getElementById("noblifi-status");
+
+  function cancelAutoLookup(message) {
+    autoCancelled = true;
+    if (message && status) status.textContent = message;
+  }
+
+  if (manualForm) {
+    manualForm.addEventListener("submit", function () {
+      cancelAutoLookup("Checking your voucher...");
+    });
+  }
+
+  if (voucherInput) {
+    voucherInput.addEventListener("input", function () {
+      if (voucherInput.value.trim()) {
+        cancelAutoLookup("Use Connect to continue with this voucher.");
+      }
+    });
+  }
+
   try {
-    query = window.location.search || "";
-    var search = new URLSearchParams(query);
+    var search = new URLSearchParams(window.location.search || "");
     if (search.get("noblifi_manual") === "1") {
-      document.getElementById("noblifi-status").textContent =
-        "Loading voucher login...";
+      if (status) status.textContent = "Enter a voucher code to start a new session.";
       document.getElementById("noblifi-force-manual").value = "1";
+      autoCancelled = true;
     }
   } catch (_) {}
 
-  // Throttle rapid reloads so one browser cannot create a burst of identical
-  // voucher lookup requests. This does not disable reconnect; it only spaces
-  // repeated requests by roughly 1.5 seconds.
-  var delay = 120;
+  var delay = autoDelayMs;
   var storageKey = "noblifi-auto-last:$(mac)";
 
   try {
     var now = Date.now();
     var last = parseInt(window.sessionStorage.getItem(storageKey) || "0", 10);
-    var remaining = 1500 - (now - last);
+    var remaining = autoDelayMs - (now - last);
     if (remaining > delay) delay = remaining;
   } catch (_) {}
 
   window.setTimeout(function () {
+    if (autoCancelled) return;
     var form = document.getElementById("noblifi-auto-connect");
     if (!form || form.dataset.sent === "1") return;
 
     form.dataset.sent = "1";
+    if (status) status.textContent = "Looking for this device's saved token...";
 
     try {
       window.sessionStorage.setItem(storageKey, String(Date.now()));
@@ -1484,6 +1503,7 @@ func renderHotspotAutoLoginPage(
 	)
 
 	directLoginJSON, _ := json.Marshal(directLoginURL)
+	voucherCode = strings.ToUpper(strings.TrimSpace(voucherCode))
 
 	return `<!doctype html>
 <html>
@@ -1513,7 +1533,7 @@ func renderHotspotAutoLoginPage(
     <div class="mark">NF</div>
     <p class="eyebrow">Authorizing</p>
     <h1>` + html.EscapeString(portalName) + `</h1>
-    <p>Your voucher is valid. Connecting this device to the internet…</p>
+    <p>We found your token <strong>` + html.EscapeString(voucherCode) + `</strong>. Connecting this device to the internet...</p>
     <div class="pulse" aria-hidden="true"></div>
     ` + poweredByNobliFiHTML(publicSiteURL) + `
   </section>
@@ -1533,7 +1553,9 @@ func renderHotspotAutoLoginPage(
    *
    * No JavaScript on the RouterOS login.html page is required for this step.
    */
-  window.location.replace(` + string(directLoginJSON) + `);
+  window.setTimeout(function () {
+    window.location.replace(` + string(directLoginJSON) + `);
+  }, 2200);
 })();
 </script>
 </body>
