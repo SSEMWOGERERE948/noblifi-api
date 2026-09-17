@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/noblifi/noblifi/backend/internal/config"
+	"github.com/noblifi/noblifi/backend/internal/plans"
 	"github.com/noblifi/noblifi/backend/internal/portprofiles"
 	"github.com/noblifi/noblifi/backend/internal/radius"
 	"github.com/noblifi/noblifi/backend/internal/routers"
@@ -110,12 +111,40 @@ func (s *Service) HotspotLoginPage(token string) (string, error) {
 		s.cfg.ProvisioningBaseURL,
 	)
 
+	var portalPlans []plans.Plan
+	if items, err := s.activePortalPlans(router); err == nil {
+		portalPlans = items
+	} else {
+		log.Printf("provisioning: hotspot package list unavailable token=%q: %v", token, err)
+	}
+
 	return renderHotspotLoginPageWithAutoConnect(
 		options.HotspotPortalName,
 		authURL,
 		autoURL,
 		s.publicSiteURL(),
+		portalPlans,
+		s.portalThemeKey(router),
 	), nil
+}
+
+func (s *Service) portalThemeKey(router routers.Router) string {
+	if router.NetworkProfile != nil && isPortalTheme(router.NetworkProfile.HotspotTemplateKey) {
+		return strings.ToLower(strings.TrimSpace(router.NetworkProfile.HotspotTemplateKey))
+	}
+	if profile, err := s.repo.NetworkProfile(router.ID); err == nil && isPortalTheme(profile.HotspotTemplateKey) {
+		return strings.ToLower(strings.TrimSpace(profile.HotspotTemplateKey))
+	}
+	return "clean"
+}
+
+func isPortalTheme(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "clean", "fresh", "sunrise", "royal":
+		return true
+	default:
+		return false
+	}
 }
 
 type HotspotAuthenticateInput struct {
@@ -911,11 +940,13 @@ func hotspotAutoConnectURL(token, baseURL string) string {
 // renderHotspotLoginPageWithAutoConnect is the RouterOS-served entry page.
 // It keeps voucher entry available immediately, then checks for a reusable
 // device-bound voucher after a short grace period.
-func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL, publicSiteURL string) string {
+func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL, publicSiteURL string, items []plans.Plan, themeKey string) string {
 	portalName = strings.TrimSpace(portalName)
 	if portalName == "" {
 		portalName = "NobliFi WiFi"
 	}
+	packages := renderPortalPackagePreview(items)
+	theme := portalThemeCSS(themeKey)
 
 	return `<!doctype html>
 <html>
@@ -925,11 +956,11 @@ func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL, publicS
   <meta name="theme-color" content="#06111f">
   <title>` + html.EscapeString(portalName) + ` Login</title>
   <style>
-    :root{color-scheme:dark;--bg:#06111f;--panel:#0b1727;--line:#24384f;--text:#f8fbff;--muted:#9fb0c5;--brand:#7dd3fc;--accent:#34d399;--warning:#fcd34d}
-    *{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(145deg,#06111f 0%,#0b1727 52%,#102033 100%);color:var(--text)}
-    main{min-height:100vh;display:grid;place-items:center;padding:24px 16px}.card{width:min(420px,100%);border:1px solid var(--line);background:rgba(11,23,39,.94);border-radius:12px;padding:26px;box-shadow:0 18px 50px rgba(0,0,0,.32)}
+    :root{` + theme + `}
+    *{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--backdrop);color:var(--text)}
+    main{min-height:100vh;display:grid;place-items:center;padding:24px 16px}.card{width:min(520px,100%);border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:26px;box-shadow:0 18px 50px rgba(0,0,0,.22)}
     .mark{width:48px;height:48px;display:grid;place-items:center;margin:0 auto 16px;border-radius:10px;background:var(--brand);color:#06111f;font-weight:900}.eyebrow{margin:0 0 7px;color:var(--brand);font-size:11px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}h1{margin:0;font-size:30px}p{color:var(--muted);line-height:1.5}
-    .center{text-align:center}.field-label{display:block;margin:22px 0 8px;font-weight:700}input{width:100%;border:1px solid var(--line);background:#07111d;color:var(--text);border-radius:9px;padding:13px;font-size:16px;outline:none}input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(125,211,252,.12)}button{width:100%;margin-top:16px;border:0;border-radius:9px;padding:13px;background:var(--brand);color:#06111f;font-weight:800;font-size:16px;cursor:pointer}.hint{margin:14px 0 0;font-size:13px;text-align:center}.notice{margin:18px 0 0;padding:12px 14px;border:1px solid rgba(252,211,77,.28);background:rgba(252,211,77,.08);border-radius:10px;color:#fde68a;font-size:13px;line-height:1.45;text-align:center}.notice strong{color:#fff}.powered{margin:18px 0 0;color:var(--muted);font-size:12px;text-align:center}.powered a{color:var(--brand);font-weight:800;text-decoration:none}.powered a:hover{text-decoration:underline}@media (max-width:420px){.card{padding:22px}h1{font-size:26px}}
+    .center{text-align:center}.field-label{display:block;margin:22px 0 8px;font-weight:700}input{width:100%;border:1px solid var(--line);background:var(--field);color:var(--text);border-radius:9px;padding:13px;font-size:16px;outline:none}input:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--focus)}button{width:100%;margin-top:16px;border:0;border-radius:9px;padding:13px;background:var(--brand);color:var(--on-brand);font-weight:800;font-size:16px;cursor:pointer}.hint{margin:14px 0 0;font-size:13px;text-align:center}.notice{margin:18px 0 0;padding:12px 14px;border:1px solid var(--notice-line);background:var(--notice-bg);border-radius:10px;color:var(--warning);font-size:13px;line-height:1.45;text-align:center}.notice strong{color:var(--text)}.packages-title{margin:22px 0 10px;font-size:15px}.packages{display:grid;gap:10px}.package{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:13px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}.package strong{display:block}.meta{margin-top:5px;display:flex;flex-wrap:wrap;gap:6px 10px;color:var(--muted);font-size:12px}.price{font-weight:900;color:var(--text);white-space:nowrap}.empty{padding:13px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);text-align:center}.token-dialog{position:fixed;inset:0;z-index:10;display:none;place-items:center;padding:18px;background:rgba(2,8,16,.72)}.token-dialog.open{display:grid}.token-box{width:min(380px,100%);border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:22px;box-shadow:0 22px 70px rgba(0,0,0,.36);text-align:center}.token-code{margin:14px 0 8px;padding:12px;border-radius:9px;background:var(--field);border:1px solid var(--line);font-weight:900;letter-spacing:.08em}.token-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.secondary{background:var(--surface);color:var(--text);border:1px solid var(--line)}.countdown{color:var(--warning);font-weight:800}.powered{margin:18px 0 0;color:var(--muted);font-size:12px;text-align:center}.powered a{color:var(--brand);font-weight:800;text-decoration:none}.powered a:hover{text-decoration:underline}@media (max-width:420px){.card{padding:22px}h1{font-size:26px}.package,.token-actions{grid-template-columns:1fr}.price{text-align:left}}
   </style>
 </head>
 <body>
@@ -951,7 +982,11 @@ func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL, publicS
     <p class="hint">If this device still has a valid token, NobliFi will reconnect it automatically.</p>
   </form>
 
-  <div id="noblifi-status" class="notice" role="status" aria-live="polite">Automatic token check will start in 30 seconds.</div>
+  <div id="noblifi-status" class="notice" role="status" aria-live="polite">Automatic token check will start in 10 seconds.</div>
+
+  <h2 class="packages-title">Available packages</h2>
+  ` + packages + `
+
   ` + poweredByNobliFiHTML(publicSiteURL) + `
 
   <form id="noblifi-auto-connect" action="` + html.EscapeString(strings.TrimSpace(autoURL)) + `" method="post">
@@ -970,10 +1005,23 @@ func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL, publicS
   </form>
 </section></main>
 
+<div id="noblifi-token-dialog" class="token-dialog" role="dialog" aria-modal="true" aria-labelledby="noblifi-token-title">
+  <section class="token-box">
+    <p class="eyebrow">Token found</p>
+    <h2 id="noblifi-token-title">Reconnect this device?</h2>
+    <p>We found a valid saved token. Automatic connection starts in <span id="noblifi-connect-countdown" class="countdown">10</span> seconds.</p>
+    <div id="noblifi-found-token" class="token-code"></div>
+    <div class="token-actions">
+      <button id="noblifi-copy-token" class="secondary" type="button">Copy token</button>
+      <button id="noblifi-connect-now" type="button">Connect now</button>
+    </div>
+  </section>
+</div>
+
 <script>
 (function () {
   var alreadySubmitting = false;
-  var autoDelayMs = 30000;
+  var autoDelayMs = 10000;
   var autoCancelled = false;
 
   function localRouterLoginFromFragment() {
@@ -1002,19 +1050,15 @@ func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL, publicS
       );
     } catch (_) {}
 
-    document.getElementById("noblifi-status").innerHTML =
-      "Found token <strong>" + voucher + "</strong>. Connecting...";
-
     document.getElementById("noblifi-router-username").value = voucher;
     document.getElementById("noblifi-router-password").value = voucher;
     document.getElementById("noblifi-router-dst").value = dst;
 
     if (alreadySubmitting) return true;
-    alreadySubmitting = true;
-
-    window.setTimeout(function () {
+    showTokenDialog(voucher, function () {
+      alreadySubmitting = true;
       document.getElementById("noblifi-router-login").submit();
-    }, 2200);
+    });
 
     return true;
   }
@@ -1026,6 +1070,49 @@ func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL, publicS
   var manualForm = document.getElementById("noblifi-manual-login");
   var voucherInput = document.getElementById("voucher_code");
   var status = document.getElementById("noblifi-status");
+
+  function showTokenDialog(voucher, connect) {
+    var dialog = document.getElementById("noblifi-token-dialog");
+    var code = document.getElementById("noblifi-found-token");
+    var countdown = document.getElementById("noblifi-connect-countdown");
+    var copy = document.getElementById("noblifi-copy-token");
+    var now = document.getElementById("noblifi-connect-now");
+    var remaining = 10;
+
+    if (status) status.innerHTML = "Found token <strong>" + voucher + "</strong>.";
+    if (code) code.textContent = voucher;
+    if (countdown) countdown.textContent = String(remaining);
+    if (dialog) dialog.classList.add("open");
+
+    function connectOnce() {
+      if (alreadySubmitting) return;
+      alreadySubmitting = true;
+      connect();
+    }
+
+    if (copy) {
+      copy.addEventListener("click", function () {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(voucher).then(function () {
+            copy.textContent = "Copied";
+          }, function () {
+            copy.textContent = "Copy failed";
+          });
+        } else {
+          copy.textContent = "Select token";
+        }
+      });
+    }
+
+    if (now) now.addEventListener("click", connectOnce);
+
+    window.setInterval(function () {
+      remaining -= 1;
+      if (remaining < 0) remaining = 0;
+      if (countdown) countdown.textContent = String(remaining);
+      if (remaining === 0) connectOnce();
+    }, 1000);
+  }
 
   function cancelAutoLookup(message) {
     autoCancelled = true;
@@ -1083,6 +1170,50 @@ func renderHotspotLoginPageWithAutoConnect(portalName, authURL, autoURL, publicS
 </script>
 </body>
 </html>`
+}
+
+func renderPortalPackagePreview(items []plans.Plan) string {
+	if len(items) == 0 {
+		return `<div class="empty">No packages are available right now.</div>`
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="packages">`)
+	shown := 0
+	for _, p := range items {
+		if !p.IsActive {
+			continue
+		}
+		shown++
+		b.WriteString(`<article class="package"><div><strong>` +
+			html.EscapeString(p.Name) +
+			`</strong><div class="meta"><span>` +
+			html.EscapeString(portalPlanDuration(p.DurationMinutes)) +
+			`</span><span>` +
+			html.EscapeString(portalPlanSpeed(p.UploadSpeed, p.DownloadSpeed)) +
+			`</span><span>` +
+			html.EscapeString(portalPlanData(p.DataLimitMB)) +
+			`</span></div></div><div class="price">UGX ` +
+			formatPortalUGX(p.Price) +
+			`</div></article>`)
+	}
+	b.WriteString(`</div>`)
+	if shown == 0 {
+		return `<div class="empty">No packages are available right now.</div>`
+	}
+	return b.String()
+}
+
+func portalThemeCSS(key string) string {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "fresh":
+		return `color-scheme:light;--backdrop:linear-gradient(145deg,#e9f8f1,#f8fffc 55%,#dff4ed);--panel:#ffffff;--surface:#f0faf6;--field:#f8fffc;--line:#b9ded0;--text:#15352a;--muted:#58766c;--brand:#059669;--accent:#0891b2;--on-brand:#ffffff;--warning:#9a6700;--notice-bg:#fff8df;--notice-line:#ecd27a;--focus:rgba(5,150,105,.16)`
+	case "sunrise":
+		return `color-scheme:light;--backdrop:linear-gradient(145deg,#fff3df,#fffaf3 55%,#ffe7d3);--panel:#ffffff;--surface:#fff7ed;--field:#fffdf9;--line:#edc9aa;--text:#422416;--muted:#806052;--brand:#e05d2f;--accent:#d99b24;--on-brand:#ffffff;--warning:#9a5b00;--notice-bg:#fff5d8;--notice-line:#eccb72;--focus:rgba(224,93,47,.16)`
+	case "royal":
+		return `color-scheme:dark;--backdrop:linear-gradient(145deg,#0e0a17,#171022 55%,#25183a);--panel:#1e1730;--surface:#281f3d;--field:#151020;--line:#4b3b68;--text:#fffaff;--muted:#bdb0cf;--brand:#c4a7ff;--accent:#f0abfc;--on-brand:#160d25;--warning:#fde68a;--notice-bg:rgba(253,230,138,.08);--notice-line:rgba(253,230,138,.28);--focus:rgba(196,167,255,.18)`
+	default:
+		return `color-scheme:dark;--backdrop:linear-gradient(145deg,#06111f,#0b1727 52%,#102033);--panel:#0b1727;--surface:#081421;--field:#07111d;--line:#24384f;--text:#f8fbff;--muted:#9fb0c5;--brand:#7dd3fc;--accent:#34d399;--on-brand:#06111f;--warning:#fde68a;--notice-bg:rgba(253,230,138,.08);--notice-line:rgba(253,230,138,.28);--focus:rgba(125,211,252,.12)`
+	}
 }
 
 // renderHotspotManualLoginPage is returned when no active bound voucher can be reused.

@@ -23,7 +23,7 @@ type Router struct {
 	WireGuardPublicKey       *string                `json:"-"`
 	WireGuardStatus          string                 `gorm:"default:''" json:"wireguard_status"`
 	WireGuardPeerStatus      string                 `gorm:"default:waiting_for_router_key" json:"wire_guard_peer_status"`
-	WireGuardPeerUpdatedAt   *time.Time              `json:"wire_guard_peer_updated_at"`
+	WireGuardPeerUpdatedAt   *time.Time             `json:"wire_guard_peer_updated_at"`
 	WireGuardLastHandshakeAt *time.Time             `json:"wire_guard_last_handshake_at"`
 	WireGuardLastError       *string                `json:"wire_guard_last_error"`
 	ProvisioningStatus       string                 `gorm:"default:pending" json:"provisioning_status"`
@@ -49,7 +49,8 @@ type Router struct {
 	DeleteRequestedAt        *time.Time             `json:"delete_requested_at"`
 	DeletedAt                *time.Time             `gorm:"index" json:"deleted_at"`
 	RemoteWebPort            *int                   `json:"-"`
-	RemoteWinboxPort         *int                   `json:"-"`
+	RemoteWinboxPort         *int                   `json:"remote_winbox_port,omitempty"`
+	RemoteAccessHost         string                 `gorm:"-" json:"remote_access_host,omitempty"`
 	RemoteAccessStatus       string                 `gorm:"default:disabled" json:"remote_access_status"`
 	RemoteAccessExpiresAt    *time.Time             `json:"-"`
 	CreatedAt                time.Time              `json:"created_at"`
@@ -99,6 +100,7 @@ type RouterNetworkProfile struct {
 	CCTVPool            string    `json:"cctv_pool"`
 	HotspotDNSName      string    `json:"hotspot_dns_name"`
 	HotspotPortalName   string    `json:"hotspot_portal_name"`
+	HotspotTemplateKey  string    `gorm:"default:clean" json:"hotspot_template_key"`
 	WANMode             string    `gorm:"default:dhcp" json:"wan_mode"`
 	PPPoEUsername       *string   `json:"pppoe_username"`
 	PPPoEPassword       *string   `json:"pppoe_password"`

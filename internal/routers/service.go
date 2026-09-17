@@ -113,6 +113,9 @@ func (s *Service) List(userID *uuid.UUID, isSuperadmin bool) ([]Router, error) {
 		return nil, err
 	}
 	HydrateHealthStatuses(records, time.Now().UTC())
+	for i := range records {
+		records[i].RemoteAccessHost = strings.TrimSpace(s.cfg.RemoteAccessHost)
+	}
 	return records, nil
 }
 
@@ -133,6 +136,7 @@ func (s *Service) Find(id uuid.UUID, userID *uuid.UUID, isSuperadmin bool) (Rout
 		return Router{}, err
 	}
 	HydrateHealthStatus(&router, time.Now().UTC())
+	router.RemoteAccessHost = strings.TrimSpace(s.cfg.RemoteAccessHost)
 	return router, nil
 }
 
@@ -353,12 +357,17 @@ func (s *Service) EnableWinBoxAccess(routerID uuid.UUID, userID *uuid.UUID, isSu
 	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
 		return WinBoxAccessResponse{}, errors.New("router WireGuard tunnel IP is required for WinBox access")
 	}
+	remoteHost := strings.TrimSpace(s.cfg.RemoteAccessHost)
+	if remoteHost == "" {
+		return WinBoxAccessResponse{}, errors.New("NOBLIFI_REMOTE_ACCESS_HOST is not configured")
+	}
 
 	routerIP := hostOnly(strings.TrimSpace(*router.WireGuardTunnelIP))
 	if routerIP == "" {
 		return WinBoxAccessResponse{}, errors.New("router WireGuard tunnel IP is required for WinBox access")
 	}
 	now := time.Now().UTC()
+	remotePort := 0
 	err = s.repo.db.Transaction(func(tx *gorm.DB) error {
 		var locked Router
 		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -367,12 +376,17 @@ func (s *Service) EnableWinBoxAccess(routerID uuid.UUID, userID *uuid.UUID, isSu
 		if query.Error != nil {
 			return query.Error
 		}
+		allocatedPort, allocErr := allocateRemoteWinboxPort(tx, s.cfg.RemoteWinboxPortBase, locked.RemoteWinboxPort)
+		if allocErr != nil {
+			return allocErr
+		}
+		remotePort = allocatedPort
 		return tx.Model(&Router{}).
 			Where("id = ?", routerID).
 			Updates(map[string]any{
-				"remote_access_status":     "active",
+				"remote_access_status":     "queued",
 				"remote_web_port":          nil,
-				"remote_winbox_port":       nil,
+				"remote_winbox_port":       remotePort,
 				"remote_access_expires_at": nil,
 				"updated_at":               now,
 			}).Error
@@ -381,9 +395,9 @@ func (s *Service) EnableWinBoxAccess(routerID uuid.UUID, userID *uuid.UUID, isSu
 		return WinBoxAccessResponse{}, err
 	}
 
-	router.RemoteWinboxPort = nil
+	router.RemoteWinboxPort = &remotePort
 	router.RemoteWebPort = nil
-	router.RemoteAccessStatus = "active"
+	router.RemoteAccessStatus = "queued"
 	router.RemoteAccessExpiresAt = nil
 	if s.runtimeWireGuardManager != nil {
 		if _, err := s.runtimeWireGuardManager.QueueRemoteAccess(router); err != nil {
@@ -391,8 +405,28 @@ func (s *Service) EnableWinBoxAccess(routerID uuid.UUID, userID *uuid.UUID, isSu
 			return WinBoxAccessResponse{}, err
 		}
 	}
-	log.Printf("router=%s winbox access enabled via WireGuard host=%s port=8291", routerID, routerIP)
-	return WinBoxAccessResponse{Status: "active", Host: routerIP, Port: 8291, VPNRequired: true}, nil
+	log.Printf("router=%s winbox relay queued host=%s public_port=%d target=%s:8291", routerID, remoteHost, remotePort, routerIP)
+	return WinBoxAccessResponse{Status: "queued", Host: remoteHost, Port: remotePort, VPNRequired: false}, nil
+}
+
+func allocateRemoteWinboxPort(tx *gorm.DB, configuredBase int, current *int) (int, error) {
+	if current != nil && *current > 0 && *current <= 65535 {
+		return *current, nil
+	}
+	base := configuredBase
+	if base < 1024 || base > 64535 {
+		base = 22000
+	}
+	for port := base; port < base+1000 && port <= 65535; port++ {
+		var count int64
+		if err := tx.Model(&Router{}).Where("remote_winbox_port = ? AND deleted_at IS NULL", port).Count(&count).Error; err != nil {
+			return 0, err
+		}
+		if count == 0 {
+			return port, nil
+		}
+	}
+	return 0, errors.New("no remote WinBox ports are available")
 }
 
 func (s *Service) DisableRemoteAccess(routerID uuid.UUID, userID *uuid.UUID, isSuperadmin bool) error {
@@ -1203,6 +1237,7 @@ func (s *Service) defaultNetworkProfile(routerID uuid.UUID, routerName string) R
 		CCTVPool:            s.cfg.CCTVPoolRange,
 		HotspotDNSName:      s.cfg.HotspotDNSName,
 		HotspotPortalName:   s.cfg.HotspotPortalName,
+		HotspotTemplateKey:  "clean",
 		WANMode:             "dhcp",
 		DisableWWWService:   s.cfg.DisableWWWService,
 		EnableAPIService:    s.cfg.EnableAPIService,
@@ -1316,6 +1351,9 @@ func mergeNetworkProfile(profile *RouterNetworkProfile, input RouterNetworkProfi
 	if input.HotspotPortalName != "" {
 		profile.HotspotPortalName = input.HotspotPortalName
 	}
+	if isValidHotspotTemplate(input.HotspotTemplateKey) {
+		profile.HotspotTemplateKey = strings.ToLower(strings.TrimSpace(input.HotspotTemplateKey))
+	}
 	if input.WANMode != "" {
 		profile.WANMode = input.WANMode
 	}
@@ -1328,6 +1366,15 @@ func mergeNetworkProfile(profile *RouterNetworkProfile, input RouterNetworkProfi
 	profile.DisableWWWService = input.DisableWWWService
 	profile.EnableAPIService = input.EnableAPIService
 	profile.EnableAPISSLService = input.EnableAPISSLService
+}
+
+func isValidHotspotTemplate(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "clean", "fresh", "sunrise", "royal":
+		return true
+	default:
+		return false
+	}
 }
 
 func tenantHotspotDNSName(hotspotName string) string {

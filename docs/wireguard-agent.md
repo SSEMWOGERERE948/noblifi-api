@@ -34,6 +34,7 @@ NOBLIFI_REMOTE_WEB_PORT_BASE=21000
 NOBLIFI_REMOTE_WINBOX_PORT_BASE=22000
 NOBLIFI_AGENT_TOKEN=<long-random-secret>
 NOBLIFI_AGENT_ID=noblifi-agent-01
+NOBLIFI_REMOTE_ACCESS_SOURCE_CIDR=<trusted-admin-public-ip>/32
 ```
 
 ## Agent Installation
@@ -127,18 +128,19 @@ Apply `migrations/002_wireguard_control_plane.sql` to production, or run the Go 
 
 ## Remote Access URLs
 
-When VPN remote access is enabled for a router, the backend assigns public
-ports from `NOBLIFI_REMOTE_WEB_PORT_BASE` and `NOBLIFI_REMOTE_WINBOX_PORT_BASE`.
-The VPS agent listens on those ports and forwards traffic through WireGuard to
-the router:
+When remote WinBox is enabled for a router, the backend assigns a public port
+from `NOBLIFI_REMOTE_WINBOX_PORT_BASE`. The VPS agent listens on that port and
+forwards traffic through WireGuard to the router:
 
 ```text
-http://<NOBLIFI_REMOTE_ACCESS_HOST>:<remote_web_port>/webfig/
 <NOBLIFI_REMOTE_ACCESS_HOST>:<remote_winbox_port>
 ```
 
 Only the VPS agent needs public listener ports. The MikroTik stays reachable
-through its private WireGuard tunnel IP.
+through its private WireGuard tunnel IP. Allow the configured 1,000-port TCP
+range (22000-22999 by default) in the VPS provider firewall only from trusted
+administrator public IPs. Set `NOBLIFI_REMOTE_ACCESS_SOURCE_CIDR` on the agent
+to enforce the same source restriction in the relay itself.
 
 ## Troubleshooting
 

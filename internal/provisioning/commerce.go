@@ -106,15 +106,16 @@ func (s *Service) renderHotspotManualCommercePage(router routers.Router, token, 
 	return renderHotspotCommercePage(portalName, authURL,
 		normalizeProvisioningBaseURL(s.cfg.ProvisioningBaseURL)+"/hotspot-buy/"+strings.TrimSpace(token),
 		normalizeProvisioningBaseURL(s.cfg.ProvisioningBaseURL)+"/hotspot-buy/"+strings.TrimSpace(token)+"/",
-		deviceMAC, linkLogin, linkOrig, message, items, s.hotspotPayments != nil, s.publicSiteURL()), nil
+		deviceMAC, linkLogin, linkOrig, message, items, s.hotspotPayments != nil, s.publicSiteURL(), s.portalThemeKey(router)), nil
 }
 
-func renderHotspotCommercePage(portalName, authURL, buyURL, statusBase, deviceMAC, linkLogin, linkOrig, message string, items []plans.Plan, paymentsEnabled bool, publicSiteURL string) string {
+func renderHotspotCommercePage(portalName, authURL, buyURL, statusBase, deviceMAC, linkLogin, linkOrig, message string, items []plans.Plan, paymentsEnabled bool, publicSiteURL, themeKey string) string {
 	if strings.TrimSpace(portalName) == "" {
 		portalName = "NobliFi WiFi"
 	}
 
 	packages := renderPortalPackageCards(items, paymentsEnabled)
+	theme := portalThemeCSS(themeKey)
 
 	notice := ""
 	if strings.TrimSpace(message) != "" {
@@ -136,9 +137,9 @@ func renderHotspotCommercePage(portalName, authURL, buyURL, statusBase, deviceMA
 <meta name="theme-color" content="#06111f">
 <title>` + html.EscapeString(portalName) + ` Login</title>
 <style>
-:root{color-scheme:dark;--bg:#06111f;--panel:#0b1727;--line:#24384f;--text:#f8fbff;--muted:#9fb0c5;--brand:#7dd3fc;--accent:#34d399;--warn:#fde68a}
+:root{` + theme + `;--warn:var(--warning)}
 *{box-sizing:border-box}
-body{margin:0;font-family:Arial,Helvetica,sans-serif;background:linear-gradient(145deg,#06111f 0%,#0b1727 52%,#102033 100%);color:var(--text)}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--backdrop);color:var(--text)}
 main{min-height:100vh;padding:24px 16px 40px}
 .shell{width:min(980px,100%);margin:0 auto}
 .hero{text-align:center;margin:18px 0 22px}
@@ -147,10 +148,10 @@ main{min-height:100vh;padding:24px 16px 40px}
 h1{margin:0;font-size:32px}
 .sub{color:var(--muted);margin:9px auto 0;max-width:620px;line-height:1.5}
 .grid{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.35fr);gap:18px;align-items:start}
-.panel{border:1px solid var(--line);background:rgba(11,23,39,.94);border-radius:14px;padding:22px;box-shadow:0 18px 50px rgba(0,0,0,.24)}
+.panel{border:1px solid var(--line);background:var(--panel);border-radius:14px;padding:22px;box-shadow:0 18px 50px rgba(0,0,0,.18)}
 h2{margin:0 0 8px;font-size:19px}
 label{display:block;margin:18px 0 8px;font-weight:700;font-size:14px}
-input{width:100%;border:1px solid var(--line);background:#07111d;color:var(--text);border-radius:9px;padding:13px;font-size:16px}
+input{width:100%;border:1px solid var(--line);background:var(--field);color:var(--text);border-radius:9px;padding:13px;font-size:16px}
 button{border:0;border-radius:9px;padding:12px 14px;font-weight:800;cursor:pointer}
 button:disabled{opacity:.55;cursor:not-allowed}
 .primary{width:100%;margin-top:14px;background:var(--brand);color:#06111f}
@@ -158,7 +159,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
 .hint{color:var(--muted);font-size:12px;line-height:1.45;margin:12px 0 0}
 .notice{margin:14px 0;padding:11px 13px;border:1px solid rgba(253,230,138,.25);background:rgba(253,230,138,.07);border-radius:10px;color:var(--warn);font-size:13px}
 .packages{display:grid;gap:11px;margin-top:16px}
-.package{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:center;padding:15px;border:1px solid var(--line);border-radius:11px;background:#081421}
+.package{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:center;padding:15px;border:1px solid var(--line);border-radius:11px;background:var(--surface)}
 .package strong{display:block}
 .meta{margin-top:5px;display:flex;flex-wrap:wrap;gap:6px 12px;color:var(--muted);font-size:12px}
 .price{margin-top:8px;font-weight:900}
@@ -166,6 +167,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
 .purchase{display:none;margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}
 .purchase.open{display:block}
 .payment-message{min-height:18px;margin-top:12px;color:var(--muted);font-size:13px}
+.providers{display:flex;gap:10px;margin:14px 0 2px}.provider{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--surface);font-size:12px;font-weight:800}.provider-icon{width:30px;height:30px;display:grid;place-items:center;border-radius:7px;font-size:10px;font-weight:900}.mtn{background:#ffcb05;color:#111}.airtel{background:#ed1c24;color:#fff}.loading-overlay{position:fixed;inset:0;z-index:20;display:none;place-items:center;padding:20px;background:rgba(2,8,16,.76);backdrop-filter:blur(4px)}.loading-overlay.open{display:grid}.loading-box{width:min(360px,100%);padding:26px;border:1px solid var(--line);border-radius:12px;background:var(--panel);text-align:center;box-shadow:0 24px 70px rgba(0,0,0,.35)}.spinner{width:44px;height:44px;margin:0 auto 16px;border:4px solid var(--line);border-top-color:var(--brand);border-radius:50%;animation:spin .8s linear infinite}.loading-box strong{display:block;font-size:18px}.loading-box p{margin:8px 0 0;color:var(--muted);font-size:13px;line-height:1.5}@keyframes spin{to{transform:rotate(360deg)}}
 .secure,.powered{text-align:center;color:var(--muted);font-size:12px;margin-top:20px}.powered a{color:var(--brand);font-weight:800;text-decoration:none}.powered a:hover{text-decoration:underline}
 @media(max-width:760px){.grid{grid-template-columns:1fr}.package{grid-template-columns:1fr}.buy{width:100%}}
 </style>
@@ -204,6 +206,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
 <form id="purchase-form">
 <label for="buyer-phone">Mobile money phone</label>
 <input id="buyer-phone" inputmode="tel" autocomplete="tel" placeholder="2567XXXXXXXX" required>
+<div class="providers" aria-label="Supported mobile money networks"><span class="provider"><span class="provider-icon mtn">MTN</span>MoMo</span><span class="provider"><span class="provider-icon airtel">airtel</span>Money</span></div>
 <label for="buyer-email">Email (optional)</label>
 <input id="buyer-email" type="email" autocomplete="email">
 <button class="primary" id="pay-button" type="submit">Pay and connect</button>
@@ -216,6 +219,10 @@ button:disabled{opacity:.55;cursor:not-allowed}
 ` + poweredByNobliFiHTML(publicSiteURL) + `
 </div>
 </main>
+
+<div id="payment-loading" class="loading-overlay" role="status" aria-live="polite" aria-modal="true">
+  <div class="loading-box"><div class="spinner"></div><strong id="loading-title">Starting payment</strong><p id="loading-detail">Keep this page open while we contact your mobile money network.</p></div>
+</div>
 
 <script>
 (function () {
@@ -279,6 +286,13 @@ button:disabled{opacity:.55;cursor:not-allowed}
   function msg(value) {
     document.getElementById("payment-message").textContent =
       value || "";
+  }
+
+  function loading(show, title, detail) {
+    var overlay = document.getElementById("payment-loading");
+    document.getElementById("loading-title").textContent = title || "Processing payment";
+    document.getElementById("loading-detail").textContent = detail || "Please keep this page open.";
+    overlay.classList.toggle("open", !!show);
   }
 
   function enabled(value, label) {
@@ -349,12 +363,14 @@ button:disabled{opacity:.55;cursor:not-allowed}
         if (generation !== pollGeneration) return;
 
         if (result.status === "paid" && result.voucher) {
+          loading(true, "Payment confirmed", "Connecting your device to WiFi...");
           msg("Payment confirmed. Connecting...");
           login(result.voucher);
           return;
         }
 
         if (result.status === "failed") {
+          loading(false);
           stopPolling();
           enabled(true, "Try payment again");
           msg(result.raw_status || "Payment failed.");
@@ -362,6 +378,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
         }
 
         if (remaining <= 0) {
+          loading(false);
           stopPolling();
           enabled(true, "Check / pay again");
           msg(
@@ -395,6 +412,8 @@ button:disabled{opacity:.55;cursor:not-allowed}
           error.message ||
           "Checking payment again..."
         );
+
+        loading(true, "Verifying payment", "Approve the prompt on your phone. We will connect you automatically.");
 
         schedulePoll(
           id,
@@ -504,6 +523,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
         }
 
         stopPolling();
+        loading(true, "Starting payment", "Contacting your mobile money network...");
         enabled(
           false,
           "Starting payment..."
@@ -546,6 +566,8 @@ button:disabled{opacity:.55;cursor:not-allowed}
               "Approve the mobile money prompt. NobliFi will connect automatically."
             );
 
+            loading(true, "Approve on your phone", "Waiting for MTN MoMo or Airtel Money confirmation...");
+
             startPolling(
               order.transaction_id ||
               order.order_tracking_id
@@ -553,6 +575,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
           })
           .catch(
             function (error) {
+              loading(false);
               enabled(
                 true,
                 "Try payment again"

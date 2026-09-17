@@ -39,6 +39,7 @@ type wireGuardWorker struct {
 	cfg    config
 	client *http.Client
 	runner commandRunner
+	remote *remoteForwarderRegistry
 }
 
 type wireGuardJob struct {
@@ -63,12 +64,17 @@ type desiredRouterConfig struct {
 type remoteAccessConfig struct {
 	RouterID    string `json:"router_id"`
 	RouterIP    string `json:"router_ip"`
-	WinboxPort  int    `json:"winbox_port"`
+	PublicPort  int    `json:"public_port"`
+	TargetPort  int    `json:"target_port"`
 	VPNRequired bool   `json:"vpn_required"`
 }
 
 func runWireGuardWorker(ctx context.Context, client *http.Client, cfg config) {
-	worker := wireGuardWorker{cfg: cfg, client: client, runner: execRunner{}}
+	worker := wireGuardWorker{cfg: cfg, client: client, runner: execRunner{}, remote: newRemoteForwarderRegistry(cfg.RemoteAccessSourceCIDR)}
+	defer worker.remote.Close()
+	if err := worker.reconcileRemoteAccess(ctx); err != nil {
+		log.Printf("remote access reconciliation failed: %v", err)
+	}
 	if err := worker.heartbeat(ctx, true); err != nil {
 		log.Printf("wireguard heartbeat failed: %v", err)
 	}
@@ -81,6 +87,9 @@ func runWireGuardWorker(ctx context.Context, client *http.Client, cfg config) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if err := worker.reconcileRemoteAccess(ctx); err != nil {
+				log.Printf("remote access reconciliation failed: %v", err)
+			}
 			if err := worker.runOnce(ctx); err != nil {
 				log.Printf("wireguard poll failed: %v", err)
 			}
@@ -312,16 +321,46 @@ func (w wireGuardWorker) upsertRemoteAccess(ctx context.Context, job wireGuardJo
 	if routerIP == "" {
 		return errors.New("remote access config has no router_ip")
 	}
-	if cfg.WinboxPort <= 0 {
-		return errors.New("remote access config has no winbox_port")
+	if cfg.PublicPort <= 0 {
+		return errors.New("remote access config has no public_port")
 	}
-	log.Printf("remote WinBox access active through WireGuard router_id=%s router_ip=%s port=%d", job.RouterID, routerIP, cfg.WinboxPort)
+	if cfg.TargetPort <= 0 {
+		cfg.TargetPort = 8291
+	}
+	if err := w.remote.Upsert(cfg.PublicPort, net.JoinHostPort(routerIP, strconv.Itoa(cfg.TargetPort))); err != nil {
+		return fmt.Errorf("start WinBox forwarder: %w", err)
+	}
+	log.Printf("remote WinBox relay active router_id=%s listen_port=%d target=%s:%d", job.RouterID, cfg.PublicPort, routerIP, cfg.TargetPort)
 	return w.post(ctx, "/internal/routers/"+job.RouterID+"/remote-access-ready", nil, nil)
 }
 
 func (w wireGuardWorker) removeRemoteAccess(ctx context.Context, job wireGuardJob) error {
-	log.Printf("remote WinBox access revoked router_id=%s; WireGuard-only access has no public forwarding rule to remove", job.RouterID)
+	port, err := strconv.Atoi(strings.TrimSpace(job.PublicKey))
+	if err == nil && port > 0 {
+		w.remote.Remove(port)
+	}
+	log.Printf("remote WinBox relay revoked router_id=%s public_port=%d", job.RouterID, port)
 	return nil
+}
+
+func (w wireGuardWorker) reconcileRemoteAccess(ctx context.Context) error {
+	var response struct {
+		Targets []remoteAccessConfig `json:"targets"`
+	}
+	if err := w.get(ctx, "/internal/routers/remote-access-targets", &response); err != nil {
+		return err
+	}
+	desired := make(map[int]string, len(response.Targets))
+	for _, target := range response.Targets {
+		if target.PublicPort <= 0 || strings.TrimSpace(target.RouterIP) == "" {
+			continue
+		}
+		if target.TargetPort <= 0 {
+			target.TargetPort = 8291
+		}
+		desired[target.PublicPort] = net.JoinHostPort(strings.TrimSpace(target.RouterIP), strconv.Itoa(target.TargetPort))
+	}
+	return w.remote.Reconcile(desired)
 }
 
 func applyRouterOSScript(conn *mikrotik.Conn, name, source string) error {

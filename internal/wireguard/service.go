@@ -29,7 +29,8 @@ type Service struct {
 type RemoteAccessConfig struct {
 	RouterID    uuid.UUID `json:"router_id"`
 	RouterIP    string    `json:"router_ip"`
-	WinboxPort  int       `json:"winbox_port"`
+	PublicPort  int       `json:"public_port"`
+	TargetPort  int       `json:"target_port"`
 	VPNRequired bool      `json:"vpn_required"`
 }
 
@@ -37,7 +38,8 @@ type RemoteAccessTarget struct {
 	RouterID    uuid.UUID `json:"router_id"`
 	Name        string    `json:"name"`
 	RouterIP    string    `json:"router_ip"`
-	WinboxPort  int       `json:"winbox_port"`
+	PublicPort  int       `json:"public_port"`
+	TargetPort  int       `json:"target_port"`
 	VPNRequired bool      `json:"vpn_required"`
 }
 
@@ -162,11 +164,15 @@ func (s *Service) DesiredRemoteAccess(routerID uuid.UUID) (RemoteAccessConfig, e
 	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
 		return RemoteAccessConfig{}, errors.New("router WireGuard tunnel IP is missing")
 	}
+	if router.RemoteWinboxPort == nil || *router.RemoteWinboxPort <= 0 {
+		return RemoteAccessConfig{}, errors.New("router remote WinBox port is missing")
+	}
 	cfg := RemoteAccessConfig{
 		RouterID:    router.ID,
 		RouterIP:    hostOnly(strings.TrimSpace(*router.WireGuardTunnelIP)),
-		WinboxPort:  8291,
-		VPNRequired: true,
+		PublicPort:  *router.RemoteWinboxPort,
+		TargetPort:  8291,
+		VPNRequired: false,
 	}
 	return cfg, nil
 }
@@ -192,9 +198,13 @@ func (s *Service) RemoteAccessTargets() ([]RemoteAccessTarget, error) {
 			RouterID:    router.ID,
 			Name:        router.Name,
 			RouterIP:    routerIP,
-			WinboxPort:  8291,
-			VPNRequired: true,
+			TargetPort:  8291,
+			VPNRequired: false,
 		}
+		if router.RemoteWinboxPort == nil || *router.RemoteWinboxPort <= 0 {
+			continue
+		}
+		target.PublicPort = *router.RemoteWinboxPort
 		targets = append(targets, target)
 	}
 	return targets, nil

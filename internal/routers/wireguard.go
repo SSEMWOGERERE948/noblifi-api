@@ -328,6 +328,7 @@ func RenderWireGuardRouterOS(router Router, cfg config.Config) string {
 :do { /user remove [find where name="%s" comment="NobliFi API management user"] } on-error={}
 :do { /user add name="%s" group=full password="%s" comment="NobliFi API management user" } on-error={ :error "NobliFi failed to create API management user" }
 :do { /ip service set api disabled=no address="%s/32" } on-error={ :error "NobliFi failed to enable restricted RouterOS API" }
+:do { /ip service set winbox disabled=no address="%s/32" port=8291 } on-error={ :error "NobliFi failed to enable restricted WinBox access" }
 
 :local routerPublicKey [/interface wireguard get $wgInterface public-key]
 :put ("NobliFi WireGuard public key: " . $routerPublicKey)
@@ -403,6 +404,7 @@ func RenderWireGuardRouterOS(router Router, cfg config.Config) string {
 		routerOSQuotedString(cfg.RouterAPIUsername),
 		routerOSQuotedString(cfg.RouterAPIUsername),
 		routerOSQuotedString(cfg.RouterAPIPassword),
+		serverIP,
 		serverIP,
 		callbackURL,
 		fetchMode,

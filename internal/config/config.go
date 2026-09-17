@@ -40,6 +40,8 @@ type Config struct {
 	WireGuardPort            int
 	WireGuardSubnetCIDR      string
 	WireGuardKeepalive       int
+	RemoteAccessHost         string
+	RemoteWinboxPortBase     int
 	HotspotBridgeName        string
 	StaffBridgeName          string
 	POSBridgeName            string
@@ -148,6 +150,14 @@ func LoadWithContext(ctx context.Context) (Config, error) {
 		WireGuardKeepalive: getIntEnv(
 			"NOBLIFI_WIREGUARD_KEEPALIVE",
 			25,
+		),
+		RemoteAccessHost: getEnv(
+			"NOBLIFI_REMOTE_ACCESS_HOST",
+			"",
+		),
+		RemoteWinboxPortBase: getIntEnv(
+			"NOBLIFI_REMOTE_WINBOX_PORT_BASE",
+			22000,
 		),
 
 		HotspotBridgeName: getEnv(
