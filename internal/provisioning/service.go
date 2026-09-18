@@ -43,6 +43,10 @@ type VoucherDeviceBinder interface {
 	BindVoucherToDevice(code, deviceMAC string) (vouchers.Voucher, error)
 }
 
+type TenantVoucherDeviceBinder interface {
+	BindVoucherToDeviceForUser(code, deviceMAC, userID string) (vouchers.Voucher, error)
+}
+
 // VoucherAutoConnector resolves an already-active voucher bound to a client MAC.
 type VoucherAutoConnector interface {
 	ValidVoucherForDevice(deviceMAC string) (string, bool, error)
@@ -322,7 +326,10 @@ func (s *Service) HotspotAuthenticate(
 	}
 
 	allowed := false
-	if binder, ok := s.radius.(VoucherDeviceBinder); ok {
+	if scopedBinder, ok := s.radius.(TenantVoucherDeviceBinder); ok && router.UserID != nil && *router.UserID != uuid.Nil {
+		_, err = scopedBinder.BindVoucherToDeviceForUser(voucherCode, deviceMAC, router.UserID.String())
+		allowed = err == nil
+	} else if binder, ok := s.radius.(VoucherDeviceBinder); ok {
 		_, err = binder.BindVoucherToDevice(voucherCode, deviceMAC)
 		allowed = err == nil
 	} else {
@@ -1635,6 +1642,7 @@ func renderHotspotAutoLoginPage(
 
 	directLoginJSON, _ := json.Marshal(directLoginURL)
 	voucherCode = strings.ToUpper(strings.TrimSpace(voucherCode))
+	voucherJSON, _ := json.Marshal(voucherCode)
 
 	return `<!doctype html>
 <html>
@@ -1642,7 +1650,7 @@ func renderHotspotAutoLoginPage(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#06111f">
-  <title>Connecting · ` + html.EscapeString(portalName) + `</title>
+  <title>Voucher found - ` + html.EscapeString(portalName) + `</title>
   <style>
     :root{color-scheme:dark;--bg:#06111f;--panel:#0b1727;--line:#24384f;--text:#f8fbff;--muted:#9fb0c5;--brand:#7dd3fc;--accent:#34d399}
     *{box-sizing:border-box}
@@ -1653,40 +1661,82 @@ func renderHotspotAutoLoginPage(
     .eyebrow{margin:0 0 7px;color:var(--brand);font-size:11px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}
     h1{margin:0;font-size:30px}
     p{color:var(--muted);line-height:1.5}
-    .pulse{width:42px;height:42px;margin:22px auto 0;border-radius:50%;border:4px solid rgba(52,211,153,.2);border-top-color:var(--accent);animation:spin .8s linear infinite}
+    .voucher{margin:18px 0 10px;padding:13px;border:1px solid var(--line);border-radius:9px;background:#07111d;font-size:21px;font-weight:900;letter-spacing:.08em;word-break:break-all}
+    .countdown{color:var(--accent);font-weight:900;font-variant-numeric:tabular-nums}.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}button{border:0;border-radius:9px;padding:13px;font-size:14px;font-weight:800;cursor:pointer}.copy{border:1px solid var(--line);background:#14243a;color:var(--text)}.connect{background:var(--brand);color:#06111f}.manual{min-height:20px;margin:13px 0 0;color:var(--accent);font-size:13px}
     .powered{margin:18px 0 0;color:var(--muted);font-size:12px;text-align:center}.powered a{color:var(--brand);font-weight:800;text-decoration:none}.powered a:hover{text-decoration:underline}
-    @keyframes spin{to{transform:rotate(360deg)}}
+    @media(max-width:380px){.actions{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
 <main>
   <section class="card">
     <div class="mark">NF</div>
-    <p class="eyebrow">Authorizing</p>
+    <p class="eyebrow">Voucher found</p>
     <h1>` + html.EscapeString(portalName) + `</h1>
-    <p>We found your token <strong>` + html.EscapeString(voucherCode) + `</strong>. Connecting this device to the internet...</p>
-    <div class="pulse" aria-hidden="true"></div>
+    <p>This voucher belongs to this device and is still valid.</p>
+    <div id="found-voucher" class="voucher">` + html.EscapeString(voucherCode) + `</div>
+    <p id="countdown-message">Reconnecting automatically in <span id="countdown" class="countdown">10</span> seconds.</p>
+    <div class="actions">
+      <button id="copy-voucher" class="copy" type="button">Copy voucher</button>
+      <button id="connect-now" class="connect" type="button">Connect now</button>
+    </div>
+    <p id="manual-message" class="manual" role="status" aria-live="polite"></p>
     ` + poweredByNobliFiHTML(publicSiteURL) + `
   </section>
 </main>
 
 <script>
 (function () {
-  /*
-   * IMPORTANT:
-   *
-   * This is a top-level navigation, not an HTTPS -> HTTP form submission.
-   * Chromium therefore does not show the insecure-form interstitial.
-   *
-   * The destination is the MikroTik /login servlet itself, with username and
-   * password query parameters. RouterOS processes the HTTP-PAP login directly
-   * and asks RADIUS to authorize the voucher.
-   *
-   * No JavaScript on the RouterOS login.html page is required for this step.
-   */
-  window.setTimeout(function () {
-    window.location.replace(` + string(directLoginJSON) + `);
-  }, 2200);
+  var remaining = 10;
+  var stopped = false;
+  var timer = null;
+  var destination = ` + string(directLoginJSON) + `;
+  var voucher = ` + string(voucherJSON) + `;
+
+  function connect() {
+    if (stopped) return;
+    stopped = true;
+    if (timer) window.clearInterval(timer);
+    document.getElementById("countdown-message").textContent = "Connecting this device...";
+    window.location.replace(destination);
+  }
+
+  timer = window.setInterval(function () {
+    remaining -= 1;
+    document.getElementById("countdown").textContent = String(Math.max(remaining, 0));
+    if (remaining <= 0) connect();
+  }, 1000);
+
+  document.getElementById("connect-now").addEventListener("click", connect);
+  document.getElementById("copy-voucher").addEventListener("click", function () {
+    var button = this;
+    var copied = function () {
+      stopped = true;
+      if (timer) window.clearInterval(timer);
+      button.textContent = "Copied";
+      document.getElementById("countdown-message").textContent = "Automatic reconnect paused.";
+      document.getElementById("manual-message").textContent = "Voucher copied. Paste it into the voucher field to connect manually.";
+    };
+    var fallbackCopy = function () {
+      var field = document.createElement("textarea");
+      field.value = voucher;
+      field.setAttribute("readonly", "readonly");
+      field.style.position = "fixed";
+      field.style.opacity = "0";
+      document.body.appendChild(field);
+      field.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (_) {}
+      document.body.removeChild(field);
+      if (ok) copied();
+      else document.getElementById("manual-message").textContent = "Press and hold the voucher above to copy it manually.";
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(voucher).then(copied).catch(fallbackCopy);
+      return;
+    }
+    fallbackCopy();
+  });
 })();
 </script>
 </body>

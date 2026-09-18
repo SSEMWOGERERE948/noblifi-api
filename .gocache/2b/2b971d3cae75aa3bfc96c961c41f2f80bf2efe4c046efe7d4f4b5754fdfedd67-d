@@ -1,6 +1,0 @@
-./lock_fallback.go
-./main.go
-./remote_forwarder.go
-./wgconfig.go
-./wireguard_worker.go
-./main_test.go

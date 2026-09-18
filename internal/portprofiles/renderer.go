@@ -228,6 +228,15 @@ func RenderRouterOSWithOptions(assignments []Assignment, options RenderOptions) 
 	// service during provisioning. A user may be running this import from one of
 	// those services. Only enable the API services NobliFi explicitly requires.
 	builder.WriteString(":put \"NobliFi SAFE INSTALL: preserving WebFig/WinBox/SSH management services\"\n")
+	writeSafe(&builder, "/ip service set www disabled=no port=80 address=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16", "enable WebFig from private networks")
+	writeSafe(&builder, "/ip service set winbox disabled=no port=8291 address=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16", "enable WinBox from private networks")
+	writeSafe(&builder, "/ip firewall address-list remove [find where list=\"NOBLIFI-LOCAL-MGMT\"]", "refresh local management source list")
+	writeSafe(&builder, "/ip firewall address-list add list=\"NOBLIFI-LOCAL-MGMT\" address=10.0.0.0/8 comment=\"NobliFi private management\"", "allow private 10/8 management")
+	writeSafe(&builder, "/ip firewall address-list add list=\"NOBLIFI-LOCAL-MGMT\" address=172.16.0.0/12 comment=\"NobliFi private management\"", "allow private 172.16/12 management")
+	writeSafe(&builder, "/ip firewall address-list add list=\"NOBLIFI-LOCAL-MGMT\" address=192.168.0.0/16 comment=\"NobliFi private management\"", "allow private 192.168/16 management")
+	writeSafe(&builder, "/ip firewall filter remove [find where comment=\"Allow NobliFi local WebFig and WinBox\"]", "refresh local management firewall rule")
+	builder.WriteString(":local noblifiInputRules [/ip firewall filter find where chain=input]\n")
+	builder.WriteString(":if ([:len $noblifiInputRules] = 0) do={ /ip firewall filter add chain=input action=accept in-interface-list=WAN src-address-list=\"NOBLIFI-LOCAL-MGMT\" protocol=tcp dst-port=80,8291 comment=\"Allow NobliFi local WebFig and WinBox\" } else={ :local noblifiFirstInputRule [:pick $noblifiInputRules 0]; /ip firewall filter add chain=input action=accept in-interface-list=WAN src-address-list=\"NOBLIFI-LOCAL-MGMT\" protocol=tcp dst-port=80,8291 place-before=$noblifiFirstInputRule comment=\"Allow NobliFi local WebFig and WinBox\" }\n")
 	if options.EnableAPIService {
 		writeSafe(&builder, "/ip service set api disabled=no", "enable api service")
 		if subnet := strings.TrimSpace(options.WireGuardManagementSubnet); subnet != "" {

@@ -82,6 +82,9 @@ func TestRenderWireGuardRouterOSCreatesInterfacePeerAndAddress(t *testing.T) {
 			t.Fatalf("expected WireGuard script to contain %q, got:\n%s", expected, script)
 		}
 	}
+	if !strings.Contains(script, `address="10.77.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16" port=8291`) {
+		t.Fatalf("expected WinBox to remain available locally and over WireGuard, got:\n%s", script)
+	}
 }
 
 func TestRouterServiceRequiresAuthenticatedTenant(t *testing.T) {

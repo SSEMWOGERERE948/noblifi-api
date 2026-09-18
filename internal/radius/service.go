@@ -172,6 +172,20 @@ func (s *Service) AuthorizeVoucherForDevice(code, deviceMAC string) (bool, error
 // prepare/bind operation and re-syncs FreeRADIUS so Calling-Station-Id is
 // enforced before the MikroTik login request is submitted.
 func (s *Service) BindVoucherToDevice(code, deviceMAC string) (vouchers.Voucher, error) {
+	return s.bindVoucherToDevice(code, deviceMAC, uuid.Nil)
+}
+
+// BindVoucherToDeviceForUser applies the same device lock while also ensuring
+// the voucher belongs to the account that owns the captive portal router.
+func (s *Service) BindVoucherToDeviceForUser(code, deviceMAC, userID string) (vouchers.Voucher, error) {
+	ownerID, err := uuid.Parse(strings.TrimSpace(userID))
+	if err != nil || ownerID == uuid.Nil {
+		return vouchers.Voucher{}, ErrVoucherUnavailable
+	}
+	return s.bindVoucherToDevice(code, deviceMAC, ownerID)
+}
+
+func (s *Service) bindVoucherToDevice(code, deviceMAC string, ownerID uuid.UUID) (vouchers.Voucher, error) {
 	code = normalizeVoucherCode(code)
 	if code == "" {
 		return vouchers.Voucher{}, ErrVoucherUnavailable
@@ -188,10 +202,11 @@ func (s *Service) BindVoucherToDevice(code, deviceMAC string) (vouchers.Voucher,
 	err = s.db.Transaction(func(tx *gorm.DB) error {
 		var voucher vouchers.Voucher
 
-		if err := tx.
-			Clauses(clause.Locking{Strength: "UPDATE"}).
-			First(&voucher, "code = ?", code).
-			Error; err != nil {
+		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("code = ?", code)
+		if ownerID != uuid.Nil {
+			query = query.Where("user_id = ?", ownerID)
+		}
+		if err := query.First(&voucher).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrVoucherUnavailable
 			}

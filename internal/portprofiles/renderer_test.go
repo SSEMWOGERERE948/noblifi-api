@@ -37,6 +37,26 @@ func TestRenderRouterOSUsesIdempotentBridgePortAdds(t *testing.T) {
 	}
 }
 
+func TestRenderRouterOSPreservesPrivateNetworkWebFigAccess(t *testing.T) {
+	script, err := RenderRouterOSWithOptions([]Assignment{
+		{InterfaceName: "ether1", Role: "WAN"},
+		{InterfaceName: "ether2", Role: "HOTSPOT_LAN"},
+		{InterfaceName: "ether5", Role: "FREE_LAN"},
+	}, validRenderOptions())
+	if err != nil {
+		t.Fatalf("RenderRouterOSWithOptions returned error: %v", err)
+	}
+	for _, expected := range []string{
+		`/ip service set www disabled=no port=80 address=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`,
+		`in-interface-list=WAN src-address-list="NOBLIFI-LOCAL-MGMT" protocol=tcp dst-port=80,8291`,
+		`place-before=$noblifiFirstInputRule`,
+	} {
+		if !strings.Contains(script, expected) {
+			t.Fatalf("expected local management rule %q, got script:\n%s", expected, script)
+		}
+	}
+}
+
 func TestRenderRouterOSRejectsNoManagementPort(t *testing.T) {
 	assignments := []Assignment{
 		{InterfaceName: "ether1", Role: "WAN"},

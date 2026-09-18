@@ -1,5 +1,0 @@
-./auto_connect.go
-./handler.go
-./models.go
-./service.go
-./udp_server.go

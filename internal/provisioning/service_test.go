@@ -55,3 +55,29 @@ func TestBootstrapScriptImportsWireGuardForRouterOS7(t *testing.T) {
 		}
 	}
 }
+
+func TestAutoLoginShowsVoucherAndTenSecondChoice(t *testing.T) {
+	page := renderHotspotAutoLoginPage(
+		"NobliFi WiFi",
+		"http://router.login/login",
+		"http://example.com",
+		"NF-TEST123",
+		"https://noblifi.example",
+	)
+
+	for _, expected := range []string{
+		"Voucher found",
+		"NF-TEST123",
+		`id="countdown" class="countdown">10</span>`,
+		"Copy voucher",
+		"Connect now",
+		"Automatic reconnect paused.",
+	} {
+		if !strings.Contains(page, expected) {
+			t.Fatalf("expected found-voucher page to contain %q", expected)
+		}
+	}
+	if strings.Contains(page, "2200") {
+		t.Fatal("found-voucher page must not use the old 2.2-second redirect")
+	}
+}

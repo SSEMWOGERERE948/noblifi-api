@@ -3,6 +3,7 @@ package radius
 import (
 	"bytes"
 	"crypto/md5"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -114,6 +115,28 @@ func TestHandleAccessPacketBindsVoucherToCallingStationID(t *testing.T) {
 	}
 	if response[0] != radiusAccessReject {
 		t.Fatalf("second response code = %d, want Access-Reject", response[0])
+	}
+}
+
+func TestBindVoucherToDeviceForUserAllowsOwnerAndRejectsOtherAccount(t *testing.T) {
+	db := testRadiusDB(t)
+	service := NewService(db)
+	ownerID := uuid.New()
+	otherID := uuid.New()
+	plan := plans.Plan{ID: uuid.New(), Name: "Account package", DurationMinutes: 60, IsActive: true}
+	if err := db.Create(&plan).Error; err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	voucher := vouchers.Voucher{ID: uuid.New(), UserID: &ownerID, Code: "NF-OWNER1", PlanID: plan.ID, Status: "unused"}
+	if err := db.Create(&voucher).Error; err != nil {
+		t.Fatalf("create voucher: %v", err)
+	}
+
+	if _, err := service.BindVoucherToDeviceForUser(voucher.Code, "AA:BB:CC:DD:EE:FF", otherID.String()); !errors.Is(err, ErrVoucherUnavailable) {
+		t.Fatalf("other account error = %v, want ErrVoucherUnavailable", err)
+	}
+	if _, err := service.BindVoucherToDeviceForUser(voucher.Code, "AA:BB:CC:DD:EE:FF", ownerID.String()); err != nil {
+		t.Fatalf("owner should be able to bind voucher: %v", err)
 	}
 }
 
