@@ -181,7 +181,7 @@ func (s *Service) RemoteAccessTargets() ([]RemoteAccessTarget, error) {
 	var records []routers.Router
 	if err := s.db.
 		Where("deleted_at IS NULL").
-		Where("wire_guard_tunnel_ip IS NOT NULL AND wire_guard_tunnel_ip <> ''").
+		Where("wire_guard_tunnel_ip IS NOT NULL").
 		Where("remote_access_status IN ?", []string{"queued", "active", "ready", "failed"}).
 		Order("created_at desc").
 		Find(&records).Error; err != nil {
@@ -240,7 +240,7 @@ func (s *Service) TelemetryTargets() ([]TelemetryTarget, error) {
 	var records []routers.Router
 	if err := s.db.
 		Where("deleted_at IS NULL").
-		Where("wire_guard_tunnel_ip IS NOT NULL AND wire_guard_tunnel_ip <> ''").
+		Where("wire_guard_tunnel_ip IS NOT NULL").
 		Order("created_at desc").
 		Find(&records).Error; err != nil {
 		return nil, err
