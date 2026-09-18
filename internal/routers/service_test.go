@@ -118,3 +118,21 @@ func TestDeleteRouterInputAcceptsOneRouterNameConfirmation(t *testing.T) {
 		t.Fatalf("deleteConfirmation() = %q, want router_name field", got)
 	}
 }
+
+func TestPreferredWinboxTargetUsesWireGuardTunnelIPFirst(t *testing.T) {
+	tunnelIP := "10.77.0.44"
+	router := Router{WireGuardTunnelIP: &tunnelIP, RemoteWinboxPort: intPtr(22017)}
+
+	host, port, vpnRequired := preferredWinboxAccessTarget(router, "154.65.105.14")
+	if host != "10.77.0.44" {
+		t.Fatalf("preferredWinboxAccessTarget() host = %q, want %q", host, "10.77.0.44")
+	}
+	if port != 8291 {
+		t.Fatalf("preferredWinboxAccessTarget() port = %d, want 8291", port)
+	}
+	if !vpnRequired {
+		t.Fatal("preferredWinboxAccessTarget() vpnRequired = false, want true")
+	}
+}
+
+func intPtr(v int) *int { return &v }

@@ -352,6 +352,23 @@ type MethodInput struct {
 	ConfigurationMethod string `json:"configuration_method"`
 }
 
+func preferredWinboxAccessTarget(router Router, remoteHost string) (host string, port int, vpnRequired bool) {
+	if router.WireGuardTunnelIP != nil {
+		host = hostOnly(strings.TrimSpace(*router.WireGuardTunnelIP))
+		if host != "" {
+			return host, 8291, true
+		}
+	}
+	if remoteHost == "" {
+		return "", 0, false
+	}
+	port = 0
+	if router.RemoteWinboxPort != nil && *router.RemoteWinboxPort > 0 {
+		port = *router.RemoteWinboxPort
+	}
+	return remoteHost, port, false
+}
+
 func (s *Service) EnableWinBoxAccess(routerID uuid.UUID, userID *uuid.UUID, isSuperadmin bool) (WinBoxAccessResponse, error) {
 	router, err := s.Find(routerID, userID, isSuperadmin)
 	if err != nil {
@@ -410,8 +427,16 @@ func (s *Service) EnableWinBoxAccess(routerID uuid.UUID, userID *uuid.UUID, isSu
 			return WinBoxAccessResponse{}, err
 		}
 	}
-	log.Printf("router=%s winbox relay queued host=%s public_port=%d target=%s:8291", routerID, remoteHost, remotePort, routerIP)
-	return WinBoxAccessResponse{Status: "queued", Host: remoteHost, Port: remotePort, VPNRequired: false}, nil
+	preferredHost, preferredPort, preferredVPNRequired := preferredWinboxAccessTarget(router, remoteHost)
+	log.Printf("router=%s winbox relay queued host=%s public_port=%d target=%s:8291 vpn_required=%t", routerID, remoteHost, remotePort, routerIP, preferredVPNRequired)
+	if preferredHost == "" {
+		preferredHost = remoteHost
+		preferredPort = remotePort
+	}
+	if preferredPort <= 0 {
+		preferredPort = remotePort
+	}
+	return WinBoxAccessResponse{Status: "queued", Host: preferredHost, Port: preferredPort, VPNRequired: preferredVPNRequired}, nil
 }
 
 func (s *Service) EnableWebAccess(routerID uuid.UUID, userID *uuid.UUID, isSuperadmin bool) (WebAccessResponse, error) {
@@ -444,10 +469,10 @@ func (s *Service) EnableWebAccess(routerID uuid.UUID, userID *uuid.UUID, isSuper
 		}
 		remotePort = allocatedPort
 		return tx.Model(&Router{}).Where("id = ?", routerID).Updates(map[string]any{
-			"remote_access_status": "queued",
-			"remote_web_port": remotePort,
+			"remote_access_status":     "queued",
+			"remote_web_port":          remotePort,
 			"remote_access_expires_at": now.Add(15 * time.Minute),
-			"updated_at": now,
+			"updated_at":               now,
 		}).Error
 	})
 	if err != nil {
