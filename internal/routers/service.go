@@ -325,6 +325,13 @@ type WinBoxAccessResponse struct {
 	VPNRequired bool   `json:"vpn_required"`
 }
 
+type WebAccessResponse struct {
+	Status string `json:"status"`
+	URL    string `json:"url"`
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+}
+
 type DeleteChallengeResponse struct {
 	ChallengeID          uuid.UUID `json:"challenge_id"`
 	ExpectedConfirmation string    `json:"expected_confirmation"`
@@ -376,7 +383,7 @@ func (s *Service) EnableWinBoxAccess(routerID uuid.UUID, userID *uuid.UUID, isSu
 		if query.Error != nil {
 			return query.Error
 		}
-		allocatedPort, allocErr := allocateRemoteWinboxPort(tx, s.cfg.RemoteWinboxPortBase, locked.RemoteWinboxPort)
+		allocatedPort, allocErr := allocateRemotePort(tx, s.cfg.RemoteWinboxPortBase, locked.RemoteWinboxPort)
 		if allocErr != nil {
 			return allocErr
 		}
@@ -385,7 +392,6 @@ func (s *Service) EnableWinBoxAccess(routerID uuid.UUID, userID *uuid.UUID, isSu
 			Where("id = ?", routerID).
 			Updates(map[string]any{
 				"remote_access_status":     "queued",
-				"remote_web_port":          nil,
 				"remote_winbox_port":       remotePort,
 				"remote_access_expires_at": nil,
 				"updated_at":               now,
@@ -396,7 +402,6 @@ func (s *Service) EnableWinBoxAccess(routerID uuid.UUID, userID *uuid.UUID, isSu
 	}
 
 	router.RemoteWinboxPort = &remotePort
-	router.RemoteWebPort = nil
 	router.RemoteAccessStatus = "queued"
 	router.RemoteAccessExpiresAt = nil
 	if s.runtimeWireGuardManager != nil {
@@ -409,7 +414,58 @@ func (s *Service) EnableWinBoxAccess(routerID uuid.UUID, userID *uuid.UUID, isSu
 	return WinBoxAccessResponse{Status: "queued", Host: remoteHost, Port: remotePort, VPNRequired: false}, nil
 }
 
-func allocateRemoteWinboxPort(tx *gorm.DB, configuredBase int, current *int) (int, error) {
+func (s *Service) EnableWebAccess(routerID uuid.UUID, userID *uuid.UUID, isSuperadmin bool) (WebAccessResponse, error) {
+	router, err := s.Find(routerID, userID, isSuperadmin)
+	if err != nil {
+		return WebAccessResponse{}, err
+	}
+	health, _ := Health(router, time.Now().UTC())
+	if health == HealthOffline {
+		return WebAccessResponse{}, errors.New("router must have recent WireGuard or telemetry activity before enabling web access")
+	}
+	if router.WireGuardTunnelIP == nil || hostOnly(strings.TrimSpace(*router.WireGuardTunnelIP)) == "" {
+		return WebAccessResponse{}, errors.New("router WireGuard tunnel IP is required for web access")
+	}
+	remoteHost := strings.TrimSpace(s.cfg.RemoteAccessHost)
+	if remoteHost == "" {
+		return WebAccessResponse{}, errors.New("NOBLIFI_REMOTE_ACCESS_HOST is not configured")
+	}
+
+	now := time.Now().UTC()
+	remotePort := 0
+	err = s.repo.db.Transaction(func(tx *gorm.DB) error {
+		var locked Router
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("deleted_at IS NULL").First(&locked, "id = ?", routerID).Error; err != nil {
+			return err
+		}
+		allocatedPort, allocErr := allocateRemotePort(tx, s.cfg.RemoteWinboxPortBase, locked.RemoteWebPort)
+		if allocErr != nil {
+			return allocErr
+		}
+		remotePort = allocatedPort
+		return tx.Model(&Router{}).Where("id = ?", routerID).Updates(map[string]any{
+			"remote_access_status": "queued",
+			"remote_web_port": remotePort,
+			"remote_access_expires_at": now.Add(15 * time.Minute),
+			"updated_at": now,
+		}).Error
+	})
+	if err != nil {
+		return WebAccessResponse{}, err
+	}
+	router.RemoteWebPort = &remotePort
+	router.RemoteAccessStatus = "queued"
+	if s.runtimeWireGuardManager != nil {
+		if _, err := s.runtimeWireGuardManager.QueueRemoteAccess(router); err != nil {
+			return WebAccessResponse{}, err
+		}
+	}
+	url := fmt.Sprintf("http://%s:%d", remoteHost, remotePort)
+	log.Printf("router=%s web relay queued host=%s public_port=%d target_port=80", routerID, remoteHost, remotePort)
+	return WebAccessResponse{Status: "queued", URL: url, Host: remoteHost, Port: remotePort}, nil
+}
+
+func allocateRemotePort(tx *gorm.DB, configuredBase int, current *int) (int, error) {
 	if current != nil && *current > 0 && *current <= 65535 {
 		return *current, nil
 	}
@@ -419,14 +475,14 @@ func allocateRemoteWinboxPort(tx *gorm.DB, configuredBase int, current *int) (in
 	}
 	for port := base; port < base+1000 && port <= 65535; port++ {
 		var count int64
-		if err := tx.Model(&Router{}).Where("remote_winbox_port = ? AND deleted_at IS NULL", port).Count(&count).Error; err != nil {
+		if err := tx.Model(&Router{}).Where("(remote_winbox_port = ? OR remote_web_port = ?) AND deleted_at IS NULL", port, port).Count(&count).Error; err != nil {
 			return 0, err
 		}
 		if count == 0 {
 			return port, nil
 		}
 	}
-	return 0, errors.New("no remote WinBox ports are available")
+	return 0, errors.New("no remote access ports are available")
 }
 
 func (s *Service) DisableRemoteAccess(routerID uuid.UUID, userID *uuid.UUID, isSuperadmin bool) error {

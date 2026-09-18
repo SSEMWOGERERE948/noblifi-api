@@ -19,6 +19,7 @@ func (h *Handler) RegisterRoutes(router fiber.Router) {
 	router.Get("/routers", h.list)
 	router.Get("/routers/:id", h.get)
 	router.Post("/routers/:id/remote-access/winbox", h.enableWinBox)
+	router.Post("/routers/:id/remote-access/web", h.enableWeb)
 	router.Delete("/routers/:id/remote-access", h.disableRemoteAccess)
 	router.Post("/routers/:id/delete-challenge", h.deleteChallenge)
 	router.Delete("/routers/:id", h.deleteRouter)
@@ -104,6 +105,19 @@ func (h *Handler) enableWinBox(c *fiber.Ctx) error {
 	}
 	userID, isSuperadmin := currentUserScope(c)
 	out, err := h.service.EnableWinBoxAccess(id, userID, isSuperadmin)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	return c.JSON(out)
+}
+
+func (h *Handler) enableWeb(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid router id")
+	}
+	userID, isSuperadmin := currentUserScope(c)
+	out, err := h.service.EnableWebAccess(id, userID, isSuperadmin)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}

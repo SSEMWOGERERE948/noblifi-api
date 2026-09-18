@@ -317,17 +317,18 @@ func RenderWireGuardRouterOS(router Router, cfg config.Config) string {
 /ip firewall filter remove [find where comment="Allow NobliFi WireGuard ping"]
 :local inputRules [/ip firewall filter find where chain=input]
 :if ([:len $inputRules] = 0) do={
-  /ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s/32" protocol=tcp dst-port=8291,8728,8729 comment="Allow NobliFi management over WireGuard"
+  /ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s/32" protocol=tcp dst-port=80,8291,8728,8729 comment="Allow NobliFi management over WireGuard"
   /ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s/32" protocol=icmp comment="Allow NobliFi WireGuard ping"
 } else={
   :local firstInputRule [:pick $inputRules 0]
-  /ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s/32" protocol=tcp dst-port=8291,8728,8729 place-before=$firstInputRule comment="Allow NobliFi management over WireGuard"
+  /ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s/32" protocol=tcp dst-port=80,8291,8728,8729 place-before=$firstInputRule comment="Allow NobliFi management over WireGuard"
   /ip firewall filter add chain=input action=accept in-interface="%s" src-address="%s/32" protocol=icmp place-before=$firstInputRule comment="Allow NobliFi WireGuard ping"
 }
 
 :do { /user remove [find where name="%s" comment="NobliFi API management user"] } on-error={}
 :do { /user add name="%s" group=full password="%s" comment="NobliFi API management user" } on-error={ :error "NobliFi failed to create API management user" }
 :do { /ip service set api disabled=no address="%s/32" } on-error={ :error "NobliFi failed to enable restricted RouterOS API" }
+:do { /ip service set www disabled=no address="%s/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16" port=80 } on-error={ :error "NobliFi failed to enable restricted WebFig access" }
 :do { /ip service set winbox disabled=no address="%s/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16" port=8291 } on-error={ :error "NobliFi failed to enable restricted WinBox access" }
 
 :local routerPublicKey [/interface wireguard get $wgInterface public-key]
@@ -404,6 +405,7 @@ func RenderWireGuardRouterOS(router Router, cfg config.Config) string {
 		routerOSQuotedString(cfg.RouterAPIUsername),
 		routerOSQuotedString(cfg.RouterAPIUsername),
 		routerOSQuotedString(cfg.RouterAPIPassword),
+		serverIP,
 		serverIP,
 		serverIP,
 		callbackURL,

@@ -48,7 +48,7 @@ type Router struct {
 	ProvisionedAt            *time.Time             `json:"provisioned_at"`
 	DeleteRequestedAt        *time.Time             `json:"delete_requested_at"`
 	DeletedAt                *time.Time             `gorm:"index" json:"deleted_at"`
-	RemoteWebPort            *int                   `json:"-"`
+	RemoteWebPort            *int                   `json:"remote_web_port,omitempty"`
 	RemoteWinboxPort         *int                   `json:"remote_winbox_port,omitempty"`
 	RemoteAccessHost         string                 `gorm:"-" json:"remote_access_host,omitempty"`
 	RemoteAccessStatus       string                 `gorm:"default:disabled" json:"remote_access_status"`
