@@ -36,7 +36,7 @@ func (r *remoteForwarderRegistry) Upsert(publicPort int, target string) error {
 	if publicPort < 1024 || publicPort > 65535 {
 		return fmt.Errorf("invalid public port %d", publicPort)
 	}
-	if err := validateWinboxTarget(target); err != nil {
+	if err := validateRemoteAccessTarget(target); err != nil {
 		return err
 	}
 	r.mu.Lock()
@@ -142,17 +142,17 @@ func proxyTCP(client net.Conn, target string) {
 	<-done
 }
 
-func validateWinboxTarget(target string) error {
+func validateRemoteAccessTarget(target string) error {
 	host, port, err := net.SplitHostPort(target)
 	if err != nil {
-		return errors.New("invalid WinBox target")
+		return errors.New("invalid remote access target")
 	}
 	addr, err := netip.ParseAddr(host)
 	if err != nil || !addr.IsPrivate() {
-		return errors.New("WinBox target must be a private WireGuard address")
+		return errors.New("remote access target must be a private WireGuard address")
 	}
-	if port != "8291" {
-		return errors.New("WinBox target port must be 8291")
+	if port != "80" && port != "8291" {
+		return errors.New("remote access target port must be 80 or 8291")
 	}
 	return nil
 }
