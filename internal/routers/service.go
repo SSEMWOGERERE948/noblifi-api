@@ -352,23 +352,6 @@ type MethodInput struct {
 	ConfigurationMethod string `json:"configuration_method"`
 }
 
-func preferredWinboxAccessTarget(router Router, remoteHost string) (host string, port int, vpnRequired bool) {
-	if router.WireGuardTunnelIP != nil {
-		host = hostOnly(strings.TrimSpace(*router.WireGuardTunnelIP))
-		if host != "" {
-			return host, 8291, true
-		}
-	}
-	if remoteHost == "" {
-		return "", 0, false
-	}
-	port = 0
-	if router.RemoteWinboxPort != nil && *router.RemoteWinboxPort > 0 {
-		port = *router.RemoteWinboxPort
-	}
-	return remoteHost, port, false
-}
-
 func (s *Service) EnableWinBoxAccess(routerID uuid.UUID, userID *uuid.UUID, isSuperadmin bool) (WinBoxAccessResponse, error) {
 	router, err := s.Find(routerID, userID, isSuperadmin)
 	if err != nil {
@@ -427,16 +410,12 @@ func (s *Service) EnableWinBoxAccess(routerID uuid.UUID, userID *uuid.UUID, isSu
 			return WinBoxAccessResponse{}, err
 		}
 	}
-	preferredHost, preferredPort, preferredVPNRequired := preferredWinboxAccessTarget(router, remoteHost)
-	log.Printf("router=%s winbox relay queued host=%s public_port=%d target=%s:8291 vpn_required=%t", routerID, remoteHost, remotePort, routerIP, preferredVPNRequired)
-	if preferredHost == "" {
-		preferredHost = remoteHost
-		preferredPort = remotePort
-	}
-	if preferredPort <= 0 {
-		preferredPort = remotePort
-	}
-	return WinBoxAccessResponse{Status: "queued", Host: preferredHost, Port: preferredPort, VPNRequired: preferredVPNRequired}, nil
+	log.Printf("router=%s winbox relay queued public_host=%s public_port=%d target=%s:8291 vpn_required=false", routerID, remoteHost, remotePort, routerIP)
+	return publicWinBoxAccessResponse(remoteHost, remotePort), nil
+}
+
+func publicWinBoxAccessResponse(remoteHost string, remotePort int) WinBoxAccessResponse {
+	return WinBoxAccessResponse{Status: "queued", Host: remoteHost, Port: remotePort, VPNRequired: false}
 }
 
 func (s *Service) EnableWebAccess(routerID uuid.UUID, userID *uuid.UUID, isSuperadmin bool) (WebAccessResponse, error) {
@@ -482,12 +461,21 @@ func (s *Service) EnableWebAccess(routerID uuid.UUID, userID *uuid.UUID, isSuper
 	router.RemoteAccessStatus = "queued"
 	if s.runtimeWireGuardManager != nil {
 		if _, err := s.runtimeWireGuardManager.QueueRemoteAccess(router); err != nil {
+			_ = s.DisableRemoteAccess(routerID, userID, isSuperadmin)
 			return WebAccessResponse{}, err
 		}
 	}
-	url := fmt.Sprintf("http://%s:%d", remoteHost, remotePort)
 	log.Printf("router=%s web relay queued host=%s public_port=%d target_port=80", routerID, remoteHost, remotePort)
-	return WebAccessResponse{Status: "queued", URL: url, Host: remoteHost, Port: remotePort}, nil
+	return publicWebAccessResponse(remoteHost, remotePort), nil
+}
+
+func publicWebAccessResponse(remoteHost string, remotePort int) WebAccessResponse {
+	return WebAccessResponse{
+		Status: "queued",
+		URL:    fmt.Sprintf("http://%s:%d", remoteHost, remotePort),
+		Host:   remoteHost,
+		Port:   remotePort,
+	}
 }
 
 func allocateRemotePort(tx *gorm.DB, configuredBase int, current *int) (int, error) {

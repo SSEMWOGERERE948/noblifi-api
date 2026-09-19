@@ -313,33 +313,18 @@ func (w wireGuardWorker) configureRouter(ctx context.Context, job wireGuardJob) 
 }
 
 func (w wireGuardWorker) upsertRemoteAccess(ctx context.Context, job wireGuardJob) error {
-	var cfg remoteAccessConfig
-	if err := w.get(ctx, "/internal/routers/"+job.RouterID+"/remote-access-config", &cfg); err != nil {
-		return fmt.Errorf("fetch remote access config: %w", err)
+	if err := w.reconcileRemoteAccess(ctx); err != nil {
+		return fmt.Errorf("reconcile remote access forwarders: %w", err)
 	}
-	routerIP := strings.TrimSpace(cfg.RouterIP)
-	if routerIP == "" {
-		return errors.New("remote access config has no router_ip")
-	}
-	if cfg.PublicPort <= 0 {
-		return errors.New("remote access config has no public_port")
-	}
-	if cfg.TargetPort <= 0 {
-		cfg.TargetPort = 8291
-	}
-	if err := w.remote.Upsert(cfg.PublicPort, net.JoinHostPort(routerIP, strconv.Itoa(cfg.TargetPort))); err != nil {
-		return fmt.Errorf("start WinBox forwarder: %w", err)
-	}
-	log.Printf("remote WinBox relay active router_id=%s listen_port=%d target=%s:%d", job.RouterID, cfg.PublicPort, routerIP, cfg.TargetPort)
+	log.Printf("remote access relays active router_id=%s", job.RouterID)
 	return w.post(ctx, "/internal/routers/"+job.RouterID+"/remote-access-ready", nil, nil)
 }
 
 func (w wireGuardWorker) removeRemoteAccess(ctx context.Context, job wireGuardJob) error {
-	port, err := strconv.Atoi(strings.TrimSpace(job.PublicKey))
-	if err == nil && port > 0 {
-		w.remote.Remove(port)
+	if err := w.reconcileRemoteAccess(ctx); err != nil {
+		return fmt.Errorf("reconcile revoked remote access: %w", err)
 	}
-	log.Printf("remote WinBox relay revoked router_id=%s public_port=%d", job.RouterID, port)
+	log.Printf("remote access relays revoked router_id=%s", job.RouterID)
 	return nil
 }
 

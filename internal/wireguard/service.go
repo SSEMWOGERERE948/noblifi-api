@@ -43,6 +43,27 @@ type RemoteAccessTarget struct {
 	VPNRequired bool      `json:"vpn_required"`
 }
 
+func remoteAccessTargetsForRouter(router routers.Router) []RemoteAccessTarget {
+	targets := make([]RemoteAccessTarget, 0, 2)
+	routerIP := hostOnly(ptrValue(router.WireGuardTunnelIP))
+	if routerIP == "" {
+		return targets
+	}
+	if router.RemoteWebPort != nil && *router.RemoteWebPort > 0 {
+		targets = append(targets, RemoteAccessTarget{
+			RouterID: router.ID, Name: router.Name, RouterIP: routerIP,
+			PublicPort: *router.RemoteWebPort, TargetPort: 80, VPNRequired: false,
+		})
+	}
+	if router.RemoteWinboxPort != nil && *router.RemoteWinboxPort > 0 {
+		targets = append(targets, RemoteAccessTarget{
+			RouterID: router.ID, Name: router.Name, RouterIP: routerIP,
+			PublicPort: *router.RemoteWinboxPort, TargetPort: 8291, VPNRequired: false,
+		})
+	}
+	return targets
+}
+
 type TelemetryTarget struct {
 	RouterID    uuid.UUID `json:"router_id"`
 	Name        string    `json:"name"`
@@ -146,9 +167,6 @@ func (s *Service) QueueRemoteAccessRemoval(router routers.Router) (WireGuardJob,
 		return WireGuardJob{}, errors.New("router ID is required")
 	}
 	port := ""
-	if router.RemoteWinboxPort != nil {
-		port = fmt.Sprintf("%d", *router.RemoteWinboxPort)
-	}
 	routerIP := ""
 	if router.WireGuardTunnelIP != nil {
 		routerIP = hostOnly(strings.TrimSpace(*router.WireGuardTunnelIP))
@@ -164,14 +182,16 @@ func (s *Service) DesiredRemoteAccess(routerID uuid.UUID) (RemoteAccessConfig, e
 	if router.WireGuardTunnelIP == nil || strings.TrimSpace(*router.WireGuardTunnelIP) == "" {
 		return RemoteAccessConfig{}, errors.New("router WireGuard tunnel IP is missing")
 	}
-	if router.RemoteWinboxPort == nil || *router.RemoteWinboxPort <= 0 {
-		return RemoteAccessConfig{}, errors.New("router remote WinBox port is missing")
+	targets := remoteAccessTargetsForRouter(router)
+	if len(targets) == 0 {
+		return RemoteAccessConfig{}, errors.New("router remote access port is missing")
 	}
+	target := targets[0]
 	cfg := RemoteAccessConfig{
 		RouterID:    router.ID,
-		RouterIP:    hostOnly(strings.TrimSpace(*router.WireGuardTunnelIP)),
-		PublicPort:  *router.RemoteWinboxPort,
-		TargetPort:  8291,
+		RouterIP:    target.RouterIP,
+		PublicPort:  target.PublicPort,
+		TargetPort:  target.TargetPort,
 		VPNRequired: false,
 	}
 	return cfg, nil
@@ -190,22 +210,7 @@ func (s *Service) RemoteAccessTargets() ([]RemoteAccessTarget, error) {
 
 	targets := make([]RemoteAccessTarget, 0, len(records))
 	for _, router := range records {
-		routerIP := hostOnly(ptrValue(router.WireGuardTunnelIP))
-		if routerIP == "" {
-			continue
-		}
-		target := RemoteAccessTarget{
-			RouterID:    router.ID,
-			Name:        router.Name,
-			RouterIP:    routerIP,
-			TargetPort:  8291,
-			VPNRequired: false,
-		}
-		if router.RemoteWinboxPort == nil || *router.RemoteWinboxPort <= 0 {
-			continue
-		}
-		target.PublicPort = *router.RemoteWinboxPort
-		targets = append(targets, target)
+		targets = append(targets, remoteAccessTargetsForRouter(router)...)
 	}
 	return targets, nil
 }

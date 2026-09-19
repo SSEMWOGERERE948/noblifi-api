@@ -119,20 +119,29 @@ func TestDeleteRouterInputAcceptsOneRouterNameConfirmation(t *testing.T) {
 	}
 }
 
-func TestPreferredWinboxTargetUsesWireGuardTunnelIPFirst(t *testing.T) {
-	tunnelIP := "10.77.0.44"
-	router := Router{WireGuardTunnelIP: &tunnelIP, RemoteWinboxPort: intPtr(22017)}
-
-	host, port, vpnRequired := preferredWinboxAccessTarget(router, "154.65.105.14")
-	if host != "10.77.0.44" {
-		t.Fatalf("preferredWinboxAccessTarget() host = %q, want %q", host, "10.77.0.44")
+func TestEnableWinBoxAccessReturnsPublicRelayEndpoint(t *testing.T) {
+	tunnelIP := "10.77.0.2"
+	response := publicWinBoxAccessResponse("169.58.83.26", 22000)
+	if response.Host != "169.58.83.26" {
+		t.Fatalf("WinBox response host = %q, want public relay host", response.Host)
 	}
-	if port != 8291 {
-		t.Fatalf("preferredWinboxAccessTarget() port = %d, want 8291", port)
+	if response.Port != 22000 {
+		t.Fatalf("WinBox response port = %d, want allocated public port", response.Port)
 	}
-	if !vpnRequired {
-		t.Fatal("preferredWinboxAccessTarget() vpnRequired = false, want true")
+	if response.VPNRequired {
+		t.Fatal("WinBox response vpn_required = true, want false")
+	}
+	if response.Host == tunnelIP || response.Port == 8291 {
+		t.Fatalf("WinBox response returned internal target %s:%d", response.Host, response.Port)
 	}
 }
 
-func intPtr(v int) *int { return &v }
+func TestWebAccessResponseReturnsBrowserURL(t *testing.T) {
+	response := publicWebAccessResponse("relay.example.com", 22001)
+	if response.URL != "http://relay.example.com:22001" {
+		t.Fatalf("WebFig response URL = %q, want public browser URL", response.URL)
+	}
+	if response.Host != "relay.example.com" || response.Port != 22001 {
+		t.Fatalf("WebFig response endpoint = %s:%d", response.Host, response.Port)
+	}
+}
