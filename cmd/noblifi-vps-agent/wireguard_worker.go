@@ -36,10 +36,11 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 }
 
 type wireGuardWorker struct {
-	cfg    config
-	client *http.Client
-	runner commandRunner
-	remote *remoteForwarderRegistry
+	cfg      config
+	client   *http.Client
+	runner   commandRunner
+	remote   *remoteForwarderRegistry
+	firewall remoteAccessFirewall
 }
 
 type wireGuardJob struct {
@@ -70,7 +71,12 @@ type remoteAccessConfig struct {
 }
 
 func runWireGuardWorker(ctx context.Context, client *http.Client, cfg config) {
-	worker := wireGuardWorker{cfg: cfg, client: client, runner: execRunner{}, remote: newRemoteForwarderRegistry(cfg.RemoteAccessSourceCIDR)}
+	runner := execRunner{}
+	worker := wireGuardWorker{
+		cfg: cfg, client: client, runner: runner,
+		remote:   newRemoteForwarderRegistry(cfg.RemoteAccessSourceCIDR),
+		firewall: newUFWRemoteAccessFirewall(runner, cfg.RemoteAccessSourceCIDR),
+	}
 	defer worker.remote.Close()
 	if err := worker.reconcileRemoteAccess(ctx); err != nil {
 		log.Printf("remote access reconciliation failed: %v", err)
@@ -336,6 +342,7 @@ func (w wireGuardWorker) reconcileRemoteAccess(ctx context.Context) error {
 		return err
 	}
 	desired := make(map[int]string, len(response.Targets))
+	desiredPorts := make(map[int]struct{}, len(response.Targets))
 	for _, target := range response.Targets {
 		if target.PublicPort <= 0 || strings.TrimSpace(target.RouterIP) == "" {
 			continue
@@ -344,8 +351,17 @@ func (w wireGuardWorker) reconcileRemoteAccess(ctx context.Context) error {
 			target.TargetPort = 8291
 		}
 		desired[target.PublicPort] = net.JoinHostPort(strings.TrimSpace(target.RouterIP), strconv.Itoa(target.TargetPort))
+		desiredPorts[target.PublicPort] = struct{}{}
 	}
-	return w.remote.Reconcile(desired)
+	if err := w.remote.Reconcile(desired); err != nil {
+		return err
+	}
+	if w.firewall != nil {
+		if err := w.firewall.Reconcile(ctx, desiredPorts); err != nil {
+			return fmt.Errorf("remote access firewall reconciliation: %w", err)
+		}
+	}
+	return nil
 }
 
 func applyRouterOSScript(conn *mikrotik.Conn, name, source string) error {
